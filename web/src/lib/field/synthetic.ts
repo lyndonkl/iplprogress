@@ -1,4 +1,4 @@
-import type { FieldData, GroupMeta } from './types';
+import type { FieldData, GroupMeta, TeamMeta } from './types';
 
 /**
  * Dev-only synthetic fallback field.
@@ -48,19 +48,79 @@ export function syntheticFieldData(): FieldData {
 
 	const groupIds = new Uint16Array(SYNTH_N);
 	const attrs = new Uint8Array(SYNTH_N);
+	const ballsFaced = new Uint8Array(SYNTH_N);
+	const team = new Uint8Array(SYNTH_N);
 	let p = 0;
 	for (const g of groups) {
 		const isWpl = g.league === 'wpl';
 		// aggression drifts up with season, so even fake data "reads"
 		const eraLift = g.league === 'ipl' ? (g.season - 2008) / 18 : 0.55;
+		let bf = 1;
+		let battingTeam = pickTeam(rng, isWpl);
 		for (let i = 0; i < g.count; i++) {
 			groupIds[p] = g.gi;
 			attrs[p] = syntheticAttrByte(rng, eraLift, isWpl);
+			// rough balls-faced ramp: most balls are early-innings balls
+			ballsFaced[p] = Math.min(255, bf);
+			if (rng() < 0.12) bf = 1; // "new batter"
+			else bf = Math.min(255, bf + 1);
+			if (rng() < 0.008) battingTeam = pickTeam(rng, isWpl); // "new innings"
+			team[p] = battingTeam;
 			p++;
 		}
 	}
 
-	return { nPoints: SYNTH_N, groups, groupIds, attrs, synthetic: true };
+	return {
+		nPoints: SYNTH_N,
+		meta: { n_points: SYNTH_N, built_at: 'synthetic', point_order: 'chronological' },
+		groups,
+		teams: syntheticTeams(),
+		groupIds,
+		attrs,
+		ballsFaced,
+		team,
+		synthetic: true
+	};
+}
+
+const SYNTH_PALETTE = [
+	'#FDB913',
+	'#004BA0',
+	'#EC1C24',
+	'#3A225D',
+	'#EA1A8E',
+	'#F26522',
+	'#DD1F2D',
+	'#282968',
+	'#00A3E0',
+	'#1B2133'
+];
+
+function syntheticTeams(): TeamMeta[] {
+	const teams: TeamMeta[] = [];
+	for (let i = 0; i < 15; i++)
+		teams.push({
+			id: i,
+			league: 'ipl',
+			name: `Synthetic IPL ${i + 1}`,
+			short: `S${i + 1}`,
+			color: SYNTH_PALETTE[i % SYNTH_PALETTE.length],
+			active: i < 10
+		});
+	for (let i = 0; i < 5; i++)
+		teams.push({
+			id: 15 + i,
+			league: 'wpl',
+			name: `Synthetic WPL ${i + 1}`,
+			short: `W${i + 1}`,
+			color: SYNTH_PALETTE[(i + 3) % SYNTH_PALETTE.length],
+			active: true
+		});
+	return teams;
+}
+
+function pickTeam(rng: () => number, isWpl: boolean): number {
+	return isWpl ? 15 + Math.floor(rng() * 5) : Math.floor(rng() * 15);
 }
 
 function syntheticAttrByte(rng: () => number, eraLift: number, isWpl: boolean): number {

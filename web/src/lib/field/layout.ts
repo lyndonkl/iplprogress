@@ -65,6 +65,66 @@ export function computeColumns(groups: GroupMeta[], halfW: number, halfH: number
 	};
 }
 
+/**
+ * Ignition-wall layout geometry (Ch 1 controlling morph):
+ * x = the batter's balls-faced index (1..30+, capped bucket at the right edge),
+ * y = season row — IPL rows 2008 (bottom) → 2026 (top), then a deliberate gap,
+ * then the WPL's four rows as a visibly separate shelf above (storyboard C1-2).
+ * Positions are in-shader: this table only carries per-group row centres.
+ */
+export interface WallLayout {
+	/** world y of each group's row centre, indexed by gi */
+	rowYs: number[];
+	/** half-height of a row body, world units */
+	rowHalfH: number;
+	/** world x of the wall's left edge (ball 1) */
+	left: number;
+	/** world width of the wall (ball 1 → 30+) */
+	width: number;
+	/** half-width of one balls-faced cell body, world units (jitter bound) */
+	cellHalfW: number;
+	/** world y of the WPL shelf centre (label anchoring); NaN when no WPL groups */
+	shelfMidY: number;
+}
+
+/** number of balls-faced cells on the wall: 1..29 plus the capped `30+` bucket */
+export const WALL_CELLS = 30;
+
+export function computeWall(groups: GroupMeta[], halfW: number, halfH: number): WallLayout {
+	const ipl = groups.filter((g) => g.league === 'ipl').sort((a, b) => a.season - b.season);
+	const wpl = groups.filter((g) => g.league === 'wpl').sort((a, b) => a.season - b.season);
+
+	const shelfGapRows = wpl.length > 0 ? 1.4 : 0;
+	const totalRows = ipl.length + wpl.length + shelfGapRows;
+
+	const yBottom = -0.74 * halfH;
+	const yTop = 0.84 * halfH;
+	const pitch = (yTop - yBottom) / Math.max(1, totalRows);
+
+	const rowYs: number[] = new Array(groups.length).fill(0);
+	ipl.forEach((g, i) => {
+		rowYs[g.gi] = yBottom + (i + 0.5) * pitch;
+	});
+	let shelfSum = 0;
+	wpl.forEach((g, j) => {
+		const y = yBottom + (ipl.length + shelfGapRows + j + 0.5) * pitch;
+		rowYs[g.gi] = y;
+		shelfSum += y;
+	});
+
+	const left = -0.84 * halfW;
+	const width = 1.68 * halfW;
+
+	return {
+		rowYs,
+		rowHalfH: pitch * 0.38,
+		left,
+		width,
+		cellHalfW: (width / WALL_CELLS) * 0.42,
+		shelfMidY: wpl.length > 0 ? shelfSum / wpl.length : NaN
+	};
+}
+
 /** DPR-aware base point size in CSS px — scaled so ~316k points fill the view. */
 export function basePointPx(cssW: number, cssH: number, nPoints: number): number {
 	const perPoint = (cssW * cssH) / Math.max(1, nPoints);

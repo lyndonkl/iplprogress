@@ -5,6 +5,8 @@ One pass over data/ipl_json + data/wpl_json in strict chronological order
 innings excluded, emitting into web/static/data/:
 
   meta.json         { n_points, built_at: "unknown", point_order, files }
+                    (scenes.py augments it to v2: + n_players, per-league
+                    n_matches — storyboard CO-3 title-card traceability)
   groups.json       23 ordered groups: IPL 2008..2026 then WPL 2023..2026
   group_ids.u16     little-endian Uint16 per delivery -> gi
   attrs.u8          bit-packed per delivery:
@@ -14,6 +16,15 @@ innings excluded, emitting into web/static/data/:
                                 batter 5s)
                       bit 3     wicket fell on this ball
                       bit 4     WPL
+  ballsfaced.u8     per delivery: the striker's 1-based ball-faced index
+                    within their innings AT this delivery (wides = 0 — the
+                    batter doesn't face them; no-balls count; capped at 255).
+                    Powers the Ch 1 ignition-wall layout.
+  team.u8           per delivery: canonical batting-franchise id (league-
+                    scoped; renames collapse — Delhi Daredevils deliveries
+                    carry the Delhi Capitals id). Ids defined in teams.json.
+  teams.json        the 20-franchise table: [{id, name, short, league,
+                    color, active}] (canon.TEAMS verbatim).
   columnar.json.gz  sandbox dataset: 12 parallel arrays + name dictionaries
 
 Layouts are procedural / derived client-side — zero position buffers are
@@ -127,6 +138,8 @@ def build_stream(data_root: Path = canon.DATA_ROOT):
 
     group_ids = array("H")
     attrs = bytearray()
+    ballsfaced = bytearray()
+    team_u8 = bytearray()
 
     batters, bowlers, teams = DictEncoder(), DictEncoder(), DictEncoder()
     col = {
@@ -151,13 +164,23 @@ def build_stream(data_root: Path = canon.DATA_ROOT):
             if canon.is_super_over(innings):
                 continue  # standing rule: super overs never enter the stream
             innings_no += 1
-            team_code = teams.code(canon.canon_team(innings["team"]))
+            canonical_team = canon.canon_team(innings["team"])
+            team_code = teams.code(canonical_team)
+            franchise_id = canon.team_id(league, canonical_team)
+            faced: dict[str, int] = {}
             for over in innings["overs"]:
                 over_no = over["over"]
                 for ball_index, dl in enumerate(over["deliveries"]):
                     group_ids.append(gi)
                     groups[gi]["count"] += 1
                     attrs.append(pack_attr(dl, wpl))
+                    team_u8.append(franchise_id)
+                    if "wides" in dl.get("extras", {}):
+                        ballsfaced.append(0)  # a wide is not a ball faced
+                    else:
+                        n = faced.get(dl["batter"], 0) + 1
+                        faced[dl["batter"]] = n
+                        ballsfaced.append(min(n, 255))
                     col["season"].append(season)
                     col["league"].append(1 if wpl else 0)
                     col["innings"].append(innings_no)
@@ -176,7 +199,7 @@ def build_stream(data_root: Path = canon.DATA_ROOT):
         "bowler": bowlers.names,
         "batting_team": teams.names,
     }
-    return groups, group_ids, attrs, col, dicts
+    return groups, group_ids, attrs, col, dicts, ballsfaced, team_u8
 
 
 # ---------------------------------------------------------------------------
@@ -189,16 +212,20 @@ def gz_bytes(raw: bytes) -> bytes:
     return gzip.compress(raw, compresslevel=9, mtime=0)
 
 
-def compact_json(obj) -> bytes:
-    return json.dumps(obj, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+def compact_json(obj, *, sort_keys: bool = False) -> bytes:
+    return json.dumps(
+        obj, separators=(",", ":"), ensure_ascii=False, sort_keys=sort_keys
+    ).encode("utf-8")
 
 
 def main(out_root: Path = canon.OUT_ROOT) -> dict:
-    groups, group_ids, attrs, col, dicts = build_stream()
+    groups, group_ids, attrs, col, dicts, ballsfaced, team_u8 = build_stream()
     n_points = len(attrs)
     assert len(group_ids) == n_points
     assert all(len(v) == n_points for v in col.values())
     assert sum(g["count"] for g in groups) == n_points
+    assert len(ballsfaced) == n_points
+    assert len(team_u8) == n_points
 
     out_root.mkdir(parents=True, exist_ok=True)
     (out_root / "payoff").mkdir(parents=True, exist_ok=True)
@@ -222,6 +249,9 @@ def main(out_root: Path = canon.OUT_ROOT) -> dict:
     emit("groups.json", compact_json(groups))
     emit("group_ids.u16", group_ids.tobytes())
     emit("attrs.u8", bytes(attrs))
+    emit("ballsfaced.u8", bytes(ballsfaced))
+    emit("team.u8", bytes(team_u8))
+    emit("teams.json", compact_json(list(canon.TEAMS), sort_keys=True))
     emit(
         "columnar.json.gz",
         compact_json(

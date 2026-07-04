@@ -1,6 +1,6 @@
 {
  "budgets": {
-  "spike_set_gz": 3000000,
+  "cold_open_set_gz": 3000000,
   "per_chapter_gz": 2000000,
   "full_read_gz": 25000000,
   "mb_definition": "1 MB = 1,000,000 bytes"
@@ -9,6 +9,10 @@
   "attrs.u8": {
    "bytes_raw": 316199,
    "bytes_gz": 112860
+  },
+  "ballsfaced.u8": {
+   "bytes_raw": 316199,
+   "bytes_gz": 139334
   },
   "columnar.json.gz": {
    "bytes_raw": 9825862,
@@ -23,34 +27,55 @@
    "bytes_gz": 263
   },
   "meta.json": {
-   "bytes_raw": 342,
-   "bytes_gz": 209
+   "bytes_raw": 653,
+   "bytes_gz": 301
   },
   "payoff/ch1.json": {
-   "bytes_raw": 7256,
-   "bytes_gz": 1290
+   "bytes_raw": 17938,
+   "bytes_gz": 2966
+  },
+  "scenes/ch1.json": {
+   "bytes_raw": 26326,
+   "bytes_gz": 6586
+  },
+  "scenes/coldopen.json": {
+   "bytes_raw": 3720,
+   "bytes_gz": 779
+  },
+  "team.u8": {
+   "bytes_raw": 316199,
+   "bytes_gz": 4696
+  },
+  "teams.json": {
+   "bytes_raw": 1954,
+   "bytes_gz": 563
   }
  },
  "checks": [
   {
-   "name": "r0_spike_set (pre-cold-open assembly)",
+   "name": "cold_open_critical_set (pre-assembly)",
    "files": [
     "meta.json",
     "groups.json",
     "group_ids.u16",
-    "attrs.u8"
+    "attrs.u8",
+    "ballsfaced.u8",
+    "team.u8",
+    "teams.json",
+    "scenes/coldopen.json"
    ],
    "budget_gz": 3000000,
-   "actual_gz": 114033,
+   "actual_gz": 259497,
    "pass": true
   },
   {
-   "name": "chapter ch1 payoff",
+   "name": "chapter ch1 (scene + payoff)",
    "files": [
-    "payoff/ch1.json"
+    "payoff/ch1.json",
+    "scenes/ch1.json"
    ],
    "budget_gz": 2000000,
-   "actual_gz": 1290,
+   "actual_gz": 9552,
    "pass": true
   },
   {
@@ -66,14 +91,19 @@
    "name": "full read-through (all artifacts)",
    "files": [
     "attrs.u8",
+    "ballsfaced.u8",
     "columnar.json.gz",
     "group_ids.u16",
     "groups.json",
     "meta.json",
-    "payoff/ch1.json"
+    "payoff/ch1.json",
+    "scenes/ch1.json",
+    "scenes/coldopen.json",
+    "team.u8",
+    "teams.json"
    ],
    "budget_gz": 25000000,
-   "actual_gz": 741146,
+   "actual_gz": 894872,
    "pass": true
   }
  ],

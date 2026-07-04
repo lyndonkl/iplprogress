@@ -1,18 +1,23 @@
-import type { FieldData, GroupMeta, MetaJson } from './types';
+import type { FieldData, GroupMeta, MetaJson, TeamMeta } from './types';
 
 /**
- * Loads the R0 contract files. If any file is missing or inconsistent:
+ * Loads the pipeline contract files (R0 set + the R1a per-point attributes —
+ * all inside the ledger's pre-assembly budget; see static/data/ledger.json).
+ * If any file is missing or inconsistent:
  *  - dev builds fall back to a synthetic 316,388-point field (flagged loudly in
- *    the console) so the spike can be developed while the pipeline runs in parallel;
+ *    the console) so scenes can be developed while the pipeline runs in parallel;
  *  - production builds throw, and the page shows an integration error overlay.
  */
 export async function loadFieldData(baseUrl: string): Promise<FieldData> {
 	try {
-		const [meta, groups, gidBuf, attrBuf] = await Promise.all([
+		const [meta, groups, teams, gidBuf, attrBuf, bfBuf, teamBuf] = await Promise.all([
 			fetchJson<MetaJson>(`${baseUrl}/data/meta.json`),
 			fetchJson<GroupMeta[]>(`${baseUrl}/data/groups.json`),
+			fetchJson<TeamMeta[]>(`${baseUrl}/data/teams.json`),
 			fetchBuffer(`${baseUrl}/data/group_ids.u16`),
-			fetchBuffer(`${baseUrl}/data/attrs.u8`)
+			fetchBuffer(`${baseUrl}/data/attrs.u8`),
+			fetchBuffer(`${baseUrl}/data/ballsfaced.u8`),
+			fetchBuffer(`${baseUrl}/data/team.u8`)
 		]);
 
 		const n = meta.n_points;
@@ -21,16 +26,30 @@ export async function loadFieldData(baseUrl: string): Promise<FieldData> {
 			throw new Error(`group_ids.u16 byteLength ${gidBuf.byteLength} ≠ 2 × n_points (${n})`);
 		if (attrBuf.byteLength !== n)
 			throw new Error(`attrs.u8 byteLength ${attrBuf.byteLength} ≠ n_points (${n})`);
+		if (bfBuf.byteLength !== n)
+			throw new Error(`ballsfaced.u8 byteLength ${bfBuf.byteLength} ≠ n_points (${n})`);
+		if (teamBuf.byteLength !== n)
+			throw new Error(`team.u8 byteLength ${teamBuf.byteLength} ≠ n_points (${n})`);
 		if (!Array.isArray(groups) || groups.length === 0) throw new Error('groups.json empty');
+		if (!Array.isArray(teams) || teams.length === 0) throw new Error('teams.json empty');
 		const counted = groups.reduce((s, g) => s + g.count, 0);
-		if (counted !== n)
-			throw new Error(`groups.json counts sum ${counted} ≠ n_points (${n})`);
+		if (counted !== n) throw new Error(`groups.json counts sum ${counted} ≠ n_points (${n})`);
 
 		// group_ids.u16 is little-endian on the wire; every platform we target is
 		// little-endian, but decode defensively anyway.
 		const groupIds = decodeU16LE(gidBuf);
 
-		return { nPoints: n, groups, groupIds, attrs: new Uint8Array(attrBuf), synthetic: false };
+		return {
+			nPoints: n,
+			meta,
+			groups,
+			teams,
+			groupIds,
+			attrs: new Uint8Array(attrBuf),
+			ballsFaced: new Uint8Array(bfBuf),
+			team: new Uint8Array(teamBuf),
+			synthetic: false
+		};
 	} catch (err) {
 		if (import.meta.env.DEV) {
 			console.warn(

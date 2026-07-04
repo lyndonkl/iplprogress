@@ -3,15 +3,19 @@
 Measures raw + gzipped size of every artifact in web/static/data/ and checks
 them against the standing budgets:
 
-  * R0 spike set (meta.json + groups.json + group_ids.u16 + attrs.u8):
-    everything that must arrive before the cold-open field can assemble —
+  * Cold-open critical set (R1a): everything that must arrive before the
+    cold-open can play — the R0 spike set (meta.json + groups.json +
+    group_ids.u16 + attrs.u8) plus the R1a addendum per-point attributes
+    (ballsfaced.u8 for the ignition wall, team.u8 + teams.json for the
+    picker ignition) and scenes/coldopen.json (the You-Draw-It truth data) —
     <= 3 MB gz.
-  * Per-chapter incremental payloads <= 2 MB gz each (here: the Ch 1 payoff
-    card JSON, and the sandbox columnar dataset held to the same bar).
+  * Per-chapter incremental payloads <= 2 MB gz each (here: Chapter 1 =
+    scenes/ch1.json + payoff/ch1.json; the sandbox columnar dataset held to
+    the same bar).
   * Full read-through <= 25 MB gz.
 
 Writes web/static/data/ledger.json, prints the table, exits non-zero if any
-budget fails (the R0 spike-set check is the release gate).
+budget fails (the cold-open critical-set check is the release gate).
 
 Sizes use decimal megabytes (1 MB = 1,000,000 bytes) — the conservative
 reading of the blueprint's "3MB".
@@ -33,6 +37,14 @@ BUDGET_CHAPTER_GZ = 2 * MB
 BUDGET_FULL_READ_GZ = 25 * MB
 
 SPIKE_SET = ("meta.json", "groups.json", "group_ids.u16", "attrs.u8")
+COLD_OPEN_SET = SPIKE_SET + (
+    "ballsfaced.u8",  # R1a: the Ch 1 ignition-wall per-point attribute
+    "team.u8",  # R1a: batting-franchise id per point (picker ignition)
+    "teams.json",  # R1a: the 20-franchise id/color table
+    "scenes/coldopen.json",  # R1a: You-Draw-It truth series + corpus facts
+)
+CH1_SET_PREFIXES = ("payoff/",)  # chapter payloads by prefix ...
+CH1_SET_FILES = ("scenes/ch1.json",)  # ... plus the chapter scene JSON
 
 
 def measure(path: Path) -> dict:
@@ -63,20 +75,24 @@ def build_ledger(out_root: Path = canon.OUT_ROOT) -> dict:
     def gz_sum(names) -> int:
         return sum(artifacts[n]["bytes_gz"] for n in names if n in artifacts)
 
-    missing_spike = [n for n in SPIKE_SET if n not in artifacts]
-    chapter_files = [n for n in artifacts if n.startswith("payoff/")]
+    missing_cold_open = [n for n in COLD_OPEN_SET if n not in artifacts]
+    chapter_files = sorted(
+        [n for n in artifacts if n.startswith(CH1_SET_PREFIXES)]
+        + [n for n in CH1_SET_FILES if n in artifacts]
+    )
     sandbox_files = [n for n in artifacts if n == "columnar.json.gz"]
 
     checks = [
         {
-            "name": "r0_spike_set (pre-cold-open assembly)",
-            "files": list(SPIKE_SET),
+            "name": "cold_open_critical_set (pre-assembly)",
+            "files": list(COLD_OPEN_SET),
             "budget_gz": BUDGET_SPIKE_GZ,
-            "actual_gz": gz_sum(SPIKE_SET),
-            "pass": not missing_spike and gz_sum(SPIKE_SET) <= BUDGET_SPIKE_GZ,
+            "actual_gz": gz_sum(COLD_OPEN_SET),
+            "pass": not missing_cold_open
+            and gz_sum(COLD_OPEN_SET) <= BUDGET_SPIKE_GZ,
         },
         {
-            "name": "chapter ch1 payoff",
+            "name": "chapter ch1 (scene + payoff)",
             "files": chapter_files,
             "budget_gz": BUDGET_CHAPTER_GZ,
             "actual_gz": gz_sum(chapter_files),
@@ -97,12 +113,12 @@ def build_ledger(out_root: Path = canon.OUT_ROOT) -> dict:
             "pass": gz_sum(artifacts) <= BUDGET_FULL_READ_GZ,
         },
     ]
-    if missing_spike:
-        checks[0]["missing"] = missing_spike
+    if missing_cold_open:
+        checks[0]["missing"] = missing_cold_open
 
     return {
         "budgets": {
-            "spike_set_gz": BUDGET_SPIKE_GZ,
+            "cold_open_set_gz": BUDGET_SPIKE_GZ,
             "per_chapter_gz": BUDGET_CHAPTER_GZ,
             "full_read_gz": BUDGET_FULL_READ_GZ,
             "mb_definition": "1 MB = 1,000,000 bytes",

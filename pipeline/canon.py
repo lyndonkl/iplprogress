@@ -134,6 +134,52 @@ def canon_team(name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Franchise id table (R1a data contract: team.u8 + teams.json)
+# ---------------------------------------------------------------------------
+
+# Franchises are LEAGUE-SCOPED: the WPL's Delhi Capitals / Mumbai Indians /
+# Royal Challengers Bengaluru are distinct franchises from their IPL
+# namesakes and carry their own ids. Ids are stable by construction: the 15
+# IPL franchises sorted by name (0-14), then the 5 WPL franchises sorted by
+# name (15-19). Renames collapse BEFORE the lookup (Delhi Daredevils
+# deliveries carry the Delhi Capitals id — same franchise, same id).
+# Colors are recognizable franchise kit hexes (approximate brand colors,
+# chosen for on-field legibility, not official style guides).
+TEAMS = (
+    {"id": 0, "name": "Chennai Super Kings", "short": "CSK", "league": "ipl", "color": "#FDB913", "active": True},
+    {"id": 1, "name": "Deccan Chargers", "short": "DCH", "league": "ipl", "color": "#36648B", "active": False},
+    {"id": 2, "name": "Delhi Capitals", "short": "DC", "league": "ipl", "color": "#282968", "active": True},
+    {"id": 3, "name": "Gujarat Lions", "short": "GL", "league": "ipl", "color": "#E86F2B", "active": False},
+    {"id": 4, "name": "Gujarat Titans", "short": "GT", "league": "ipl", "color": "#1B2133", "active": True},
+    {"id": 5, "name": "Kochi Tuskers Kerala", "short": "KTK", "league": "ipl", "color": "#6E2C8E", "active": False},
+    {"id": 6, "name": "Kolkata Knight Riders", "short": "KKR", "league": "ipl", "color": "#3A225D", "active": True},
+    {"id": 7, "name": "Lucknow Super Giants", "short": "LSG", "league": "ipl", "color": "#00A3E0", "active": True},
+    {"id": 8, "name": "Mumbai Indians", "short": "MI", "league": "ipl", "color": "#004BA0", "active": True},
+    {"id": 9, "name": "Pune Warriors", "short": "PWI", "league": "ipl", "color": "#4B9CD3", "active": False},
+    {"id": 10, "name": "Punjab Kings", "short": "PBKS", "league": "ipl", "color": "#DD1F2D", "active": True},
+    {"id": 11, "name": "Rajasthan Royals", "short": "RR", "league": "ipl", "color": "#EA1A8E", "active": True},
+    {"id": 12, "name": "Rising Pune Supergiant", "short": "RPS", "league": "ipl", "color": "#582C83", "active": False},
+    {"id": 13, "name": "Royal Challengers Bengaluru", "short": "RCB", "league": "ipl", "color": "#EC1C24", "active": True},
+    {"id": 14, "name": "Sunrisers Hyderabad", "short": "SRH", "league": "ipl", "color": "#F26522", "active": True},
+    {"id": 15, "name": "Delhi Capitals", "short": "DC-W", "league": "wpl", "color": "#3E5FAC", "active": True},
+    {"id": 16, "name": "Gujarat Giants", "short": "GG", "league": "wpl", "color": "#EFA02E", "active": True},
+    {"id": 17, "name": "Mumbai Indians", "short": "MI-W", "league": "wpl", "color": "#0066B3", "active": True},
+    {"id": 18, "name": "Royal Challengers Bengaluru", "short": "RCB-W", "league": "wpl", "color": "#B01E23", "active": True},
+    {"id": 19, "name": "UP Warriorz", "short": "UPW", "league": "wpl", "color": "#FFC72C", "active": True},
+)
+
+TEAM_IDS = {(t["league"], t["name"]): t["id"] for t in TEAMS}
+
+
+def team_id(league: str, canonical_name: str) -> int:
+    """Franchise id for a canonical team name in a league context."""
+    try:
+        return TEAM_IDS[(league, canonical_name)]
+    except KeyError:
+        raise KeyError(f"unmapped franchise: {league}/{canonical_name!r}") from None
+
+
+# ---------------------------------------------------------------------------
 # Venues
 # ---------------------------------------------------------------------------
 

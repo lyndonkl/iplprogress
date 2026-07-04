@@ -1,14 +1,30 @@
 import * as THREE from 'three';
-import type { FieldData, GroupMeta } from './types';
-import { computeColumns, basePointPx, type ColumnLayout } from './layout';
+import {
+	DEFAULT_RENDER_STATE,
+	LAYOUT_CODE,
+	type FieldData,
+	type FieldRenderState,
+	type GroupMeta
+} from './types';
+import {
+	computeColumns,
+	computeWall,
+	basePointPx,
+	type ColumnLayout,
+	type WallLayout
+} from './layout';
 import { makeVertexShader, fragmentShader } from './shaders';
 
 /**
- * The R0 particle-morph spike: one THREE.Points object, ~316k points,
- * orthographic 2.5D camera, demand-mode rendering (blueprint §2: NO
- * requestAnimationFrame loop while idle — exactly one render per
- * uProgress / resize / DPR change), and a DOM label plane projected
- * through the same camera on every rendered frame.
+ * The persistent field renderer (R0 spike, promoted to the story platform):
+ * one THREE.Points object, ~316k points, orthographic 2.5D camera,
+ * demand-mode rendering (blueprint §2: NO requestAnimationFrame loop while
+ * idle — exactly one render per applyState / resize / DPR change), and a DOM
+ * label plane projected through the same camera on every rendered frame.
+ *
+ * The renderer is state-driven: the story orchestrator resolves scene
+ * fieldStates into FieldRenderState objects and calls applyState(). Identical
+ * consecutive states are skipped entirely (idle scroll noise → zero renders).
  */
 
 export interface FieldStats {
@@ -17,7 +33,7 @@ export interface FieldStats {
 	/** renders in the trailing 1s window (≈ fps while scrubbing) */
 	fps: number;
 	nPoints: number;
-	/** current morph progress 0..1 */
+	/** current morph progress 0..1 (uProgress) */
 	progress: number;
 }
 
@@ -32,17 +48,24 @@ export interface FieldOptions {
 }
 
 export interface FieldHandle {
-	/** set morph progress (0 = free field, 1 = season columns) and render once */
-	setProgress(p: number): void;
+	/** apply a resolved render state; renders at most once (skips no-ops) */
+	applyState(state: FieldRenderState): void;
 	/** request exactly one render on the next animation frame */
 	invalidate(): void;
 	dispose(): void;
+	/** project field/world coordinates to CSS px inside the container (annotation anchoring) */
+	projectToCss(worldX: number, worldY: number): { x: number; y: number };
+	/** current season-columns geometry (null before first resize) */
+	getColumnLayout(): ColumnLayout | null;
+	/** current ignition-wall geometry (null before first resize) */
+	getWallLayout(): WallLayout | null;
+	readonly data: FieldData;
 	readonly stats: Readonly<FieldStats>;
 }
 
 interface LabelEntry {
 	el: HTMLElement;
-	gi: number; // -1 for league headings
+	gi: number; // -1 IPL heading, -2 WPL heading
 	kind: 'season' | 'league';
 	worldX: number;
 	worldY: number;
@@ -81,10 +104,15 @@ export function createField(opts: FieldOptions): FieldHandle {
 	camera.position.set(0, 0, 5);
 	camera.lookAt(0, 0, 0);
 
+	// per-group table: x = column centre x · y = wall row centre y
 	const colVectors: THREE.Vector2[] = data.groups.map(() => new THREE.Vector2());
 
 	const uniforms: Record<string, THREE.IUniform> = {
 		uProgress: { value: 0 },
+		uLayoutA: { value: LAYOUT_CODE.free },
+		uLayoutB: { value: LAYOUT_CODE.free },
+		uReveal: { value: 1 },
+		uInvN: { value: 1 / Math.max(1, n) },
 		uHalfW: { value: 1 },
 		uHalfH: { value: 1 },
 		uPointScale: { value: 2 },
@@ -92,12 +120,27 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uColBottom: { value: -0.68 },
 		uColUsableH: { value: 1.38 },
 		uInvMaxCount: { value: 1 },
-		uCols: { value: colVectors }
+		uCols: { value: colVectors },
+		uWallLeft: { value: -0.84 },
+		uWallWidth: { value: 1.68 },
+		uWallCellHalfW: { value: 0.02 },
+		uWallRowHalfH: { value: 0.02 },
+		uDim: { value: 1 },
+		uWplDim: { value: 1 },
+		uHlClass: { value: -1 },
+		uHlLift: { value: 0 },
+		uHlBoost: { value: 0 },
+		uOthersDim: { value: 1 },
+		uHlSkipWpl: { value: 0 },
+		uPickedTeam: { value: -1 },
+		uTeamColor: { value: new THREE.Color('#ffffff') }
 	};
 
 	const geometry = new THREE.BufferGeometry();
 	geometry.setAttribute('position', new THREE.BufferAttribute(record, 3));
 	geometry.setAttribute('aAttrs', new THREE.BufferAttribute(data.attrs, 1, false));
+	geometry.setAttribute('aBallsFaced', new THREE.BufferAttribute(data.ballsFaced, 1, false));
+	geometry.setAttribute('aTeam', new THREE.BufferAttribute(data.team, 1, false));
 	// positions are procedural in-shader; give THREE an all-covering bound
 	geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 100);
 
@@ -118,29 +161,33 @@ export function createField(opts: FieldOptions): FieldHandle {
 
 	/* ---- DOM label plane -------------------------------------------------- */
 	const labels: LabelEntry[] = buildLabels(labelLayer, data.groups);
-	let layout: ColumnLayout | null = null;
+	let columnLayout: ColumnLayout | null = null;
+	let wallLayout: WallLayout | null = null;
 	let cssW = 1;
 	let cssH = 1;
 
 	const proj = new THREE.Vector3();
+	function toCss(worldX: number, worldY: number): { x: number; y: number } {
+		proj.set(worldX, worldY, 0).project(camera);
+		return { x: (proj.x * 0.5 + 0.5) * cssW, y: (-proj.y * 0.5 + 0.5) * cssH };
+	}
+
 	function updateLabels(): void {
 		for (const L of labels) {
-			proj.set(L.worldX, L.worldY, 0).project(camera);
-			const x = (proj.x * 0.5 + 0.5) * cssW;
-			const y = (-proj.y * 0.5 + 0.5) * cssH;
-			L.el.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0)`;
+			const p = toCss(L.worldX, L.worldY);
+			L.el.style.transform = `translate3d(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px, 0)`;
 		}
 	}
 
 	function anchorLabels(): void {
-		if (!layout) return;
+		if (!columnLayout) return;
 		for (const L of labels) {
 			if (L.kind === 'season') {
-				L.worldX = layout.xs[L.gi];
-				L.worldY = layout.bottom;
+				L.worldX = columnLayout.xs[L.gi];
+				L.worldY = columnLayout.bottom;
 			} else {
-				L.worldX = L.gi === -1 ? layout.iplMidX : layout.wplMidX;
-				L.worldY = layout.bottom;
+				L.worldX = L.gi === -1 ? columnLayout.iplMidX : columnLayout.wplMidX;
+				L.worldY = columnLayout.bottom;
 			}
 		}
 	}
@@ -171,6 +218,58 @@ export function createField(opts: FieldOptions): FieldHandle {
 		onRender?.(stats);
 	}
 
+	/* ---- state application -------------------------------------------------- */
+	let applied: FieldRenderState = { ...DEFAULT_RENDER_STATE };
+	const teamColorById = new Map<number, THREE.Color>(
+		data.teams.map((t) => [t.id, new THREE.Color(t.color)])
+	);
+
+	function sameState(a: FieldRenderState, b: FieldRenderState): boolean {
+		return (
+			a.layoutA === b.layoutA &&
+			a.layoutB === b.layoutB &&
+			a.morph === b.morph &&
+			a.reveal === b.reveal &&
+			a.dim === b.dim &&
+			a.wplDim === b.wplDim &&
+			a.labels === b.labels &&
+			a.highlightClass === b.highlightClass &&
+			a.highlightLift === b.highlightLift &&
+			a.highlightBoost === b.highlightBoost &&
+			a.othersDim === b.othersDim &&
+			a.highlightSkipWpl === b.highlightSkipWpl &&
+			a.teamId === b.teamId
+		);
+	}
+
+	function applyState(s: FieldRenderState): void {
+		if (disposed || sameState(applied, s)) return; // idle noise → no render
+		applied = { ...s };
+
+		uniforms.uLayoutA.value = LAYOUT_CODE[s.layoutA];
+		uniforms.uLayoutB.value = LAYOUT_CODE[s.layoutB];
+		uniforms.uProgress.value = s.morph;
+		uniforms.uReveal.value = s.reveal;
+		uniforms.uDim.value = s.dim;
+		uniforms.uWplDim.value = s.wplDim;
+		uniforms.uHlClass.value = s.highlightClass;
+		uniforms.uHlLift.value = s.highlightLift;
+		uniforms.uHlBoost.value = s.highlightBoost;
+		uniforms.uOthersDim.value = s.othersDim;
+		uniforms.uHlSkipWpl.value = s.highlightSkipWpl ? 1 : 0;
+		uniforms.uPickedTeam.value = s.teamId;
+		const tc = teamColorById.get(s.teamId);
+		if (tc) (uniforms.uTeamColor.value as THREE.Color).copy(tc);
+
+		// label plane opacity is scene-state-driven, never animated on its own
+		const o = Math.min(1, Math.max(0, s.labels));
+		labelLayer.style.opacity = o.toFixed(3);
+		labelLayer.style.visibility = o <= 0 ? 'hidden' : 'visible';
+
+		stats.progress = s.morph;
+		invalidate();
+	}
+
 	/* ---- resize / DPR ------------------------------------------------------ */
 	function handleResize(): void {
 		const w = container.clientWidth || 1;
@@ -189,18 +288,24 @@ export function createField(opts: FieldOptions): FieldHandle {
 		camera.bottom = -halfH;
 		camera.updateProjectionMatrix();
 
-		layout = computeColumns(data.groups, halfW, halfH);
+		columnLayout = computeColumns(data.groups, halfW, halfH);
+		wallLayout = computeWall(data.groups, halfW, halfH);
 		uniforms.uHalfW.value = halfW;
 		uniforms.uHalfH.value = halfH;
 		uniforms.uPointScale.value = basePointPx(w, h, n) * dpr;
-		uniforms.uColHalfWidth.value = layout.colHalfWidth;
-		uniforms.uColBottom.value = layout.bottom;
-		uniforms.uColUsableH.value = layout.usableH;
-		uniforms.uInvMaxCount.value = layout.invMaxCount;
-		for (let gi = 0; gi < groupCount; gi++) colVectors[gi].set(layout.xs[gi], 0);
+		uniforms.uColHalfWidth.value = columnLayout.colHalfWidth;
+		uniforms.uColBottom.value = columnLayout.bottom;
+		uniforms.uColUsableH.value = columnLayout.usableH;
+		uniforms.uInvMaxCount.value = columnLayout.invMaxCount;
+		uniforms.uWallLeft.value = wallLayout.left;
+		uniforms.uWallWidth.value = wallLayout.width;
+		uniforms.uWallCellHalfW.value = wallLayout.cellHalfW;
+		uniforms.uWallRowHalfH.value = wallLayout.rowHalfH;
+		for (let gi = 0; gi < groupCount; gi++)
+			colVectors[gi].set(columnLayout.xs[gi], wallLayout.rowYs[gi]);
 
 		// label density: rotate to vertical when column pitch gets tight (mobile)
-		const slotPx = (layout.slotW / (2 * halfW)) * w;
+		const slotPx = (columnLayout.slotW / (2 * halfW)) * w;
 		labelLayer.classList.toggle('vertical', slotPx < 52);
 
 		anchorLabels();
@@ -224,25 +329,16 @@ export function createField(opts: FieldOptions): FieldHandle {
 	}
 	watchDpr();
 
-	/* ---- progress ----------------------------------------------------------- */
-	function setProgress(p: number): void {
-		const clamped = Math.min(1, Math.max(0, p));
-		if (clamped === stats.progress) return; // idle scroll noise → no render
-		stats.progress = clamped;
-		uniforms.uProgress.value = clamped;
-		// labels fade in with column formation and hold through the final step
-		const o = Math.min(1, Math.max(0, (clamped - 0.6) / 0.32));
-		labelLayer.style.opacity = o.toFixed(3);
-		labelLayer.style.visibility = o <= 0 ? 'hidden' : 'visible';
-		invalidate();
-	}
-
 	handleResize(); // initial size + first render
 
 	return {
-		setProgress,
+		applyState,
 		invalidate,
 		stats,
+		data,
+		projectToCss: toCss,
+		getColumnLayout: () => columnLayout,
+		getWallLayout: () => wallLayout,
 		dispose(): void {
 			disposed = true;
 			if (rafId !== null) cancelAnimationFrame(rafId);
