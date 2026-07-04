@@ -17,8 +17,8 @@
 	const n = $derived(field?.data.nPoints ?? 316199);
 	const teamClause = $derived(
 		$pickedTeam !== null && $pickedTeam.league !== null && $pickedTeam.team !== 'neutral'
-			? `, pre-tuned to ${$pickedTeam.team}`
-			: ' — pre-tuned to whichever team you pick'
+			? `, opening on ${$pickedTeam.team}`
+			: ' — opening on the 2019 final, or on whichever team you pick'
 	);
 </script>
 
@@ -40,9 +40,10 @@
 		</p>
 
 		<p class="tease">
-			<strong>The field will be yours.</strong>
+			<strong>The field is yours.</strong>
 			Every one of the {n.toLocaleString('en-US')} balls on this screen, filterable under your
-			thumb — season by season, team by team{teamClause}. Next release.
+			thumb — season by season, team by team{teamClause}. Tap any ball to name it.
+			<a class="tease-link" href="{base}/#bowl">Keep scrolling into the sandbox →</a>
 		</p>
 
 		<p class="navhint">
@@ -92,6 +93,19 @@
 		display: block;
 		color: var(--ink-dim);
 		font-style: italic;
+	}
+
+	.tease-link {
+		display: inline-block;
+		margin-top: 0.5rem;
+		padding: 0.4rem 0;
+		color: var(--teal);
+		font-weight: 600;
+	}
+
+	.tease-link:focus-visible {
+		outline: 2px solid var(--teal);
+		outline-offset: 2px;
 	}
 
 	.navhint {

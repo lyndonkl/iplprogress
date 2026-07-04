@@ -25,8 +25,9 @@ export const FUTURE_CHAPTERS: string[] = [
 	'Chapter 7 — The Twelfth Man',
 	'Chapter 8 — The Captain’s Brain',
 	'Chapter 9 — The Living League',
-	'Chapter 10 — The Era Machine',
-	'The Field Is Yours'
+	'Chapter 10 — The Era Machine'
+	// 'The Field Is Yours' is now LIVE — the Bowl scene declares it as a navLabel
+	// (see src/lib/scenes/sandbox), so it appears as a live nav item, not a `soon`.
 ];
 
 /** Compose nav items: scenes that declare navLabel, then the soon list. */
