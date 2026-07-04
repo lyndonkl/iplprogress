@@ -1,8 +1,11 @@
 import * as THREE from 'three';
 import {
 	DEFAULT_RENDER_STATE,
+	FILTER_DIM,
 	LAYOUT_CODE,
+	NO_FILTER,
 	type FieldData,
+	type FieldFilter,
 	type FieldRenderState,
 	type GroupMeta
 } from './types';
@@ -14,7 +17,13 @@ import {
 	type ColumnLayout,
 	type WallLayout
 } from './layout';
-import { makeVertexShader, fragmentShader } from './shaders';
+import { makeVertexShader, fragmentShader, makePickVertexShader, pickFragmentShader } from './shaders';
+
+/** Pick target edge, device px. The tap patch is rendered 1:1 into it; the
+ *  readback scans outward from the centre → the effective pick radius is
+ *  (PICK_PATCH-1)/2 device px (≈10 CSS px at DPR 2). Odd so there is an exact
+ *  centre pixel. */
+const PICK_PATCH = 41;
 
 /**
  * The persistent field renderer (R0 spike, promoted to the story platform):
@@ -53,6 +62,43 @@ export interface FieldHandle {
 	applyState(state: FieldRenderState): void;
 	/** request exactly one render on the next animation frame */
 	invalidate(): void;
+
+	/* ---- GPU picking (§11) ------------------------------------------------- */
+	/**
+	 * Recover the field point nearest a tap/click at CSS coordinates (relative
+	 * to the field container), or null if no visible point is within `radiusPx`.
+	 * Filtered-out points (see setFilter) and not-yet-assembled points are NOT
+	 * pickable. Demand-mode: renders a tiny offscreen patch ONCE and reads it
+	 * back — no persistent loop, idle GPU stays ~0. Call it on the tap event.
+	 * @param cssX horizontal CSS px inside the field container
+	 * @param cssY vertical CSS px inside the field container
+	 * @param radiusPx max distance in CSS px (default = the full patch radius)
+	 */
+	pickAt(cssX: number, cssY: number, radiusPx?: number): number | null;
+
+	/* ---- keyboard select (§11) — no GPU, filter-aware CPU walks ------------- */
+	/** first VISIBLE point index in chronological order, or null if the filter hides all */
+	firstVisiblePoint(): number | null;
+	/**
+	 * step to the next VISIBLE point from `fromIndex` in chronological order
+	 * (dir +1 forward, -1 back); null at the ends. Pass -1 as fromIndex with
+	 * dir +1 to get the first visible point. For a keyboard focus cursor moving
+	 * in screen space, use pickAt(x, y) with a generous radius instead.
+	 */
+	stepVisiblePoint(fromIndex: number, dir: 1 | -1): number | null;
+
+	/* ---- facet filter (§12) — the Bowl instrument -------------------------- */
+	/**
+	 * Merge a partial facet filter into the live field and render once
+	 * (demand-mode). For interactive scenes (the Bowl) where no scroll morph is
+	 * competing; declarative scenes set the same facets via SceneFieldState.
+	 */
+	setFilter(partial: Partial<FieldFilter>): void;
+	/** the currently applied facet filter */
+	getFilter(): Readonly<FieldFilter>;
+	/** whether the match_index buffer is loaded (i.e. the matchIndex facet works) */
+	readonly hasMatchAttr: boolean;
+
 	dispose(): void;
 	/** project field/world coordinates to CSS px inside the container (annotation anchoring) */
 	projectToCss(worldX: number, worldY: number): { x: number; y: number };
@@ -98,6 +144,15 @@ export function createField(opts: FieldOptions): FieldHandle {
 	const { canvas, container, labelLayer, data, onRender } = opts;
 	const n = data.nPoints;
 	const groupCount = data.groups.length;
+
+	// The match facet + exact-match tooltip need a per-point match index. It is
+	// OPTIONAL: present only when the pipeline ships match_index.u16. Without it
+	// the match preset filters by a contiguous point-index range instead (§12.4).
+	const hasMatchAttr = data.matchIndex != null && data.matchIndex.length === n;
+
+	// gi → season year, for the season facet (a season may span both leagues).
+	const groupSeason = new Array<number>(groupCount).fill(0);
+	for (const g of data.groups) groupSeason[g.gi] = g.season;
 
 	/* ---- per-point attributes: ordinal-in-group in one pass ------------- */
 	// position vec3 = (index, gi, ordinal) — all exact integers in Float32.
@@ -169,7 +224,15 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uResortX: { value: resortX },
 		uPickedTeam: { value: -1 },
 		uTeamColor: { value: new THREE.Color('#ffffff') },
-		uWallHeatMix: { value: 0 }
+		uWallHeatMix: { value: 0 },
+		// facet filter (§12) — all inactive by default (R1a scenes unaffected)
+		uFilterTeam: { value: -1 },
+		uFilterSeason: { value: -1 },
+		uGroupSeason: { value: groupSeason },
+		uFilterRangeLo: { value: 0 },
+		uFilterRangeHi: { value: 0 },
+		uFilterMatch: { value: -1 },
+		uFilterDim: { value: 1 }
 	};
 
 	const geometry = new THREE.BufferGeometry();
@@ -182,12 +245,15 @@ export function createField(opts: FieldOptions): FieldHandle {
 	geometry.setAttribute('aWallHeat', new THREE.BufferAttribute(data.wallHeat, 1, true));
 	geometry.setAttribute('aSubOrd', new THREE.BufferAttribute(subOrd, 1, false));
 	const subOrdAttr = geometry.getAttribute('aSubOrd') as THREE.BufferAttribute;
+	// OPTIONAL match index (u16 → non-normalized float attr); gates the match facet
+	if (hasMatchAttr)
+		geometry.setAttribute('aMatchIndex', new THREE.BufferAttribute(data.matchIndex!, 1, false));
 	// positions are procedural in-shader; give THREE an all-covering bound
 	geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 100);
 
 	const material = new THREE.ShaderMaterial({
 		glslVersion: THREE.GLSL3,
-		vertexShader: makeVertexShader(groupCount),
+		vertexShader: makeVertexShader(groupCount, hasMatchAttr),
 		fragmentShader,
 		uniforms,
 		transparent: true,
@@ -199,6 +265,34 @@ export function createField(opts: FieldOptions): FieldHandle {
 	const points = new THREE.Points(geometry, material);
 	points.frustumCulled = false;
 	scene.add(points);
+
+	/* ---- GPU picking pass (§11) — shares geometry + uniforms with the visual
+	   material, so points sit at the same place and honour the same filter; the
+	   pick material only differs in the fragment (index-as-color) and blending.
+	   Rendered on demand to a tiny offscreen target — never in the render loop. */
+	const pickMaterial = new THREE.ShaderMaterial({
+		glslVersion: THREE.GLSL3,
+		vertexShader: makePickVertexShader(groupCount, hasMatchAttr),
+		fragmentShader: pickFragmentShader,
+		uniforms, // SAME object → morph/layout/filter always match the visual field
+		transparent: false,
+		depthTest: false,
+		depthWrite: false,
+		blending: THREE.NoBlending
+	});
+	const pickPoints = new THREE.Points(geometry, pickMaterial);
+	pickPoints.frustumCulled = false;
+	const pickScene = new THREE.Scene();
+	pickScene.add(pickPoints);
+	const pickTarget = new THREE.WebGLRenderTarget(PICK_PATCH, PICK_PATCH, {
+		format: THREE.RGBAFormat,
+		type: THREE.UnsignedByteType,
+		depthBuffer: false,
+		stencilBuffer: false,
+		minFilter: THREE.NearestFilter,
+		magFilter: THREE.NearestFilter
+	});
+	const pickPixels = new Uint8Array(PICK_PATCH * PICK_PATCH * 4);
 
 	/* ---- DOM label plane -------------------------------------------------- */
 	const labels: LabelEntry[] = buildLabels(labelLayer, data.groups);
@@ -352,7 +446,13 @@ export function createField(opts: FieldOptions): FieldHandle {
 			a.resortEngage === b.resortEngage &&
 			a.resortLift === b.resortLift &&
 			a.resortTint === b.resortTint &&
-			a.resortOthersDim === b.resortOthersDim
+			a.resortOthersDim === b.resortOthersDim &&
+			a.filterTeam === b.filterTeam &&
+			a.filterSeason === b.filterSeason &&
+			a.filterMatchIndex === b.filterMatchIndex &&
+			a.filterRangeLo === b.filterRangeLo &&
+			a.filterRangeHi === b.filterRangeHi &&
+			a.filterDim === b.filterDim
 		);
 	}
 
@@ -400,6 +500,14 @@ export function createField(opts: FieldOptions): FieldHandle {
 		const tc = teamColorById.get(s.teamId);
 		if (tc) (uniforms.uTeamColor.value as THREE.Color).copy(tc);
 
+		// facet filter (§12): the match facet is inert unless the buffer is loaded
+		uniforms.uFilterTeam.value = s.filterTeam;
+		uniforms.uFilterSeason.value = s.filterSeason;
+		uniforms.uFilterRangeLo.value = s.filterRangeLo;
+		uniforms.uFilterRangeHi.value = s.filterRangeHi;
+		uniforms.uFilterMatch.value = hasMatchAttr ? s.filterMatchIndex : -1;
+		uniforms.uFilterDim.value = s.filterDim;
+
 		// label plane opacity is scene-state-driven, never animated on its own
 		const o = Math.min(1, Math.max(0, s.labels));
 		labelLayer.style.opacity = o.toFixed(3);
@@ -407,6 +515,126 @@ export function createField(opts: FieldOptions): FieldHandle {
 
 		stats.progress = s.morph;
 		invalidate();
+	}
+
+	/* ---- GPU picking (§11) -------------------------------------------------- */
+	const pickCenter = (PICK_PATCH - 1) / 2;
+
+	function pickAt(cssX: number, cssY: number, radiusPx?: number): number | null {
+		if (disposed) return null;
+		const dpr = renderer.getPixelRatio();
+		const fullW = Math.max(1, Math.round(cssW * dpr));
+		const fullH = Math.max(1, Math.round(cssH * dpr));
+		const devX = cssX * dpr;
+		const devY = cssY * dpr;
+
+		// Render only the PICK_PATCH×PICK_PATCH device-px window under the tap into
+		// the offscreen target (1:1), then read it back — ONE render, ONE readback,
+		// no loop. The visible canvas is untouched (we never target the default
+		// framebuffer), so demand-mode idle GPU stays ~0.
+		const prevTarget = renderer.getRenderTarget();
+		camera.setViewOffset(fullW, fullH, devX - pickCenter, devY - pickCenter, PICK_PATCH, PICK_PATCH);
+		camera.updateProjectionMatrix();
+		renderer.setRenderTarget(pickTarget);
+		renderer.setClearColor(0x000000, 1); // background 0 → decodes to "no point"
+		renderer.render(pickScene, camera);
+		renderer.readRenderTargetPixels(pickTarget, 0, 0, PICK_PATCH, PICK_PATCH, pickPixels);
+		// restore renderer + camera exactly (no side effects on the next visible frame)
+		renderer.setRenderTarget(prevTarget);
+		renderer.setClearColor(0x0b0e14, 1);
+		camera.clearViewOffset();
+		camera.updateProjectionMatrix();
+
+		// nearest painted pixel to the patch centre = the pick radius (readback is
+		// bottom-up, but the centre is the fixed point of that flip, so distances
+		// to centre are unchanged).
+		const maxR = radiusPx != null ? radiusPx * dpr : Infinity;
+		const maxR2 = maxR * maxR;
+		let best = -1;
+		let bestD2 = Infinity;
+		for (let py = 0; py < PICK_PATCH; py++) {
+			for (let px = 0; px < PICK_PATCH; px++) {
+				const o = (py * PICK_PATCH + px) * 4;
+				const id1 = pickPixels[o] + pickPixels[o + 1] * 256 + pickPixels[o + 2] * 65536;
+				if (id1 === 0) continue; // background
+				const dx = px - pickCenter;
+				const dy = py - pickCenter;
+				const d2 = dx * dx + dy * dy;
+				if (d2 < bestD2 && d2 <= maxR2) {
+					bestD2 = d2;
+					best = id1 - 1;
+				}
+			}
+		}
+		return best >= 0 ? best : null;
+	}
+
+	/* ---- facet filter (§12) + keyboard select ------------------------------ */
+	// `mode` memory for the "no facet active" case (filterDim carries no mode then).
+	let filterMode: FieldFilter['mode'] = NO_FILTER.mode;
+
+	function filterToRenderState(f: FieldFilter): Pick<
+		FieldRenderState,
+		'filterTeam' | 'filterSeason' | 'filterMatchIndex' | 'filterRangeLo' | 'filterRangeHi' | 'filterDim'
+	> {
+		const anyFacet =
+			f.team != null || f.season != null || f.matchIndex != null || f.matchRange != null;
+		return {
+			filterTeam: f.team ?? -1,
+			filterSeason: f.season ?? -1,
+			filterMatchIndex: f.matchIndex ?? -1,
+			filterRangeLo: f.matchRange ? f.matchRange[0] : 0,
+			filterRangeHi: f.matchRange ? f.matchRange[1] : 0,
+			// filterDim is a no-op whenever no facet is active (nothing is filtered out)
+			filterDim: anyFacet ? FILTER_DIM[f.mode] : 1
+		};
+	}
+
+	function getFilter(): Readonly<FieldFilter> {
+		const rangeActive = applied.filterRangeHi > applied.filterRangeLo;
+		const matchActive = hasMatchAttr && applied.filterMatchIndex >= 0;
+		const anyFacet =
+			applied.filterTeam >= 0 || applied.filterSeason >= 0 || matchActive || rangeActive;
+		return {
+			team: applied.filterTeam >= 0 ? applied.filterTeam : null,
+			season: applied.filterSeason >= 0 ? applied.filterSeason : null,
+			matchIndex: matchActive ? applied.filterMatchIndex : null,
+			matchRange: rangeActive ? [applied.filterRangeLo, applied.filterRangeHi] : null,
+			mode: !anyFacet ? filterMode : applied.filterDim === 0 ? 'hide' : 'dim'
+		};
+	}
+
+	function setFilter(partial: Partial<FieldFilter>): void {
+		const merged: FieldFilter = { ...getFilter(), ...partial };
+		filterMode = merged.mode; // remember the mode across "clear all facets"
+		applyState({ ...applied, ...filterToRenderState(merged) });
+	}
+
+	// CPU mirror of the shader's `passesFilter`, read from the LIVE applied
+	// uniforms so it is correct no matter which path (setFilter or a scene's
+	// declarative fieldState) set the filter.
+	function pointVisible(i: number): boolean {
+		if (applied.filterTeam >= 0 && data.team[i] !== applied.filterTeam) return false;
+		if (applied.filterSeason >= 0 && groupSeason[data.groupIds[i]] !== applied.filterSeason)
+			return false;
+		if (
+			applied.filterRangeHi > applied.filterRangeLo &&
+			(i < applied.filterRangeLo || i >= applied.filterRangeHi)
+		)
+			return false;
+		if (hasMatchAttr && applied.filterMatchIndex >= 0 && data.matchIndex![i] !== applied.filterMatchIndex)
+			return false;
+		return true;
+	}
+
+	function firstVisiblePoint(): number | null {
+		for (let i = 0; i < n; i++) if (pointVisible(i)) return i;
+		return null;
+	}
+
+	function stepVisiblePoint(fromIndex: number, dir: 1 | -1): number | null {
+		for (let i = fromIndex + dir; i >= 0 && i < n; i += dir) if (pointVisible(i)) return i;
+		return null;
 	}
 
 	/* ---- resize / DPR ------------------------------------------------------ */
@@ -475,9 +703,15 @@ export function createField(opts: FieldOptions): FieldHandle {
 
 	handleResize(); // initial size + first render
 
-	return {
+	const handle: FieldHandle = {
 		applyState,
 		invalidate,
+		pickAt,
+		firstVisiblePoint,
+		stepVisiblePoint,
+		setFilter,
+		getFilter,
+		hasMatchAttr,
 		stats,
 		data,
 		projectToCss: toCss,
@@ -492,10 +726,14 @@ export function createField(opts: FieldOptions): FieldHandle {
 			dprQuery?.removeEventListener('change', onDprChange);
 			geometry.dispose();
 			material.dispose();
+			pickMaterial.dispose();
+			pickTarget.dispose();
 			renderer.dispose();
 			for (const L of labels) L.el.remove();
 		}
 	};
+
+	return handle;
 }
 
 /* ---- label construction ---------------------------------------------------- */

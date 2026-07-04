@@ -1,6 +1,6 @@
 import type { Component } from 'svelte';
 import type { FieldHandle } from '$lib/field/field';
-import type { HighlightClass, LayoutId, ResortColumns } from '$lib/field/types';
+import type { FilterMode, HighlightClass, LayoutId, ResortColumns } from '$lib/field/types';
 import type { FootnoteId } from './footnotes';
 
 /**
@@ -88,6 +88,34 @@ export interface SceneFieldState {
 	 * is engaged (the beat is staged before the fireworks). Team-ignite wins on top.
 	 */
 	wallHeatMix?: number;
+
+	/* ---- facet filter (§12 capability — the Bowl instrument) ----------------
+	 * A point is VISIBLE iff it passes EVERY active facet (team AND season AND
+	 * match); failing points are hidden/ghosted per `filterMode` and are removed
+	 * from the GPU pick pass (only visible balls are tappable). Each facet is
+	 * independent; `null`/omitted means it imposes no constraint. Omit them all
+	 * (the R1a default) and the field is unfiltered. The Bowl opens with
+	 * `filterTeam` set so it is never blank. Interactive facet changes call
+	 * `field.setFilter` imperatively; these declarative fields set the entry
+	 * state. See CONTRACT §12. */
+	/** teams.json id to keep, or null/omitted = all teams */
+	filterTeam?: number | null;
+	/** season YEAR to keep (any league's group for that year), or null = all */
+	filterSeason?: number | null;
+	/**
+	 * match index to keep, or null = all. Needs the pipeline's OPTIONAL
+	 * match_index.u16 buffer; a no-op without it — use `filterMatchRange` for the
+	 * R1b famous-match preset instead. See CONTRACT §12.4.
+	 */
+	filterMatchIndex?: number | null;
+	/**
+	 * contiguous point-index range [lo, hi) to keep, or null = no range. Matches
+	 * one game with zero new buffers (a match's deliveries are contiguous in
+	 * point order) — the working path for R1b's famous-match preset.
+	 */
+	filterMatchRange?: readonly [number, number] | null;
+	/** how filtered-out points render: 'hide' (α→0) or 'dim' ghost (default 'dim') */
+	filterMode?: FilterMode;
 }
 
 /** Props every scene annotations component receives from the orchestrator. */

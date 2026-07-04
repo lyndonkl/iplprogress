@@ -15,8 +15,8 @@
    "bytes_gz": 139311
   },
   "columnar.json.gz": {
-   "bytes_raw": 9825863,
-   "bytes_gz": 625569
+   "bytes_raw": 11775799,
+   "bytes_gz": 655235
   },
   "group_ids.u16": {
    "bytes_raw": 632398,
@@ -26,9 +26,13 @@
    "bytes_raw": 1206,
    "bytes_gz": 263
   },
+  "matches.json": {
+   "bytes_raw": 305768,
+   "bytes_gz": 20686
+  },
   "meta.json": {
-   "bytes_raw": 720,
-   "bytes_gz": 320
+   "bytes_raw": 831,
+   "bytes_gz": 348
   },
   "payoff/ch1.json": {
    "bytes_raw": 20655,
@@ -41,6 +45,10 @@
   "scenes/coldopen.json": {
    "bytes_raw": 3720,
    "bytes_gz": 779
+  },
+  "scenes/sandbox.json": {
+   "bytes_raw": 3331,
+   "bytes_gz": 1236
   },
   "team.u8": {
    "bytes_raw": 316199,
@@ -70,7 +78,7 @@
     "scenes/coldopen.json"
    ],
    "budget_gz": 3000000,
-   "actual_gz": 405172,
+   "actual_gz": 405200,
    "pass": true
   },
   {
@@ -84,12 +92,14 @@
    "pass": true
   },
   {
-   "name": "sandbox columnar dataset",
+   "name": "sandbox dataset (columnar + matches + descriptor)",
    "files": [
-    "columnar.json.gz"
+    "columnar.json.gz",
+    "matches.json",
+    "scenes/sandbox.json"
    ],
    "budget_gz": 2000000,
-   "actual_gz": 625569,
+   "actual_gz": 677157,
    "pass": true
   },
   {
@@ -100,16 +110,18 @@
     "columnar.json.gz",
     "group_ids.u16",
     "groups.json",
+    "matches.json",
     "meta.json",
     "payoff/ch1.json",
     "scenes/ch1.json",
     "scenes/coldopen.json",
+    "scenes/sandbox.json",
     "team.u8",
     "teams.json",
     "wallheat.u8"
    ],
    "budget_gz": 25000000,
-   "actual_gz": 1042854,
+   "actual_gz": 1094470,
    "pass": true
   }
  ],

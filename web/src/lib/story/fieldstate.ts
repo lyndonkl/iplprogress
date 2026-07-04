@@ -1,6 +1,41 @@
-import { HL_CLASS, type FieldRenderState, type ResortColumns } from '$lib/field/types';
+import {
+	FILTER_DIM,
+	HL_CLASS,
+	type FieldRenderState,
+	type ResortColumns
+} from '$lib/field/types';
 import { ASSEMBLY_RAIN_WINDOW } from '$lib/field/shaders';
 import type { SceneDef, SceneFieldState, SubsetHighlight, SubsetResort } from './types';
+
+/** The six filter uniform fields resolved from a scene's declarative facets. */
+interface ResolvedFilter {
+	active: boolean;
+	filterTeam: number;
+	filterSeason: number;
+	filterMatchIndex: number;
+	filterRangeLo: number;
+	filterRangeHi: number;
+	filterDim: number;
+}
+
+function resolveSceneFilter(s: SceneFieldState): ResolvedFilter {
+	const team = s.filterTeam ?? null;
+	const season = s.filterSeason ?? null;
+	const matchIndex = s.filterMatchIndex ?? null;
+	const range = s.filterMatchRange ?? null;
+	const active = team != null || season != null || matchIndex != null || range != null;
+	const mode = s.filterMode ?? 'dim';
+	return {
+		active,
+		filterTeam: team ?? -1,
+		filterSeason: season ?? -1,
+		filterMatchIndex: matchIndex ?? -1,
+		filterRangeLo: range ? range[0] : 0,
+		filterRangeHi: range ? range[1] : 0,
+		// filterDim is a no-op when no facet is active (nothing is filtered out)
+		filterDim: active ? FILTER_DIM[mode] : 1
+	};
+}
 
 /**
  * Pure scene-state math for the scroll orchestrator: resolves a (from, to, t)
@@ -69,6 +104,13 @@ export function resolveRenderState(
 	const rs = toRs ?? fromRs;
 	const rsClass = rs ? HL_CLASS[rs.class] : HL_CLASS.none;
 
+	// Facet filter resolves like the highlight: the discrete facets come from
+	// whichever side declares an active filter (preferring `to`), while filterDim
+	// lerps — an inactive side contributes dim 1, so a filter fades in/out cleanly.
+	const fFilter = resolveSceneFilter(from);
+	const gFilter = resolveSceneFilter(to);
+	const facets = gFilter.active ? gFilter : fFilter.active ? fFilter : gFilter;
+
 	return {
 		layoutA: f.layout,
 		layoutB: g.layout,
@@ -96,7 +138,14 @@ export function resolveRenderState(
 		resortEngage: lerp(fromRs?.engage ?? 0, toRs?.engage ?? 0, clampedT),
 		resortLift: lerp(fromRs?.lift ?? 0.5, toRs?.lift ?? 0.5, clampedT),
 		resortTint: lerp(fromRs?.tint ?? 0, toRs?.tint ?? 0, clampedT),
-		resortOthersDim: lerp(fromRs?.othersDim ?? 1, toRs?.othersDim ?? 1, clampedT)
+		resortOthersDim: lerp(fromRs?.othersDim ?? 1, toRs?.othersDim ?? 1, clampedT),
+		// facets discrete (from the active side); the dim fades so filters glide
+		filterTeam: facets.filterTeam,
+		filterSeason: facets.filterSeason,
+		filterMatchIndex: facets.filterMatchIndex,
+		filterRangeLo: facets.filterRangeLo,
+		filterRangeHi: facets.filterRangeHi,
+		filterDim: lerp(fFilter.active ? fFilter.filterDim : 1, gFilter.active ? gFilter.filterDim : 1, clampedT)
 	};
 }
 

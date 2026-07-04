@@ -1,4 +1,4 @@
-"""R1a scene aggregates — scenes/coldopen.json + scenes/ch1.json.
+"""R1a/R1b scene aggregates — scenes/coldopen.json + ch1.json + sandbox.json.
 
 One chronological pass over the corpus (super-over innings excluded, per the
 standing rule) computing every number the cold open and Chapter 1 put on
@@ -28,6 +28,13 @@ tests/test_r1a.py against an independent recount):
               (f) the WPL beat (first-10 SR, four-led run DNA, and the
               League Maturity Clock: RR = ALL runs / legal balls — wides
               AND no-balls excluded from the denominator).
+
+  sandbox     (R1b) the minimal-bowl descriptor: the famous-match preset
+              (2019 IPL Final, MI beat CSK by 1 run — resolved by
+              league+season+stage+teams+margin, never a hard-coded index),
+              the TEAM + SEASON facet lists (teams.json / groups.json), and
+              the tap-a-ball tooltip field roster. Team+season facets only,
+              per the tightened §3 scope; everything else is R6/R7.
 
 Era bands (R1a data contract): IPL 2008-2010, 2011-2015, 2016-2019,
 2020-2022, 2023-2026; WPL pooled 2023-2026.
@@ -588,6 +595,104 @@ def ball_index_axis() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# R1b — the minimal sandbox descriptor (scenes/sandbox.json)
+# ---------------------------------------------------------------------------
+
+# The tap-a-ball tooltip's field roster: what a tapped point resolves to, and
+# where each field comes from. Emitted into sandbox.json so the contract is a
+# build artifact (tested) rather than prose. columnar[i] = the tapped point.
+TOOLTIP_FIELDS = [
+    {"field": "batter", "source": "columnar.dicts.batter[arrays.batter[i]]"},
+    {"field": "bowler", "source": "columnar.dicts.bowler[arrays.bowler[i]]"},
+    {"field": "batting_team", "source": "columnar.dicts.batting_team[arrays.batting_team[i]]"},
+    {"field": "opponent", "source": "the team in matches[arrays.match_index[i]].teams that is not batting_team"},
+    {"field": "match_label", "source": "matches[arrays.match_index[i]]: season + stage + date"},
+    {"field": "venue", "source": "matches[arrays.match_index[i]].venue"},
+    {"field": "city", "source": "matches[arrays.match_index[i]].city"},
+    {"field": "over_ball", "source": "f'{arrays.over[i] + 1}.{arrays.ball_index_in_over[i] + 1}' (over/ball are 0-based)"},
+    {"field": "innings", "source": "arrays.innings[i]"},
+    {"field": "runs_off_bat", "source": "arrays.runs_batter[i]"},
+    {"field": "runs_total", "source": "arrays.runs_total[i]"},
+    {"field": "wicket", "source": "arrays.wicket[i] (1 = a dismissal fell)"},
+    {"field": "wicket_kind", "source": "columnar.dicts.wicket_kind[arrays.wicket_kind[i]] ('' when no wicket)"},
+    {"field": "result_text", "source": "matches[arrays.match_index[i]].result_text"},
+]
+
+# The famous-match preset (RESOLVED owner decision, blueprint §7 #1): the 2019
+# IPL Final, Mumbai Indians beat Chennai Super Kings by 1 run — Malinga's final
+# over. Resolved robustly by (league, season, stage, teams) with a margin
+# cross-check, never by a hard-coded match_index.
+PRESET_LABEL = (
+    "2019 IPL Final — Mumbai Indians beat Chennai Super Kings by 1 run"
+)
+PRESET_BLURB = (
+    "Mumbai Indians defend nine off Lasith Malinga's final over to beat "
+    "Chennai Super Kings by a single run — the closest final in IPL history."
+)
+PRESET_TEAMS = frozenset({"Mumbai Indians", "Chennai Super Kings"})
+
+
+def resolve_preset(matches: list) -> int:
+    """The 2019 IPL-Final match_index, resolved by identity not by number."""
+    hits = [
+        i
+        for i, m in enumerate(matches)
+        if m["league"] == "ipl"
+        and m["season"] == 2019
+        and m["stage"] == "Final"
+        and set(m["teams"]) == PRESET_TEAMS
+    ]
+    if len(hits) != 1:
+        raise SystemExit(f"preset match not uniquely resolved: {hits}")
+    idx = hits[0]
+    result = matches[idx]["result_text"]
+    if result != "Mumbai Indians won by 1 run":  # season+stage+teams+MARGIN
+        raise SystemExit(f"preset margin mismatch: {result!r}")
+    return idx
+
+
+def sandbox_doc() -> dict:
+    matches = flatten.build_matches()
+    preset_index = resolve_preset(matches)
+    teams = [
+        {"id": t["id"], "short": t["short"], "name": t["name"], "league": t["league"]}
+        for t in canon.TEAMS
+    ]
+    return {
+        "preset": {
+            "match_index": preset_index,
+            "label": PRESET_LABEL,
+            "blurb": PRESET_BLURB,
+        },
+        "facets": {
+            "team": {
+                "source": "teams.json",
+                "opens_prefiltered_to": (
+                    "the reader's picked franchise id (team.u8, indexes "
+                    "teams.json) — the sandbox is never blank"
+                ),
+                "options": teams,
+            },
+            "season": {
+                "source": "groups.json",
+                "ipl": list(canon.IPL_SEASONS),
+                "wpl": list(canon.WPL_SEASONS),
+            },
+        },
+        "tooltip": {
+            "resolves_via": "matches.json (match_index) + columnar.json.gz arrays/dicts",
+            "fields": TOOLTIP_FIELDS,
+        },
+        "scope": (
+            "R1b minimal bowl: TEAM + SEASON facets only, one famous-match "
+            "preset, tap-a-ball tooltip. League/phase/player/over/outcome "
+            "facets, the linked worm/Manhattan panel, tour flags and "
+            "shareable URLs are deferred to R6/R7 (blueprint §3)."
+        ),
+    }
+
+
 def ch1_doc(bands, seasons) -> dict:
     return {
         "era_bands": band_meta(),
@@ -610,11 +715,16 @@ def main(out_root: Path = canon.OUT_ROOT) -> dict:
     bands, seasons, players, n_matches, superover_balls = build()
     coldopen = coldopen_doc(seasons, players, n_matches, superover_balls)
     ch1 = ch1_doc(bands, seasons)
+    sandbox = sandbox_doc()
 
     scenes_dir = out_root / "scenes"
     scenes_dir.mkdir(parents=True, exist_ok=True)
     sizes = {}
-    for name, doc in (("coldopen.json", coldopen), ("ch1.json", ch1)):
+    for name, doc in (
+        ("coldopen.json", coldopen),
+        ("ch1.json", ch1),
+        ("sandbox.json", sandbox),
+    ):
         raw = flatten.compact_json(doc, sort_keys=True)
         (scenes_dir / name).write_bytes(raw)
         sizes[f"scenes/{name}"] = {
@@ -649,7 +759,9 @@ def main(out_root: Path = canon.OUT_ROOT) -> dict:
         f"{f10['ipl 2008-2010']['hazard_pct']}% -> ipl 2023-2026 "
         f"{f10['ipl 2023-2026']['hazard_pct']}%"
     )
-    return {"coldopen": coldopen, "ch1": ch1}
+    p = sandbox["preset"]
+    print(f"sandbox preset: match_index={p['match_index']} — {p['label']}")
+    return {"coldopen": coldopen, "ch1": ch1, "sandbox": sandbox}
 
 
 if __name__ == "__main__":

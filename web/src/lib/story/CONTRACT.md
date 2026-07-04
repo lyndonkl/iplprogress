@@ -1,4 +1,4 @@
-# Story Shell Contract — R1a
+# Story Shell Contract — R1a (+ R1b field capabilities: §11 picking · §12 filtering)
 
 The scene system every scene builder codes against. The shell (this directory +
 `lib/field/` + `lib/state/`) is owned by the story-shell architect; **scene
@@ -352,3 +352,157 @@ diverging scale on screen (a legend built from `ch1.json`
 **No new position buffers.** The recolor is a per-point colour blend only; the
 one new byte (`wallheat.u8`, ≈316KB raw / tens of KB gz) is in the pipeline
 ledger and inside the Ch 1 budget.
+
+---
+
+## 11. GPU picking on the 316k-point field (R1b — the Bowl's tap-a-ball)
+
+Tap/click/keyboard-select recovers the exact field point the reader aimed at,
+so the sandbox can name the delivery (bowler · batter · match · result). The
+platform returns only the **point index**; the scene reads the delivery's
+metadata from the columnar sandbox dataset at that index (§12.4).
+
+### 11.1 `field.pickAt(cssX, cssY, radiusPx?) → number | null`
+
+```ts
+const idx = field.pickAt(ev.offsetX, ev.offsetY);      // tap → point index
+if (idx != null) showTooltip(idx);                     // null = empty space
+```
+
+- `cssX` / `cssY` are CSS px **inside the field container** (a pointer event's
+  `offsetX/offsetY`, or `clientX/Y` minus the container rect).
+- Returns the **nearest VISIBLE point** to the tap within the pick radius, or
+  `null`. Radius defaults to the full patch (≈10 CSS px at DPR 2); pass a
+  smaller `radiusPx` to tighten it (finger vs. mouse).
+- **Filtered-out points are never pickable** — the pick pass honours the exact
+  same facet filter as the visible field (§12), and not-yet-assembled points
+  (assembly reveal) are excluded too.
+- **How (demand-mode, hard invariant):** one render of a tiny `PICK_PATCH`×
+  `PICK_PATCH` offscreen target under the tap **plus one 1-shot pixel readback,
+  fired only on the event** — never a persistent loop. It renders to an
+  offscreen target, so the visible canvas and the demand-mode frame counter are
+  untouched; idle GPU stays ~0. Each point is drawn as a solid square encoding
+  `index+1` as 24-bit RGB; the readback returns the nearest painted pixel to the
+  tap centre.
+
+### 11.2 Keyboard select — filter-aware, no GPU
+
+For "no hover-only content; works by keyboard" (blueprint §2). Two helpers walk
+the **visible** set (they mirror the shader filter on the CPU, so they never
+return a hidden ball):
+
+```ts
+field.firstVisiblePoint(): number | null           // first visible ball, chrono order
+field.stepVisiblePoint(fromIndex, dir): number | null // next/prev visible ball (dir ±1)
+```
+
+- Tab into the field → `firstVisiblePoint()`; arrow keys → `stepVisiblePoint`
+  (returns `null` at the ends; wrap by calling `firstVisiblePoint()` yourself).
+- For a keyboard focus **cursor moving in screen space**, call `pickAt(x, y)`
+  with a generous `radiusPx` at the cursor's logical position instead.
+
+---
+
+## 12. Per-point facet filtering (R1b — the filterable instrument)
+
+The field becomes an instrument: a point is **visible iff it passes EVERY active
+facet** (team AND season AND match). R1b ships **team + season facets and one
+famous-match preset only** (blueprint §3 minimal-Bowl definition); league /
+phase / player / over / outcome facets are deferred to R6. Failing points render
+hidden or ghosted, and drop out of the pick pass (§11). Every facet change
+resolves to **one static demand-rendered field state** (set uniforms → one
+render), so the fallback path is satisfied for free.
+
+### 12.1 Declarative — `SceneFieldState` (the entry state)
+
+Omit them all (the R1a default) and the field is unfiltered. The Bowl opens with
+`filterTeam` set to the reader's pick so it is **never blank**:
+
+```ts
+fieldState: {
+  layout: 'free',
+  filterTeam: pickedTeamId,     // teams.json id, or null = all teams
+  filterSeason: null,           // season YEAR, or null = all
+  filterMatchIndex: null,       // match index (needs match_index.u16; else null)
+  filterMatchRange: null,       // [lo, hi) point-index range — the preset path
+  filterMode: 'dim'             // filtered-out points: 'dim' ghost (default) | 'hide'
+}
+```
+
+Each facet is independent; `null`/omitted imposes no constraint. Facets resolve
+discretely (whichever side of a morph declares an active filter, preferring the
+target) while the dim **lerps**, so a filter fades in/out cleanly with a morph.
+
+### 12.2 Imperative — `field.setFilter` (interactive facet buttons)
+
+The Bowl's facet controls change the filter *without* a scroll morph:
+
+```ts
+field.setFilter({ team: teamId });        // merge one facet, render once
+field.setFilter({ season: 2016 });        // compose (team AND season)
+field.setFilter({ matchRange: [lo, hi], mode: 'hide' }); // the famous-match preset
+field.setFilter({ team: null, season: null, matchRange: null }); // clear → full field
+field.getFilter();  // → Readonly<FieldFilter> (the live applied filter)
+field.hasMatchAttr; // true once match_index.u16 is loaded (else the matchIndex facet is inert)
+```
+
+`FieldFilter = { team, season, matchIndex, matchRange, mode }` (all facets
+`number | null`; `matchRange` is `readonly [lo, hi) | null`; `mode` is
+`'hide' | 'dim'`). `setFilter` merges a partial onto the current filter and
+demand-renders once.
+
+**Orchestrator caveat (integration — read this).** The scroll orchestrator
+re-applies a scene's declarative `fieldState` on every progress tick. So a scene
+that changes facets interactively must keep its own reactive facet state and
+**both** (a) call `field.setFilter(...)` on a control change for the instant
+render, **and** (b) surface the same facets through `dynamicState(progress,
+held) => ({ ...held, filterTeam, filterSeason, filterMatchRange })` so a stray
+scroll re-application can't revert them. The Bowl is the terminal held scene, so
+in practice this only bites if the reader scrolls while a facet is non-default —
+but wire both paths to the same state and it is a non-issue.
+
+### 12.3 Season facet semantics
+
+`filterSeason` matches a **year** against the point's group season, so a season
+spans **both leagues' groups** for that year (e.g. `2023` keeps IPL-2023 and
+WPL-2023). Composed with a team facet (which already implies a league) it
+resolves to that team's balls in that year.
+
+### 12.4 Pipeline dependency — `match_index.u16` + `matches.json` (integration note)
+
+The **exact-match tooltip** ("…in the 2019 final…") and **arbitrary match
+selection** (tap any ball → filter to its match; R6) need a per-point match
+identity that the shipped data does **not** yet carry. Two working facts shape
+the ask:
+
+- **Today, with zero new buffers:** a match's deliveries are **contiguous in
+  point order** (verified: exactly 1,331 contiguous blocks, no interleaving), so
+  the R1b famous-match preset filters by a **`matchRange` = [lo, hi)** point-index
+  range. The scene derives `[lo, hi)` for the chosen match from the columnar
+  dataset (first/last index whose row matches the preset's season+teams+innings),
+  or the pipeline emits it in a tiny preset JSON. **No pipeline buffer required
+  for R1b.**
+- **Preferred / R6:** ship **`match_index.u16`** — one Uint16 per delivery, same
+  point order as the other per-point buffers (max index 1330 < 65535; blocky and
+  monotone → gz to ~a KB, like `group_ids.u16`). The loader auto-detects it
+  (`FieldData.matchIndex`), `field.hasMatchAttr` flips true, and the
+  `uFilterMatch` uniform / `filterMatchIndex` facet light up for selecting **any**
+  match by id. Also ship **`matches.json`** (`match_index → { label, date, venue,
+  teams, result }`) so a tap on any ball can NAME its match, not just the preset's.
+
+The **tooltip metadata itself** (bowler · batter · runs · wicket) already lives
+in `columnar.json.gz` (parallel arrays + dicts, same point order): the scene
+reads `arrays.batter[idx]` etc. at the `pickAt` index. The platform's job ends at
+returning the index; only the *match name* is blocked on the pipeline note above.
+
+### 12.5 What the platform added (for the pipeline/other agents)
+
+- **No new GL attribute is required for R1b.** `aMatchIndex` is wired but
+  **optional** — it binds only when `match_index.u16` ships. Team (`aTeam`) and
+  season (`gi` → `uGroupSeason[]`) facets reuse buffers already on the wire.
+- New `FieldRenderState` uniform fields (set by `resolveRenderState` /
+  `setFilter`): `filterTeam`, `filterSeason`, `filterMatchIndex`, `filterRangeLo`,
+  `filterRangeHi`, `filterDim`. All default inactive, so **R1a scenes render
+  byte-identically** (the filter block is a shader no-op when no facet is active).
+- The visual and pick vertex shaders share one `computeCore()` (position +
+  visibility), so the pick pass can never drift from what the reader sees.

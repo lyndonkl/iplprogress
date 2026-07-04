@@ -19,23 +19,21 @@
  * Cross-cutting uniform-driven states (compose with any layout):
  *   subset highlight — points matching uHlClass lift (uHlLift) and brighten
  *                      (uHlBoost); everything else dims (uOthersDim).
- *                      uHlSkipWpl excludes WPL points from the match (C1-5:
- *                      the WPL's sixes stay on its shelf while the IPL's lift)
- *   subset re-sort   — points matching uResortClass fly from their base layout
- *                      into per-season firework columns as uResortEngage scrubs
- *                      0→1 (x = uResortX[gi] column centre, y stacked by the
- *                      per-point subset ordinal aSubOrd / uResortInvMax),
- *                      arcing up out of the wall (uResortLift) with the SAME
- *                      per-point stagger so object constancy holds; everything
- *                      else dims (uResortOthersDim). A per-point two-tone
- *                      recolor fades in with uResortTint (attrs.u8 bit 5 =
- *                      top-10 specialist → bright, else dim — LUMINANCE only).
- *                      uResortSkipWpl keeps WPL points on the wall. Reversible:
- *                      the settle-back is just uResortEngage lerping 1→0. §7.
+ *   subset re-sort   — points matching uResortClass fly into per-season columns
+ *                      as uResortEngage scrubs 0→1 (§9); reversible.
  *   team ignite      — points whose aTeam == uPickedTeam render in uTeamColor
  *                      and resist the global dim (personalization survives)
+ *   facet filter     — points that FAIL the active team/season/match facets are
+ *                      hidden (uFilterDim 0) or ghosted (uFilterDim > 0); they
+ *                      are ALSO removed from the GPU pick pass (R1b §11/§12).
  *   dims             — uDim (whole field) and uWplDim (WPL points only) are
  *                      luminance multipliers: hue never encodes quantity
+ *
+ * The vertex logic that decides WHERE a point sits and WHETHER it is visible
+ * (`computeCore()` below) is SHARED verbatim by the visual vertex shader and
+ * the GPU-picking vertex shader (`makePickVertexShader`), so the pick pass is
+ * pixel-registered to the field the reader sees and honours the same filter —
+ * filtered-out points are never pickable. Only the colour/encoding differs.
  *
  * Attribute packing (ShaderMaterial's built-in `position` vec3 is reused as
  * the per-point record — three floats, all exact integers < 2^24):
@@ -48,10 +46,11 @@
  *   aTeam       = batting-team id (u8, matches teams.json)
  *   aSubOrd     = point's ordinal among its group's re-sort subset (client-
  *                 computed on demand; 0 for non-subset points — no wire cost)
- *   aWallHeat   = era-relative "intent" byte, NORMALIZED to 0..1 (how hot a
- *                 ball's season × balls-faced cell strike rate runs versus the
- *                 pooled IPL 2008-2010 batter at the SAME ball-index — drives
- *                 the C1-2 thesis-beat recolor, gated by uWallHeatMix)
+ *   aWallHeat   = era-relative "intent" byte, NORMALIZED to 0..1 (drives the
+ *                 C1-2 thesis-beat recolor, gated by uWallHeatMix)
+ *   aMatchIndex = per-delivery match index (u16, OPTIONAL — only present when
+ *                 the pipeline ships match_index.u16; gates the uFilterMatch
+ *                 facet + the exact-match tooltip. See CONTRACT §12.4.)
  */
 
 /** Fraction of the reveal range a point spends "raining in" (assembly layout). */
@@ -67,12 +66,13 @@ export const ASSEMBLY_RAIN_WINDOW = 0.045;
  */
 export const WALLHEAT_NEUTRAL_BYTE = 73;
 
-export function makeVertexShader(groupCount: number): string {
-	return /* glsl */ `
-#define GROUP_COUNT ${groupCount}
-#define RAIN_W ${ASSEMBLY_RAIN_WINDOW}
-#define WALLHEAT_NEUTRAL ${(WALLHEAT_NEUTRAL_BYTE / 255).toFixed(6)}
+/* ---------------------------------------------------------------------------
+ * Shared GLSL — the position + visibility core. Used verbatim by BOTH the
+ * visual and the pick vertex shaders so their geometry can never drift.
+ * ------------------------------------------------------------------------- */
 
+/** Full uniform superset (both shaders declare it; unused uniforms compile out). */
+const UNIFORMS_GLSL = /* glsl */ `
 uniform float uProgress;      // 0 = layout A · 1 = layout B
 uniform int uLayoutA;         // layout codes: 0 free · 1 columns · 2 wall · 3 assembly
 uniform int uLayoutB;
@@ -105,37 +105,42 @@ uniform float uResortTint;    // two-tone recolor strength 0..1 (top-10 vs rest)
 uniform float uResortOthersDim; // luminance × for non-matching points while engaged
 uniform float uResortInvMax;  // 1 / max per-group subset count (column height norm)
 uniform float uResortX[GROUP_COUNT]; // per-group re-sort column centre x (world)
-uniform float uPickedTeam;    // picked-team id (-1 = none)
+uniform float uPickedTeam;    // ignite: picked-team id (-1 = none)
 uniform vec3 uTeamColor;      // picked team's color
 uniform float uWallHeatMix;   // 0 = outcome colour · 1 = era-relative heat (C1-2 thesis beat)
 
+// ---- Facet filter (R1b §12). A point is VISIBLE iff it passes every active
+//      facet; failing points are hidden/ghosted (uFilterDim) and never pickable.
+uniform float uFilterTeam;    // team id to keep, or -1 = team facet inactive
+uniform int uFilterSeason;    // season YEAR to keep, or -1 = season facet inactive
+uniform int uGroupSeason[GROUP_COUNT]; // gi → season year (season-facet lookup)
+uniform float uFilterRangeLo; // point-index range lo (inclusive); range facet
+uniform float uFilterRangeHi; //   active iff uFilterRangeHi > uFilterRangeLo
+uniform float uFilterMatch;   // match index to keep, or -1 (needs aMatchIndex)
+uniform float uFilterDim;     // luminance×alpha for FILTERED-OUT points (0 hide … 1 no-op)
+`;
+
+/** Core per-point attributes (both shaders read these). */
+function coreAttrsGlsl(hasMatch: boolean): string {
+	return /* glsl */ `
 in float aAttrs;
 in float aBallsFaced;
 in float aTeam;
 in float aSubOrd;
-in float aWallHeat;           // era-relative intent 0..1 (normalized u8; neutral = 73/255)
+${hasMatch ? 'in float aMatchIndex; // per-delivery match index (u16)' : ''}
+`;
+}
 
-out vec3 vColor;
-out float vGlow;
-out float vAlpha;
-
+/** pcg hash + layout picker + facet-filter test + the shared position core. */
+function coreBodyGlsl(): string {
+	return /* glsl */ `
 // PCG hash — exact integer path, no float-precision striping at 316k indices.
 uint pcg(uint v) {
 	uint state = v * 747796405u + 2891336453u;
 	uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
 	return (word >> 22u) ^ word;
 }
-
 const float INV32 = 1.0 / 4294967296.0;
-
-const vec3 C_DOT   = vec3(0.227, 0.263, 0.345); // #3a4358
-const vec3 C_ONE   = vec3(0.420, 0.478, 0.600); // #6b7a99
-const vec3 C_TWO   = vec3(0.490, 0.561, 0.690); // #7d8fb0
-const vec3 C_FOUR  = vec3(0.910, 0.639, 0.239); // #e8a33d
-const vec3 C_SIX   = vec3(1.000, 0.365, 0.227); // #ff5d3a
-const vec3 C_WKT   = vec3(0.851, 0.310, 0.420); // #d94f6b
-const vec3 C_XTRA  = vec3(0.333, 0.392, 0.498); // #55647f
-const vec3 C_TEAL  = vec3(0.180, 0.769, 0.714); // #2ec4b6
 
 vec3 pickLayout(int id, vec3 pFree, vec3 pCols, vec3 pWall) {
 	if (id == 1) return pCols;
@@ -143,27 +148,39 @@ vec3 pickLayout(int id, vec3 pFree, vec3 pCols, vec3 pWall) {
 	return pFree; // 0 free · 3 assembly share the free-field scatter
 }
 
-// Era-relative "intent" ramp for the C1-2 thesis beat (blended by uWallHeatMix).
-// h is aWallHeat in 0..1 — how hot a ball's (season × balls-faced) cell strike
-// rate runs versus the pooled IPL 2008-2010 batter at the SAME ball-index. The
-// scale is DIVERGING about WALLHEAT_NEUTRAL (= the 2008-2010 batter): cool
-// deep-blue below it, neutral grey-blue at it, amber → six-red well above. This
-// reuses the outcome palette constants and is the ONE authored place hue encodes
-// a quantity — gated entirely by uWallHeatMix, which is 0 everywhere but the beat.
-vec3 heatColor(float h) {
-	if (h <= WALLHEAT_NEUTRAL) {
-		float t = clamp(h / WALLHEAT_NEUTRAL, 0.0, 1.0);
-		return mix(C_DOT, C_TWO, t); // deep-blue → neutral grey-blue
-	}
-	float t = (h - WALLHEAT_NEUTRAL) / (1.0 - WALLHEAT_NEUTRAL);
-	if (t < 0.5) return mix(C_TWO, C_FOUR, t / 0.5);            // grey-blue → amber
-	return mix(C_FOUR, C_SIX, clamp((t - 0.5) / 0.5, 0.0, 1.0)); // amber → six-red
+// Facet filter (R1b §12): true iff the point passes every ACTIVE facet.
+bool passesFilter(int gi) {
+	if (uFilterTeam >= 0.0 && abs(aTeam - uFilterTeam) >= 0.5) return false;
+	if (uFilterSeason >= 0 && uGroupSeason[gi] != uFilterSeason) return false;
+	if (uFilterRangeHi > uFilterRangeLo &&
+		(position.x < uFilterRangeLo || position.x >= uFilterRangeHi)) return false;
+#ifdef HAS_MATCH
+	if (uFilterMatch >= 0.0 && abs(aMatchIndex - uFilterMatch) >= 0.5) return false;
+#endif
+	return true;
 }
 
-void main() {
-	float grp = position.y;
+// Everything that decides WHERE a point is and WHETHER it renders. Shared so
+// the pick pass is registered to the visual field and honours the same filter.
+struct Core {
+	vec3 pos;
+	bool culled;         // assembly frontier hasn't reached this point → offscreen
+	float assemblyAlpha; // rain-in alpha (1 outside the assembly window)
+	bool filterPass;     // passes every active facet (pickable + full brightness)
+	int outcome;
+	bool wicket;
+	bool wpl;
+	bool top10;
+	bool hlMatch;        // matches uHlClass (color brighten / others-dim)
+	bool matchResort;    // matches uResortClass (color recolor)
+	float reAmt;         // resort engage weight for the recolor
+	float baseSizeMul;   // outcome-driven base point-size multiplier
+};
+
+Core computeCore() {
+	Core o;
 	float ord = position.z;
-	int gi = int(grp + 0.5);
+	int gi = int(position.y + 0.5);
 
 	// four decorrelated hash draws chained from the point index
 	uint r1 = pcg(uint(position.x));
@@ -175,30 +192,25 @@ void main() {
 	float h3 = float(r3) * INV32;
 	float h4 = float(r4) * INV32;
 
-	// ---- Decode the packed attr byte (needed by the free layout's WPL
-	//      constellation and by the highlight below).
+	// decode the packed attr byte
 	int a = int(aAttrs + 0.5);
-	int outcome = a & 7;
-	bool wicket = (a & 8) != 0;
-	bool wpl = (a & 16) != 0;
-	bool top10 = (a & 32) != 0; // hit by that season's top-10 six-hitter (C1-5 two-tone)
+	o.outcome = a & 7;
+	o.wicket = (a & 8) != 0;
+	o.wpl = (a & 16) != 0;
+	o.top10 = (a & 32) != 0;
 
-	// ---- Subset re-sort membership (drives both position and color below).
+	// subset re-sort membership (drives position + color)
 	bool resortOn = uResortClass >= 0.0;
-	bool matchResort = false;
+	o.matchResort = false;
 	if (resortOn) {
 		int rc = int(uResortClass + 0.5);
-		matchResort = (rc == 6) ? wicket : (outcome == rc);
-		if (matchResort && uResortSkipWpl > 0.5 && wpl) matchResort = false;
+		o.matchResort = (rc == 6) ? o.wicket : (o.outcome == rc);
+		if (o.matchResort && uResortSkipWpl > 0.5 && o.wpl) o.matchResort = false;
 	}
 
-	// ---- Layout: the free field — procedural scatter from the index hash,
-	//      slight z-jitter for depth on the 2.5D ortho camera. The WPL is its
-	//      own constellation in the upper-right sky, deliberately apart — the
-	//      IPL cloud fills the sky below a clear gap (storyboard CO-3; the
-	//      upper→upper continuity into the C1-2 shelf is authored).
+	// free field — WPL its own upper-right constellation, IPL cloud below a gap
 	vec3 posFree;
-	if (wpl) {
+	if (o.wpl) {
 		posFree = vec3(
 			(0.50 + (h1 * 2.0 - 1.0) * 0.42) * uHalfW,
 			(0.76 + (h2 * 2.0 - 1.0) * 0.14) * uHalfH,
@@ -212,8 +224,7 @@ void main() {
 		);
 	}
 
-	// ---- Layout: season columns — column x from the group centroid table,
-	//      stack height from the within-group ordinal, deterministic jitter.
+	// season columns
 	vec2 col = uCols[gi];
 	vec3 posCols = vec3(
 		col.x + (h4 * 2.0 - 1.0) * uColHalfWidth,
@@ -221,8 +232,7 @@ void main() {
 		(h3 - 0.5) * 0.25
 	);
 
-	// ---- Layout: the ignition wall — x from the balls-faced index (capped
-	//      30+ bucket at the right edge), y from the season row centre.
+	// ignition wall
 	float bf = clamp(aBallsFaced, 1.0, 30.0);
 	float cellT = (bf - 1.0) / 29.0;
 	vec3 posWall = vec3(
@@ -231,7 +241,7 @@ void main() {
 		(h3 - 0.5) * 0.25
 	);
 
-	// ---- Morph with per-point stagger so the field streams, not teleports.
+	// morph with per-point stagger so the field streams, not teleports
 	float delay = h3 * 0.55;
 	float t = clamp(uProgress * 1.55 - delay, 0.0, 1.0);
 	t = t * t * (3.0 - 2.0 * t);
@@ -241,11 +251,8 @@ void main() {
 		t
 	);
 
-	// ---- Subset re-sort: matching points fly from the base layout into their
-	//      season's firework column, arcing up on the way. Staggered by the
-	//      SAME per-point delay as the layout morph, so every point traces one
-	//      continuous path (object constancy); reversible via uResortEngage 1→0.
-	if (matchResort) {
+	// subset re-sort flight — matching points arc into their season's column
+	if (o.matchResort) {
 		float re = clamp(uResortEngage * 1.55 - delay, 0.0, 1.0);
 		re = re * re * (3.0 - 2.0 * re);
 		vec3 posCol = vec3(
@@ -254,45 +261,119 @@ void main() {
 			(h3 - 0.5) * 0.25
 		);
 		pos = mix(pos, posCol, re);
-		pos.y += 4.0 * re * (1.0 - re) * uResortLift; // lift arc, symmetric both legs
+		pos.y += 4.0 * re * (1.0 - re) * uResortLift;
 	}
 
-	float alphaMul = 1.0;
-
-	// ---- Assembly stream-in: chronological reveal by point index. A point
-	//      is hidden until the reveal frontier reaches it, rains in across
-	//      the RAIN_W window, then sits. At uReveal == 1 every point has
-	//      landed (frontier maps to 1 + RAIN_W), so morphing assembly→free
-	//      afterwards is a no-op on positions.
+	// assembly stream-in: chronological reveal by point index
+	o.assemblyAlpha = 1.0;
+	o.culled = false;
 	if (uLayoutA == 3 || uLayoutB == 3) {
 		float ci = position.x * uInvN;
 		float d = (uReveal * (1.0 + RAIN_W) - ci) / RAIN_W;
 		if (d <= 0.0) {
-			// not yet bowled into the field — cull before rasterization
-			vColor = vec3(0.0);
-			vGlow = 0.0;
-			vAlpha = 0.0;
-			gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
-			gl_PointSize = 0.0;
-			return;
+			o.culled = true;
 		} else if (d < 1.0) {
 			float fall = 1.0 - d;
 			pos.y += fall * fall * uHalfH * 1.35; // rains in from above
-			alphaMul *= d;
+			o.assemblyAlpha *= d;
 		}
 	}
 
-	// ---- Color from the outcome class (decoded above).
+	// base point size from the outcome class (wicket takes priority)
+	float sizeMul = 1.0;
+	if (o.wicket) sizeMul = 1.45;
+	else if (o.outcome == 3) sizeMul = 1.5;
+	else if (o.outcome == 4) sizeMul = 1.9;
+	o.baseSizeMul = sizeMul;
+
+	// subset highlight — the LIFT is position (shared); the color is per-shader
+	o.hlMatch = false;
+	if (uHlClass >= 0.0) {
+		int hc = int(uHlClass + 0.5);
+		bool m = (hc == 6) ? o.wicket : (o.outcome == hc);
+		if (m && uHlSkipWpl > 0.5 && o.wpl) m = false;
+		o.hlMatch = m;
+		if (m) pos.y += uHlLift;
+	}
+
+	o.reAmt = resortOn ? clamp(uResortEngage, 0.0, 1.0) : 0.0;
+	o.filterPass = passesFilter(gi);
+	o.pos = pos;
+	return o;
+}
+`;
+}
+
+export function makeVertexShader(groupCount: number, hasMatch = false): string {
+	return /* glsl */ `
+#define GROUP_COUNT ${groupCount}
+#define RAIN_W ${ASSEMBLY_RAIN_WINDOW}
+#define WALLHEAT_NEUTRAL ${(WALLHEAT_NEUTRAL_BYTE / 255).toFixed(6)}
+${hasMatch ? '#define HAS_MATCH' : ''}
+
+${UNIFORMS_GLSL}
+${coreAttrsGlsl(hasMatch)}
+in float aWallHeat;           // era-relative intent 0..1 (normalized u8; neutral = 73/255)
+
+out vec3 vColor;
+out float vGlow;
+out float vAlpha;
+
+const vec3 C_DOT   = vec3(0.227, 0.263, 0.345); // #3a4358
+const vec3 C_ONE   = vec3(0.420, 0.478, 0.600); // #6b7a99
+const vec3 C_TWO   = vec3(0.490, 0.561, 0.690); // #7d8fb0
+const vec3 C_FOUR  = vec3(0.910, 0.639, 0.239); // #e8a33d
+const vec3 C_SIX   = vec3(1.000, 0.365, 0.227); // #ff5d3a
+const vec3 C_WKT   = vec3(0.851, 0.310, 0.420); // #d94f6b
+const vec3 C_XTRA  = vec3(0.333, 0.392, 0.498); // #55647f
+const vec3 C_TEAL  = vec3(0.180, 0.769, 0.714); // #2ec4b6
+
+${coreBodyGlsl()}
+
+// Era-relative "intent" ramp for the C1-2 thesis beat (blended by uWallHeatMix).
+// DIVERGING about WALLHEAT_NEUTRAL (= the 2008-2010 batter): cool deep-blue
+// below, neutral grey-blue at it, amber → six-red well above. Reuses the
+// outcome palette; the ONE authored place hue encodes a quantity, gated to the beat.
+vec3 heatColor(float h) {
+	if (h <= WALLHEAT_NEUTRAL) {
+		float t = clamp(h / WALLHEAT_NEUTRAL, 0.0, 1.0);
+		return mix(C_DOT, C_TWO, t);
+	}
+	float t = (h - WALLHEAT_NEUTRAL) / (1.0 - WALLHEAT_NEUTRAL);
+	if (t < 0.5) return mix(C_TWO, C_FOUR, t / 0.5);
+	return mix(C_FOUR, C_SIX, clamp((t - 0.5) / 0.5, 0.0, 1.0));
+}
+
+void main() {
+	Core core = computeCore();
+
+	// assembly: not yet bowled into the field — cull before rasterization
+	if (core.culled) {
+		vColor = vec3(0.0);
+		vGlow = 0.0;
+		vAlpha = 0.0;
+		gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+		gl_PointSize = 0.0;
+		return;
+	}
+
+	vec3 pos = core.pos;
+	float alphaMul = core.assemblyAlpha;
+	int outcome = core.outcome;
+	bool wicket = core.wicket;
+	bool wpl = core.wpl;
+	float sizeMul = core.baseSizeMul;
+
+	// ---- Color from the outcome class.
 	vec3 c;
 	float glow = 0.0;
-	float sizeMul = 1.0;
-	if (wicket)             { c = C_WKT;  sizeMul = 1.45; }
-	else if (outcome == 0)  { c = C_DOT; }
-	else if (outcome == 1)  { c = C_ONE; }
-	else if (outcome == 2)  { c = C_TWO; }
-	else if (outcome == 3)  { c = C_FOUR; sizeMul = 1.5; }
-	else if (outcome == 4)  { c = C_SIX;  sizeMul = 1.9; glow = 1.0; }
-	else                    { c = C_XTRA; }
+	if (wicket)            { c = C_WKT; }
+	else if (outcome == 0) { c = C_DOT; }
+	else if (outcome == 1) { c = C_ONE; }
+	else if (outcome == 2) { c = C_TWO; }
+	else if (outcome == 3) { c = C_FOUR; }
+	else if (outcome == 4) { c = C_SIX; glow = 1.0; }
+	else                   { c = C_XTRA; }
 
 	// WPL points shift toward the cool teal family — two populations.
 	if (wpl) {
@@ -300,28 +381,14 @@ void main() {
 		c = mix(c, C_TEAL, k);
 	}
 
-	// ---- Era-relative intent recolor (C1-2 thesis beat). A separate blend ON
-	//      TOP of the base outcome colour, gated by uWallHeatMix: at 0 the mix
-	//      is a no-op so the establishing outcome shot AND the C1-5 fireworks
-	//      two-tone are pixel-identical; at 1 every ball is recoloured by how far
-	//      its cell beats the 2008-2010 batter at the SAME ball-index, cancelling
-	//      the wall's horizontal acceleration gradient so the early-ball corner
-	//      ignites bottom→top. Runs before highlight/re-sort/team, but the beat is
-	//      staged alone (uResort* == 0, no highlight while it animates), and this
-	//      is 0 while the fireworks re-sort/tint — so the paths never interact.
+	// ---- Era-relative intent recolor (C1-2 thesis beat), gated by uWallHeatMix.
 	if (uWallHeatMix > 0.0) {
 		c = mix(c, heatColor(aWallHeat), uWallHeatMix);
 	}
 
-	// ---- Subset highlight: matching points lift and brighten; others dim.
-	//      uHlSkipWpl keeps WPL points out of the subset (they take the
-	//      others path instead — C1-5: the WPL's sixes stay on its shelf).
+	// ---- Subset highlight color (the pos.y lift already happened in core).
 	if (uHlClass >= 0.0) {
-		int hc = int(uHlClass + 0.5);
-		bool m = (hc == 6) ? wicket : (outcome == hc);
-		if (m && uHlSkipWpl > 0.5 && wpl) m = false;
-		if (m) {
-			pos.y += uHlLift;
+		if (core.hlMatch) {
 			c *= 1.0 + uHlBoost;
 			sizeMul *= 1.0 + 0.35 * uHlBoost;
 			glow = max(glow, uHlBoost * 0.5);
@@ -331,15 +398,11 @@ void main() {
 		}
 	}
 
-	// ---- Subset re-sort recolor: matching points brighten as they lift and
-	//      carry the two-tone LUMINANCE split (top-10 specialist bright vs rest
-	//      dim, within the six-ember hue — never a second hue); everything else
-	//      dims hard so the columns read on a cleared stage. Weighted by engage
-	//      so it fades in with the flight and back out on the settle.
-	if (resortOn) {
-		float reAmt = clamp(uResortEngage, 0.0, 1.0);
-		if (matchResort) {
-			float tone = mix(1.0, top10 ? 1.4 : 0.5, uResortTint);
+	// ---- Subset re-sort recolor (two-tone LUMINANCE split, weighted by engage).
+	if (uResortClass >= 0.0) {
+		float reAmt = core.reAmt;
+		if (core.matchResort) {
+			float tone = mix(1.0, core.top10 ? 1.4 : 0.5, uResortTint);
 			c *= mix(1.0, tone, reAmt);
 			glow = max(glow, 0.4 * reAmt);
 			sizeMul *= 1.0 + 0.15 * reAmt;
@@ -354,8 +417,16 @@ void main() {
 	c *= uDim;
 	if (wpl) c *= uWplDim;
 
-	// ---- Team ignite: the reader's franchise renders in team color and
-	//      resists the dims — personalization survives every scene state.
+	// ---- Facet filter: points failing an active facet are hidden/ghosted.
+	//      (uFilterDim is 0 to hide, small to ghost, 1 no-op — and is a no-op
+	//      whenever no facet is active because filterPass is then always true.)
+	if (!core.filterPass) {
+		alphaMul *= uFilterDim;
+		c *= mix(0.5, 1.0, uFilterDim);
+	}
+
+	// ---- Team ignite: the reader's franchise renders in team color and resists
+	//      the dims — personalization survives every scene state.
 	if (uPickedTeam >= 0.0 && abs(aTeam - uPickedTeam) < 0.5) {
 		c = mix(c, uTeamColor, 0.82);
 		sizeMul *= 1.25;
@@ -397,5 +468,67 @@ void main() {
 	}
 	if (alpha < 0.02) discard;
 	fragColor = vec4(col, alpha);
+}
+`;
+
+/* ---------------------------------------------------------------------------
+ * GPU picking (R1b §11). The pick vertex shader shares `computeCore()` so a
+ * point sits at the exact same place it does visually and is culled when it is
+ * filtered out (never pickable) or not yet assembled. The fragment writes the
+ * point index encoded as 24-bit RGB (index+1, so 0 reads back as "no point").
+ * Points render as SOLID squares (no round mask) so even 1-2px points paint a
+ * pixel; the readback scans outward from the tap for the nearest painted pixel
+ * (the pick radius). Rendered on demand to a tiny offscreen target — one render
+ * + one readback per tap, never a loop (idle GPU stays ~0).
+ * ------------------------------------------------------------------------- */
+
+export function makePickVertexShader(groupCount: number, hasMatch = false): string {
+	return /* glsl */ `
+#define GROUP_COUNT ${groupCount}
+#define RAIN_W ${ASSEMBLY_RAIN_WINDOW}
+${hasMatch ? '#define HAS_MATCH' : ''}
+
+${UNIFORMS_GLSL}
+${coreAttrsGlsl(hasMatch)}
+
+out highp vec3 vPickColor;
+
+${coreBodyGlsl()}
+
+void main() {
+	Core core = computeCore();
+
+	// Filtered-out or not-yet-assembled points are NOT pickable → cull offscreen.
+	if (core.culled || !core.filterPass) {
+		gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+		gl_PointSize = 0.0;
+		vPickColor = vec3(0.0);
+		return;
+	}
+
+	// Encode (index + 1) into 24-bit RGB; 0 is reserved for the background.
+	float id1 = position.x + 1.0;
+	float r = mod(id1, 256.0);
+	float g = mod(floor(id1 / 256.0), 256.0);
+	float b = mod(floor(id1 / 65536.0), 256.0);
+	vPickColor = vec3(r, g, b) / 255.0;
+
+	gl_Position = projectionMatrix * modelViewMatrix * vec4(core.pos, 1.0);
+	// inflate small points a touch so each reliably paints ≥1px in the pick patch
+	gl_PointSize = uPointScale * max(core.baseSizeMul, 1.6);
+}
+`;
+}
+
+export const pickFragmentShader = /* glsl */ `
+precision highp float;
+
+in highp vec3 vPickColor;
+
+out vec4 fragColor;
+
+void main() {
+	// solid square (no round mask) → maximal hit area; exact index bytes out
+	fragColor = vec4(vPickColor, 1.0);
 }
 `;

@@ -58,6 +58,14 @@ export interface FieldData {
 	 * (uploaded NORMALIZED to 0..1). Same point order as ballsFaced.
 	 */
 	wallHeat: Uint8Array;
+	/**
+	 * per-delivery match index (same point order), length nPoints — OPTIONAL:
+	 * present only when the pipeline ships `match_index.u16` (see CONTRACT §12.4).
+	 * Enables the `uFilterMatch` facet and the exact-match tooltip on any tap.
+	 * When absent, match filtering falls back to a contiguous point-index RANGE
+	 * (deliveries of a match ARE contiguous in point order), which needs no buffer.
+	 */
+	matchIndex?: Uint16Array;
 	/** true when this is the dev-only synthetic fallback, not pipeline output */
 	synthetic: boolean;
 }
@@ -119,6 +127,56 @@ export const ATTR_TOP10_BIT = 32;
  * fireworks: 19 columns, WPL sixes stay on the shelf); 'all' = every group.
  */
 export type ResortColumns = 'ipl' | 'all';
+
+/* ---------------------------------------------------------------------------
+ * Facet filter (R1b §12 — the Bowl instrument). A point is VISIBLE iff it
+ * passes EVERY active facet (team AND season AND match); failing points are
+ * hidden or ghosted per `mode`, and are removed from the GPU pick pass so
+ * only visible balls are tappable. Every facet is independent — `null` means
+ * that facet imposes no constraint.
+ * ------------------------------------------------------------------------- */
+
+/** How filtered-OUT points render: fully hidden (α→0) or ghosted (dim). */
+export type FilterMode = 'hide' | 'dim';
+
+/** The luminance×alpha multiplier applied to filtered-OUT points, per mode. */
+export const FILTER_DIM: Record<FilterMode, number> = { hide: 0, dim: 0.09 };
+
+/**
+ * The imperative filter the sandbox scene drives (via `field.setFilter`). Maps
+ * onto the `FieldRenderState.filter*` uniforms. R1b ships TEAM + SEASON only,
+ * plus the ONE famous-match preset expressed as `matchRange` (or `matchIndex`
+ * once the pipeline ships `match_index.u16`). Everything else is deferred (R6).
+ */
+export interface FieldFilter {
+	/** teams.json id to keep, or null = all teams */
+	team: number | null;
+	/** season YEAR to keep (matches any league's group for that year), or null = all */
+	season: number | null;
+	/**
+	 * match index to keep, or null = all. Requires the OPTIONAL `match_index.u16`
+	 * buffer (FieldData.matchIndex); a no-op when that buffer isn't loaded — use
+	 * `matchRange` instead for the R1b preset. See CONTRACT §12.4.
+	 */
+	matchIndex: number | null;
+	/**
+	 * contiguous point-index range [lo, hi) to keep, or null = no range. Matches
+	 * a single game with zero new buffers because a match's deliveries ARE
+	 * contiguous in point order — the working path for R1b's famous-match preset.
+	 */
+	matchRange: readonly [number, number] | null;
+	/** how filtered-out points render (default 'dim') */
+	mode: FilterMode;
+}
+
+/** The neutral filter — every facet inactive (the whole field visible). */
+export const NO_FILTER: FieldFilter = {
+	team: null,
+	season: null,
+	matchIndex: null,
+	matchRange: null,
+	mode: 'dim'
+};
 
 /**
  * One fully-resolved GPU state for the persistent field. The story
@@ -189,6 +247,23 @@ export interface FieldRenderState {
 	resortTint: number;
 	/** luminance × for non-matching points while the re-sort is engaged */
 	resortOthersDim: number;
+
+	/* ---- facet filter (§12 capability — the Bowl instrument) ----------------
+	 * Resolved uniform values. A point passes iff it clears EVERY active facet;
+	 * failing points are dimmed by `filterDim` and dropped from the pick pass.
+	 * All facets default to inactive, so R1a scenes are unaffected. */
+	/** team id to keep, or -1 = team facet inactive */
+	filterTeam: number;
+	/** season YEAR to keep, or -1 = season facet inactive */
+	filterSeason: number;
+	/** match index to keep, or -1 = inactive (needs the match_index buffer) */
+	filterMatchIndex: number;
+	/** point-index range lo (inclusive); the range facet is active iff hi > lo */
+	filterRangeLo: number;
+	/** point-index range hi (exclusive) */
+	filterRangeHi: number;
+	/** luminance×alpha for FILTERED-OUT points (0 hide … 1 no-op) */
+	filterDim: number;
 }
 
 export const DEFAULT_RENDER_STATE: FieldRenderState = {
@@ -212,5 +287,11 @@ export const DEFAULT_RENDER_STATE: FieldRenderState = {
 	resortEngage: 0,
 	resortLift: 0,
 	resortTint: 0,
-	resortOthersDim: 1
+	resortOthersDim: 1,
+	filterTeam: -1,
+	filterSeason: -1,
+	filterMatchIndex: -1,
+	filterRangeLo: 0,
+	filterRangeHi: 0,
+	filterDim: 1
 };

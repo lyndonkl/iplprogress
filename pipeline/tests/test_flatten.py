@@ -275,7 +275,7 @@ class TestColumnar(unittest.TestCase):
             {
                 "season", "league", "innings", "over", "ball_index_in_over",
                 "batter", "bowler", "batting_team", "runs_batter", "runs_total",
-                "outcome", "wicket",
+                "outcome", "wicket", "wicket_kind", "match_index",
             },
         )
         for name, values in arrays.items():

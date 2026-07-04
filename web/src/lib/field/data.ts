@@ -42,6 +42,11 @@ export async function loadFieldData(baseUrl: string): Promise<FieldData> {
 		// little-endian, but decode defensively anyway.
 		const groupIds = decodeU16LE(gidBuf);
 
+		// OPTIONAL per-point match index (R1b §12): enables the uFilterMatch facet
+		// and the exact-match tooltip. Absent until the pipeline ships it — fetch
+		// non-fatally so R1a and the range-based match preset keep working.
+		const matchIndex = await fetchOptionalU16(`${baseUrl}/data/match_index.u16`, n);
+
 		return {
 			nPoints: n,
 			meta,
@@ -52,6 +57,7 @@ export async function loadFieldData(baseUrl: string): Promise<FieldData> {
 			ballsFaced: new Uint8Array(bfBuf),
 			team: new Uint8Array(teamBuf),
 			wallHeat: new Uint8Array(heatBuf),
+			matchIndex,
 			synthetic: false
 		};
 	} catch (err) {
@@ -84,6 +90,30 @@ async function fetchBuffer(url: string): Promise<ArrayBuffer> {
 	const type = res.headers.get('content-type') ?? '';
 	if (type.includes('text/html')) throw new Error(`${url} → served HTML, not binary`);
 	return res.arrayBuffer();
+}
+
+/**
+ * Fetch an OPTIONAL little-endian Uint16 buffer of exactly `n` entries. Returns
+ * undefined (never throws) when the file is missing or the wrong size — the
+ * caller treats absence as "facet unavailable", so a not-yet-shipped pipeline
+ * artifact degrades gracefully rather than breaking the whole field.
+ */
+async function fetchOptionalU16(url: string, n: number): Promise<Uint16Array | undefined> {
+	try {
+		const res = await fetch(url);
+		if (!res.ok) return undefined;
+		const type = res.headers.get('content-type') ?? '';
+		if (type.includes('text/html')) return undefined; // dev server 404 → index.html
+		const buf = await res.arrayBuffer();
+		if (buf.byteLength !== n * 2) {
+			if (import.meta.env.DEV)
+				console.warn(`[every-ball-ever] ${url}: byteLength ${buf.byteLength} ≠ 2×${n} — ignoring`);
+			return undefined;
+		}
+		return decodeU16LE(buf);
+	} catch {
+		return undefined;
+	}
 }
 
 function decodeU16LE(buf: ArrayBuffer): Uint16Array {

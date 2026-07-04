@@ -18,8 +18,9 @@ python3 pipeline/flatten.py \
 ```
 
 Order matters: `flatten.py` emits the point stream + per-point attributes + columnar
-dataset and writes `meta.json`; `scenes.py` emits `scenes/coldopen.json` +
-`scenes/ch1.json`; `payoff_harness.py` emits `payoff/ch1.json` (each records its sizes
+dataset + `matches.json` and writes `meta.json`; `scenes.py` emits `scenes/coldopen.json`
++ `scenes/ch1.json` + `scenes/sandbox.json` (the R1b preset); `payoff_harness.py` emits
+`payoff/ch1.json` (each records its sizes
 in `meta.json`); `ledger.py` audits everything on disk against the blueprint §2
 budgets. The harness and the ledger exit non-zero on failure. The whole build runs in
 seconds and is **byte-for-byte deterministic** (gzip level 9, `mtime=0`; JSON compact,
@@ -31,7 +32,7 @@ new artifacts key-sorted) — verified by rebuilding and diffing checksums.
 |---|---|
 | `canon.py` | Engine #4 canonicalization: 62 raw venue strings → 37 canonical grounds, franchise renames (DD→DC, KXIP→PBKS, RCB Bangalore→Bengaluru in both leagues, Rising Pune unified; Gujarat **Lions ≠ Titans ≠ Giants**), season normalization (`'2007/08'`→2008 … — always the year the cricket was played, verified equal to `dates[0]` year for all 1331 matches), D/L flag, super-over innings detection, **and the R1a 20-franchise id table** (`TEAMS`/`team_id`): league-scoped ids 0–19 (IPL's 15 sorted by name, then the WPL's 5 — the WPL DC/MI/RCB are distinct franchises with their own ids), approximate-brand kit colors, `active` flags (Deccan Chargers, Gujarat Lions, Kochi, Pune Warriors, Rising Pune Supergiant are `false`). Every lookup raises `KeyError` on unmapped input. |
 | `flatten.py` | One chronological pass emitting all per-point contract artifacts (see below). |
-| `scenes.py` | R1a scene aggregates: `scenes/coldopen.json` (You-Draw-It truth series + corpus facts) and `scenes/ch1.json` (ignition, out-rate, defiers, sixes, aerial ledger, WPL beat). |
+| `scenes.py` | R1a/R1b scene aggregates: `scenes/coldopen.json` (You-Draw-It truth series + corpus facts), `scenes/ch1.json` (ignition, out-rate, defiers, sixes, aerial ledger, WPL beat), and `scenes/sandbox.json` (R1b minimal-bowl preset + team/season facets + tap-a-ball tooltip roster). |
 | `payoff_harness.py` | Payoff-card snapshot harness: emits + asserts the 16 Chapter-1 variants (R1a full spec). |
 | `ledger.py` | Payload ledger vs the §2 budgets; prints the table; writes `ledger.json`. |
 | `tests/` | `unittest` snapshot tests (see below). |
@@ -73,7 +74,9 @@ index, over, delivery index):
 | `teams.json` **(R1a)** | the 20-franchise table `[{id, name, short, league, color, active}]` (`canon.TEAMS` verbatim; colors are recognizable approximate kit hexes, not official style guides). |
 | `scenes/coldopen.json` **(R1a)** | per season+league: `matches`, `deliveries`, **`totals200`**, **`avg_first_innings_full`** (+ its innings count); plus `corpus` facts `{points_rendered: 316199, corpus_total: 316388, superover_balls: 189, matches: 1331, players: 938, ipl_seasons: 19, wpl_seasons: 4}` and a `definitions` block. |
 | `scenes/ch1.json` **(R1a)** | Chapter 1: `ball_index_axis` (the shared balls-faced x-axis convention — per-ball curves end at exactly ball 30, NOT a capped `30+` bucket; only the wall caps — so scenes label the strips' right edge `30` and the wall's `30+`), `ignition` (SR per balls-faced index 1..30 per era band + first-10-ball SR per season per league), `outrate` (KM-style hazard per index 1..30 per band, sample sizes, first-10 headline), `defiers` (top-5 per ball index **1/3/5/10/15/20** per band — balls 1 & 3 added so the strip's tap set is fully data-backed), `sixes` (per season, incl. **`legal_balls` + `balls_per_six`** so "a six every 21 → every 12" traces to an artifact), `aerial` (per band, with caveat), `wpl_beat` (incl. the League Maturity Clock). |
-| `columnar.json.gz` | sandbox dataset: 12 parallel arrays over the same point order + `dicts` mapping codes → names. gzip level 9 |
+| `columnar.json.gz` | sandbox dataset: **14** parallel arrays over the same point order + `dicts` mapping codes → names. R1b adds `match_index` (→ `matches.json`, so a tapped ball resolves to its match) and `wicket_kind` (dict-encoded; code 0 = `""` for non-wicket balls, so `wicket_kind != 0` ⟺ `wicket == 1`). gzip level 9 |
+| `matches.json` **(R1b)** | array indexed by `match_index` (== point-stream order), each `{teams:[a,b] (canonical), season, date, stage ("Final"/"Qualifier 1"/"Eliminator"/"Match N"), venue, city, result_text ("Mumbai Indians won by 1 run"), league}`. 1,331 rows. The tooltip's **opponent** is the team in `teams` that is not the tapped ball's `batting_team`. |
+| `scenes/sandbox.json` **(R1b)** | the minimal-bowl descriptor: `preset` `{match_index, label, blurb}` (the 2019 IPL Final — MI beat CSK by 1 run — resolved by league+season+stage+teams+margin, never a hard-coded index), `facets` (**team + season only**, pointing at `teams.json`/`groups.json`), and `tooltip.fields` (the tap-a-ball field roster). Everything beyond team/season facets + one preset + tooltip is deferred to R6/R7. |
 | `payoff/ch1.json` | 16 Chapter-1 payoff variants, R1a full spec (below) |
 | `ledger.json` | the payload audit (build report, excluded from its own budget math) |
 
@@ -163,17 +166,20 @@ exist, are non-degenerate under the extended spec, and exits non-zero otherwise.
 
 - **Cold-open critical set** (`meta.json` + `groups.json` + `group_ids.u16` +
   `attrs.u8` + **`ballsfaced.u8` + `team.u8` + `teams.json` + `scenes/coldopen.json`**
-  — everything needed before the cold open plays): **≤ 3 MB gz → actual 259,110 B gz
-  (~0.26 MB)**. Largest members: ballsfaced.u8 139,311 B gz, attrs.u8 112,505 B gz;
-  team.u8 compresses to 4,680 B gz. (The season-blocked reorder shifts these gz
-  sizes a few hundred bytes vs the pre-fix build — the byte sequence changed, the
-  budget didn't.)
-- **Chapter 1** (`scenes/ch1.json` + `payoff/ch1.json`): ≤ 2 MB gz → actual 11,409 B gz
-  (grew from 9,552 B: the balls-1/3 defiers, per-season `legal_balls`/`balls_per_six`,
-  `ball_index_axis`, and the payoff `team_pair`/`honesty` fields).
-- Sandbox columnar ≤ 2 MB gz → actual 625,569 B gz (also under the blueprint's ~0.8 MB
-  target).
-- Full read-through ≤ 25 MB gz → actual 896,088 B gz (~0.90 MB).
+  `wallheat.u8` +
+  — everything needed before the cold open plays): **≤ 3 MB gz → actual 405,200 B gz
+  (~0.41 MB)**. Largest members: wallheat.u8 146,050 B gz, ballsfaced.u8 139,311 B gz,
+  attrs.u8 112,505 B gz; team.u8 compresses to 4,680 B gz.
+- **Chapter 1** (`scenes/ch1.json` + `payoff/ch1.json`): ≤ 2 MB gz → actual 12,113 B gz
+  (the balls-1/3 defiers, per-season `legal_balls`/`balls_per_six`, `ball_index_axis`,
+  and the payoff `team_pair`/`honesty` fields).
+- **R1b sandbox dataset** (`columnar.json.gz` + `matches.json` + `scenes/sandbox.json`,
+  lazy-loaded, never in the cold-open set): ≤ 2 MB gz → actual 677,157 B gz. columnar
+  655,235 B gz (grew ~30 KB gz for the `match_index`/`wicket_kind` columns — both
+  compress well: match_index runs constant within a match, wicket_kind is ~98 % zeros),
+  matches.json 20,686 B gz, sandbox.json 1,236 B gz. Still under the blueprint's
+  ~0.8 MB target.
+- Full read-through ≤ 25 MB gz → actual 1,094,470 B gz (~1.09 MB).
 - The `ledger.py` rows enumerate exactly the shipped filenames (no phantom
   `draw/truth.json` / `ch1/outrate.json` rows — those never shipped; the R1a scene
   data lives in `scenes/coldopen.json` + `scenes/ch1.json`).
@@ -181,7 +187,7 @@ exist, are non-degenerate under the extended spec, and exits non-zero otherwise.
 ## Tests
 
 ```sh
-python3 -m unittest discover -s pipeline/tests -q     # 68 tests
+python3 -m unittest discover -s pipeline/tests -q     # 93 tests
 ```
 
 - `test_canon.py` — canonicalization tables exhaustive over the corpus in **both**
@@ -216,6 +222,18 @@ python3 -m unittest discover -s pipeline/tests -q     # 68 tests
   maturity clocks, designed sparsity for born-late franchises, and the **discrete
   `team_pair`/`honesty` fields** (non-empty honesty ⟺ small_sample; the WPL headline is
   `team_pair + " " + honesty`, no regex).
+- `test_r1b.py` — the sandbox data contract: `matches.json` length == **1,331** distinct
+  matches with well-formed rows (canonical `teams`, `date` year == `season`, gazetteer
+  `city`, 23 Finals / 1,249 "Match N" / 17 ties / 9 no-results) and the **inline table
+  == `build_matches()`** equivalence; the `match_index` column (length n_points, every
+  value a valid match, monotone non-decreasing, Uint16-range, agreeing delivery-for-
+  delivery with the columnar league/season and the opponent-derivation); the
+  `wicket_kind` column (code 0 == `""`, `wicket_kind != 0` ⟺ `wicket == 1` corpus-wide);
+  a **spot-checked known ball** — the 2019 IPL Final (1181768) flattened by hand and
+  matched delivery-for-delivery against its `match_index` slice, incl. the last ball
+  (Malinga to SN Thakur, lbw, opponent MI, "Mumbai Indians won by 1 run"); and the
+  `scenes/sandbox.json` preset resolving **by identity** (league+season+stage+teams+
+  margin) to that same match, with team+season-only facets and the tooltip field roster.
 
 Snapshot constants live at the top of each test file; a new Cricsheet drop that changes
 the corpus must update them consciously.

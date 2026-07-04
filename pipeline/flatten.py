@@ -41,7 +41,15 @@ actual point buffer, so the order in these buffers IS the assembly order).
                     (ignition.wallheat); see wallheat.py.
   teams.json        the 20-franchise table: [{id, name, short, league,
                     color, active}] (canon.TEAMS verbatim).
-  columnar.json.gz  sandbox dataset: 12 parallel arrays + name dictionaries
+  matches.json      R1b sandbox: array indexed by match_index (== point-stream
+                    order), each {teams:[a,b] (canonical), season, date, stage
+                    ("Final"/"Qualifier 1"/"Eliminator"/"Match N"), venue,
+                    city, result_text ("Mumbai Indians won by 1 run"), league}.
+                    1,331 rows. A tapped ball's match_index -> its match; the
+                    opponent is the team in `teams` that is not batting_team.
+  columnar.json.gz  sandbox dataset: 14 parallel arrays + name dictionaries
+                    (adds match_index -> matches.json, and wicket_kind, dict-
+                    encoded, code 0 = "" for non-wicket balls)
 
 Layouts are procedural / derived client-side — zero position buffers are
 shipped (blueprint §2). Stdlib only. Deterministic output (gzip mtime=0).
@@ -156,6 +164,99 @@ class DictEncoder:
         return c
 
 
+# ---------------------------------------------------------------------------
+# Matches table (R1b sandbox: tap-a-ball -> the exact match)
+# ---------------------------------------------------------------------------
+
+
+def match_stage(info: dict) -> str:
+    """Human stage label for a match: playoff name, else 'Match N'.
+
+    Cricsheet's event block carries a `stage` on the 82 playoff matches
+    ('Final', 'Qualifier 1/2', 'Eliminator', 'Semi Final', 'Elimination
+    Final', '3rd Place Play-Off') and a `match_number` on the 1,249 league
+    games; the two are mutually exclusive over the corpus (82 + 1,249 =
+    1,331). Stage wins when present so a tapped final reads 'Final', not a
+    number.
+    """
+    ev = info.get("event", {})
+    stage = ev.get("stage")
+    if stage:
+        return str(stage)
+    number = ev.get("match_number")
+    if number is not None:
+        return f"Match {number}"
+    return "Match"
+
+
+def match_result_text(info: dict) -> str:
+    """A one-line result sentence for the tooltip (canonical team names).
+
+    Wins read 'Team won by N run(s)/wicket(s)'; the 23 D/L results append
+    ' (D/L)'; the 17 ties name the Super-Over winner from outcome.eliminator;
+    the 9 no-results read 'No result'. Team names are canonicalized so a
+    tooltip's winner string matches the batting_team dictionary.
+    """
+    outcome = info.get("outcome", {})
+    result = outcome.get("result")
+    if result == "no result":
+        return "No result"
+    if result == "tie":
+        elim = outcome.get("eliminator")
+        if elim:
+            return f"Match tied — {canon.canon_team(elim)} won the Super Over"
+        return "Match tied"
+    dl = " (D/L)" if "D/L" in (outcome.get("method") or "") else ""
+    winner = outcome.get("winner")
+    by = outcome.get("by", {})
+    if winner and "runs" in by:
+        r = by["runs"]
+        return f"{canon.canon_team(winner)} won by {r} run{'' if r == 1 else 's'}{dl}"
+    if winner and "wickets" in by:
+        w = by["wickets"]
+        return f"{canon.canon_team(winner)} won by {w} wicket{'' if w == 1 else 's'}{dl}"
+    return "Result unavailable"
+
+
+def match_record(info: dict, league: str) -> dict:
+    """One matches.json row (fields fixed by the R1b tooltip contract).
+
+    teams are canonical (so opponent = the team in `teams` that is not the
+    tapped ball's batting_team resolves by name); city comes from the
+    canonical-ground gazetteer (canon.GROUND_CITY) rather than the raw,
+    sometimes-absent info.city, keeping it exhaustive and deterministic.
+    """
+    venue = canon.canon_venue(info["venue"])
+    return {
+        "teams": [canon.canon_team(t) for t in info["teams"]],
+        "season": canon.canon_season(info),
+        "date": str(info["dates"][0]),
+        "stage": match_stage(info),
+        "venue": venue,
+        "city": canon.GROUND_CITY[venue],
+        "result_text": match_result_text(info),
+        "league": league,
+    }
+
+
+def build_matches(data_root: Path = canon.DATA_ROOT) -> list:
+    """The matches table; matches[i] is the match whose deliveries carry
+    match_index == i in the point stream.
+
+    A light pass over info blocks only, in the SAME season-blocked order as
+    build_stream (both iterate sorted_match_files), so scenes.py can resolve
+    the sandbox preset's match_index without re-flattening the ball stream.
+    build_stream builds the identical list inline via match_record; the tests
+    assert the two agree.
+    """
+    matches = []
+    for _date, _mid, league, path in sorted_match_files(data_root):
+        with open(path) as fh:
+            info = json.load(fh)["info"]
+        matches.append(match_record(info, league))
+    return matches
+
+
 def build_stream(data_root: Path = canon.DATA_ROOT):
     """Single chronological pass producing every per-point structure."""
     groups = [
@@ -173,14 +274,21 @@ def build_stream(data_root: Path = canon.DATA_ROOT):
     team_u8 = bytearray()
 
     batters, bowlers, teams = DictEncoder(), DictEncoder(), DictEncoder()
+    # Seed code 0 = "" so every NON-wicket ball's wicket_kind is 0 (the vast
+    # majority, and it gzips to ~nothing); wicket balls carry the real kind.
+    wicket_kinds = DictEncoder()
+    wicket_kinds.code("")
+    matches = []  # matches[match_index] == this match's record
     col = {
         "season": [], "league": [], "innings": [], "over": [],
         "ball_index_in_over": [], "batter": [], "bowler": [],
         "batting_team": [], "runs_batter": [], "runs_total": [],
-        "outcome": [], "wicket": [],
+        "outcome": [], "wicket": [], "wicket_kind": [], "match_index": [],
     }
 
-    for _date, _mid, league, path in sorted_match_files(data_root):
+    for match_index, (_date, _mid, league, path) in enumerate(
+        sorted_match_files(data_root)
+    ):
         with open(path) as fh:
             match = json.load(fh)
         info = match["info"]
@@ -189,6 +297,7 @@ def build_stream(data_root: Path = canon.DATA_ROOT):
         wpl = league == "wpl"
         canon.canon_venue(info["venue"])  # exhaustiveness enforced at build time
         canon.is_dl(info)
+        matches.append(match_record(info, league))
 
         innings_no = 0
         for innings in match.get("innings", []):
@@ -223,14 +332,20 @@ def build_stream(data_root: Path = canon.DATA_ROOT):
                     col["runs_batter"].append(dl["runs"]["batter"])
                     col["runs_total"].append(dl["runs"]["total"])
                     col["outcome"].append(outcome_class(dl))
-                    col["wicket"].append(1 if dl.get("wickets") else 0)
+                    wkts = dl.get("wickets")
+                    col["wicket"].append(1 if wkts else 0)
+                    col["wicket_kind"].append(
+                        wicket_kinds.code(wkts[0]["kind"]) if wkts else 0
+                    )
+                    col["match_index"].append(match_index)
 
     dicts = {
         "batter": batters.names,
         "bowler": bowlers.names,
         "batting_team": teams.names,
+        "wicket_kind": wicket_kinds.names,
     }
-    return groups, group_ids, attrs, col, dicts, ballsfaced, team_u8
+    return groups, group_ids, attrs, col, dicts, ballsfaced, team_u8, matches
 
 
 # ---------------------------------------------------------------------------
@@ -250,13 +365,18 @@ def compact_json(obj, *, sort_keys: bool = False) -> bytes:
 
 
 def main(out_root: Path = canon.OUT_ROOT) -> dict:
-    groups, group_ids, attrs, col, dicts, ballsfaced, team_u8 = build_stream()
+    groups, group_ids, attrs, col, dicts, ballsfaced, team_u8, matches = build_stream()
     n_points = len(attrs)
     assert len(group_ids) == n_points
     assert all(len(v) == n_points for v in col.values())
     assert sum(g["count"] for g in groups) == n_points
     assert len(ballsfaced) == n_points
     assert len(team_u8) == n_points
+    # Every match_index indexes a real match (0 <= mi < |matches|); the table
+    # spans the whole corpus. The stronger "inline table == build_matches()"
+    # equivalence and the 1,331 count are asserted in tests/test_r1b.py.
+    assert 0 <= min(col["match_index"])
+    assert max(col["match_index"]) < len(matches)
 
     out_root.mkdir(parents=True, exist_ok=True)
     (out_root / "payoff").mkdir(parents=True, exist_ok=True)
@@ -292,6 +412,10 @@ def main(out_root: Path = canon.OUT_ROOT) -> dict:
     emit("team.u8", bytes(team_u8))
     emit("wallheat.u8", bytes(wallheat_bytes))
     emit("teams.json", compact_json(list(canon.TEAMS), sort_keys=True))
+    # matches[match_index] -> the exact match a tapped ball belongs to (R1b
+    # tooltip). List order IS match_index, so the list is never re-sorted;
+    # sort_keys only orders each record's keys for byte-determinism.
+    emit("matches.json", compact_json(matches, sort_keys=True))
     emit(
         "columnar.json.gz",
         compact_json(

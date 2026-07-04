@@ -10,8 +10,9 @@ them against the standing budgets:
     for the picker ignition) and scenes/coldopen.json (the You-Draw-It truth
     data) — <= 3 MB gz.
   * Per-chapter incremental payloads <= 2 MB gz each (here: Chapter 1 =
-    scenes/ch1.json + payoff/ch1.json; the sandbox columnar dataset held to
-    the same bar).
+    scenes/ch1.json + payoff/ch1.json; the R1b sandbox dataset —
+    columnar.json.gz + matches.json + scenes/sandbox.json — held to the same
+    bar, and lazy-loaded, never in the cold-open critical set).
   * Full read-through <= 25 MB gz.
 
 Writes web/static/data/ledger.json, prints the table, exits non-zero if any
@@ -46,6 +47,10 @@ COLD_OPEN_SET = SPIKE_SET + (
 )
 CH1_SET_PREFIXES = ("payoff/",)  # chapter payloads by prefix ...
 CH1_SET_FILES = ("scenes/ch1.json",)  # ... plus the chapter scene JSON
+# R1b sandbox dataset: the lazy-loaded columnar arrays + the matches table a
+# tapped ball resolves through + the sandbox descriptor. Held to the per-
+# chapter budget (it is not in the cold-open critical set).
+SANDBOX_SET = ("columnar.json.gz", "matches.json", "scenes/sandbox.json")
 
 
 def measure(path: Path) -> dict:
@@ -81,7 +86,7 @@ def build_ledger(out_root: Path = canon.OUT_ROOT) -> dict:
         [n for n in artifacts if n.startswith(CH1_SET_PREFIXES)]
         + [n for n in CH1_SET_FILES if n in artifacts]
     )
-    sandbox_files = [n for n in artifacts if n == "columnar.json.gz"]
+    sandbox_files = [n for n in SANDBOX_SET if n in artifacts]
 
     checks = [
         {
@@ -100,7 +105,7 @@ def build_ledger(out_root: Path = canon.OUT_ROOT) -> dict:
             "pass": bool(chapter_files) and gz_sum(chapter_files) <= BUDGET_CHAPTER_GZ,
         },
         {
-            "name": "sandbox columnar dataset",
+            "name": "sandbox dataset (columnar + matches + descriptor)",
             "files": sandbox_files,
             "budget_gz": BUDGET_CHAPTER_GZ,
             "actual_gz": gz_sum(sandbox_files),
