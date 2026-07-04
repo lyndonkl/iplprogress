@@ -50,6 +50,14 @@ export interface FieldData {
 	ballsFaced: Uint8Array;
 	/** per-delivery batting-team id (matches teams.json ids) */
 	team: Uint8Array;
+	/**
+	 * per-delivery era-relative intent byte (wallheat.u8): how hot this ball's
+	 * (season × clamped balls-faced) cell strike rate runs versus the pooled IPL
+	 * 2008-2010 batter at the SAME ball-index. Neutral byte 73 = the 2008-2010
+	 * batter; below = cooler, above = hotter. Drives the C1-2 thesis-beat recolor
+	 * (uploaded NORMALIZED to 0..1). Same point order as ballsFaced.
+	 */
+	wallHeat: Uint8Array;
 	/** true when this is the dev-only synthetic fallback, not pipeline output */
 	synthetic: boolean;
 }
@@ -148,6 +156,15 @@ export interface FieldRenderState {
 	highlightSkipWpl: boolean;
 	/** picked-team id (teams.json) whose balls ignite in team color; -1 = none */
 	teamId: number;
+	/**
+	 * era-relative recolor blend for the C1-2 thesis beat: 0 = outcome colour
+	 * (establishing shot / fireworks), 1 = every ball recoloured by its wallHeat
+	 * cell (how far it beats the 2008-2010 batter at the same ball-index). The
+	 * blend is a no-op at 0, so the establishing shot and the six two-tone are
+	 * unchanged. Team-ignite still wins on top. Never > 0 while a re-sort is
+	 * engaged (the beat is staged alone).
+	 */
+	wallHeatMix: number;
 
 	/* ---- subset re-sort (§7 capability — the C1-5 fireworks) ----------------
 	 * A cross-cutting modifier (composes with any base layout, like the
@@ -188,6 +205,7 @@ export const DEFAULT_RENDER_STATE: FieldRenderState = {
 	othersDim: 1,
 	highlightSkipWpl: false,
 	teamId: -1,
+	wallHeatMix: 0,
 	resortClass: HL_CLASS.none,
 	resortSkipWpl: false,
 	resortColumns: 'ipl',

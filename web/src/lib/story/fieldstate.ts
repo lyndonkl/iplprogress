@@ -19,6 +19,7 @@ interface ResolvedSceneState {
 	highlight: SubsetHighlight | null;
 	resort: SubsetResort | null;
 	teamIgnite: boolean;
+	wallHeatMix: number;
 }
 
 export function withDefaults(s: SceneFieldState): ResolvedSceneState {
@@ -30,7 +31,8 @@ export function withDefaults(s: SceneFieldState): ResolvedSceneState {
 		labels: s.labels ?? 0,
 		highlight: s.highlight ?? null,
 		resort: s.resort ?? null,
-		teamIgnite: s.teamIgnite ?? true
+		teamIgnite: s.teamIgnite ?? true,
+		wallHeatMix: s.wallHeatMix ?? 0
 	};
 }
 
@@ -83,6 +85,9 @@ export function resolveRenderState(
 		highlightSkipWpl: (toHl ?? fromHl)?.skipWpl ?? false,
 		// the team stays lit through morphs; a scene may opt out explicitly
 		teamId: (clampedT < 0.5 ? f.teamIgnite : g.teamIgnite) ? teamId : -1,
+		// era-relative recolor blend lerps like any scalar (0 both sides = no-op),
+		// so the C1-2 heat beat ramps in and settles back out with the scroll
+		wallHeatMix: lerp(f.wallHeatMix, g.wallHeatMix, clampedT),
 		resortClass: rsClass,
 		resortSkipWpl: rs?.skipWpl ?? false,
 		resortColumns: rs ? resortColumns(rs) : 'ipl',

@@ -78,6 +78,16 @@ export interface SceneFieldState {
 	resort?: SubsetResort | null;
 	/** whether the picked team's balls stay ignited (default true — §2 standing rule) */
 	teamIgnite?: boolean;
+	/**
+	 * era-relative recolor blend for the C1-2 thesis beat (default 0). 0 = the
+	 * establishing outcome colour; 1 = every ball recoloured by its wallheat cell
+	 * (how far it beats the pooled 2008-2010 batter at the SAME ball-index), which
+	 * cancels the wall's horizontal acceleration gradient so the early-ball corner
+	 * ignites bottom→top. Drive it 0→1 during the hold via `dynamicState` (it is a
+	 * post-morph field change, like the C1-5 tint). Must be 0 wherever a re-sort
+	 * is engaged (the beat is staged before the fireworks). Team-ignite wins on top.
+	 */
+	wallHeatMix?: number;
 }
 
 /** Props every scene annotations component receives from the orchestrator. */

@@ -168,7 +168,8 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uResortInvMax: { value: 1 },
 		uResortX: { value: resortX },
 		uPickedTeam: { value: -1 },
-		uTeamColor: { value: new THREE.Color('#ffffff') }
+		uTeamColor: { value: new THREE.Color('#ffffff') },
+		uWallHeatMix: { value: 0 }
 	};
 
 	const geometry = new THREE.BufferGeometry();
@@ -176,6 +177,9 @@ export function createField(opts: FieldOptions): FieldHandle {
 	geometry.setAttribute('aAttrs', new THREE.BufferAttribute(data.attrs, 1, false));
 	geometry.setAttribute('aBallsFaced', new THREE.BufferAttribute(data.ballsFaced, 1, false));
 	geometry.setAttribute('aTeam', new THREE.BufferAttribute(data.team, 1, false));
+	// wallheat is uploaded NORMALIZED (u8 → 0..1) so the shader reads aWallHeat
+	// directly against WALLHEAT_NEUTRAL (73/255); every other attr is raw bytes.
+	geometry.setAttribute('aWallHeat', new THREE.BufferAttribute(data.wallHeat, 1, true));
 	geometry.setAttribute('aSubOrd', new THREE.BufferAttribute(subOrd, 1, false));
 	const subOrdAttr = geometry.getAttribute('aSubOrd') as THREE.BufferAttribute;
 	// positions are procedural in-shader; give THREE an all-covering bound
@@ -341,6 +345,7 @@ export function createField(opts: FieldOptions): FieldHandle {
 			a.othersDim === b.othersDim &&
 			a.highlightSkipWpl === b.highlightSkipWpl &&
 			a.teamId === b.teamId &&
+			a.wallHeatMix === b.wallHeatMix &&
 			a.resortClass === b.resortClass &&
 			a.resortSkipWpl === b.resortSkipWpl &&
 			a.resortColumns === b.resortColumns &&
@@ -366,6 +371,15 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uniforms.uHlBoost.value = s.highlightBoost;
 		uniforms.uOthersDim.value = s.othersDim;
 		uniforms.uHlSkipWpl.value = s.highlightSkipWpl ? 1 : 0;
+
+		// era-relative recolor blend (C1-2 thesis beat). Staged alone: the beat
+		// runs before the fireworks, so heat and the re-sort/tint never overlap.
+		uniforms.uWallHeatMix.value = s.wallHeatMix;
+		if (import.meta.env.DEV && s.wallHeatMix > 0 && s.resortClass >= 0)
+			console.warn(
+				'[every-ball-ever] invariant: uWallHeatMix > 0 while a re-sort is engaged —',
+				'the heat beat (C1-2) and the fireworks re-sort (C1-5) must be staged apart.'
+			);
 
 		// subset re-sort (§7): lazily derive the per-point ordinals + column
 		// geometry the first time a given class engages; every scalar is set

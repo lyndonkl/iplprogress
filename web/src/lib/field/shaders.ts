@@ -48,15 +48,30 @@
  *   aTeam       = batting-team id (u8, matches teams.json)
  *   aSubOrd     = point's ordinal among its group's re-sort subset (client-
  *                 computed on demand; 0 for non-subset points — no wire cost)
+ *   aWallHeat   = era-relative "intent" byte, NORMALIZED to 0..1 (how hot a
+ *                 ball's season × balls-faced cell strike rate runs versus the
+ *                 pooled IPL 2008-2010 batter at the SAME ball-index — drives
+ *                 the C1-2 thesis-beat recolor, gated by uWallHeatMix)
  */
 
 /** Fraction of the reveal range a point spends "raining in" (assembly layout). */
 export const ASSEMBLY_RAIN_WINDOW = 0.045;
 
+/**
+ * The wallheat encoding's neutral byte (ch1.json `ignition.wallheat.neutral_byte`
+ * = 73): the byte at which a cell equals the pooled IPL 2008-2010 batter at its
+ * ball-index and sits at the diverging scale's neutral pivot. Baked into the
+ * shader as `WALLHEAT_NEUTRAL` (73/255) so 2008-era rows read neutral. Mirror of
+ * the pipeline constant — if the pipeline re-encodes with a different pivot,
+ * this must move with it.
+ */
+export const WALLHEAT_NEUTRAL_BYTE = 73;
+
 export function makeVertexShader(groupCount: number): string {
 	return /* glsl */ `
 #define GROUP_COUNT ${groupCount}
 #define RAIN_W ${ASSEMBLY_RAIN_WINDOW}
+#define WALLHEAT_NEUTRAL ${(WALLHEAT_NEUTRAL_BYTE / 255).toFixed(6)}
 
 uniform float uProgress;      // 0 = layout A · 1 = layout B
 uniform int uLayoutA;         // layout codes: 0 free · 1 columns · 2 wall · 3 assembly
@@ -92,11 +107,13 @@ uniform float uResortInvMax;  // 1 / max per-group subset count (column height n
 uniform float uResortX[GROUP_COUNT]; // per-group re-sort column centre x (world)
 uniform float uPickedTeam;    // picked-team id (-1 = none)
 uniform vec3 uTeamColor;      // picked team's color
+uniform float uWallHeatMix;   // 0 = outcome colour · 1 = era-relative heat (C1-2 thesis beat)
 
 in float aAttrs;
 in float aBallsFaced;
 in float aTeam;
 in float aSubOrd;
+in float aWallHeat;           // era-relative intent 0..1 (normalized u8; neutral = 73/255)
 
 out vec3 vColor;
 out float vGlow;
@@ -124,6 +141,23 @@ vec3 pickLayout(int id, vec3 pFree, vec3 pCols, vec3 pWall) {
 	if (id == 1) return pCols;
 	if (id == 2) return pWall;
 	return pFree; // 0 free · 3 assembly share the free-field scatter
+}
+
+// Era-relative "intent" ramp for the C1-2 thesis beat (blended by uWallHeatMix).
+// h is aWallHeat in 0..1 — how hot a ball's (season × balls-faced) cell strike
+// rate runs versus the pooled IPL 2008-2010 batter at the SAME ball-index. The
+// scale is DIVERGING about WALLHEAT_NEUTRAL (= the 2008-2010 batter): cool
+// deep-blue below it, neutral grey-blue at it, amber → six-red well above. This
+// reuses the outcome palette constants and is the ONE authored place hue encodes
+// a quantity — gated entirely by uWallHeatMix, which is 0 everywhere but the beat.
+vec3 heatColor(float h) {
+	if (h <= WALLHEAT_NEUTRAL) {
+		float t = clamp(h / WALLHEAT_NEUTRAL, 0.0, 1.0);
+		return mix(C_DOT, C_TWO, t); // deep-blue → neutral grey-blue
+	}
+	float t = (h - WALLHEAT_NEUTRAL) / (1.0 - WALLHEAT_NEUTRAL);
+	if (t < 0.5) return mix(C_TWO, C_FOUR, t / 0.5);            // grey-blue → amber
+	return mix(C_FOUR, C_SIX, clamp((t - 0.5) / 0.5, 0.0, 1.0)); // amber → six-red
 }
 
 void main() {
@@ -264,6 +298,19 @@ void main() {
 	if (wpl) {
 		float k = (outcome == 3 || outcome == 4) && !wicket ? 0.32 : 0.5;
 		c = mix(c, C_TEAL, k);
+	}
+
+	// ---- Era-relative intent recolor (C1-2 thesis beat). A separate blend ON
+	//      TOP of the base outcome colour, gated by uWallHeatMix: at 0 the mix
+	//      is a no-op so the establishing outcome shot AND the C1-5 fireworks
+	//      two-tone are pixel-identical; at 1 every ball is recoloured by how far
+	//      its cell beats the 2008-2010 batter at the SAME ball-index, cancelling
+	//      the wall's horizontal acceleration gradient so the early-ball corner
+	//      ignites bottom→top. Runs before highlight/re-sort/team, but the beat is
+	//      staged alone (uResort* == 0, no highlight while it animates), and this
+	//      is 0 while the fireworks re-sort/tint — so the paths never interact.
+	if (uWallHeatMix > 0.0) {
+		c = mix(c, heatColor(aWallHeat), uWallHeatMix);
 	}
 
 	// ---- Subset highlight: matching points lift and brighten; others dim.

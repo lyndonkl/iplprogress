@@ -10,14 +10,15 @@ import type { FieldData, GroupMeta, MetaJson, TeamMeta } from './types';
  */
 export async function loadFieldData(baseUrl: string): Promise<FieldData> {
 	try {
-		const [meta, groups, teams, gidBuf, attrBuf, bfBuf, teamBuf] = await Promise.all([
+		const [meta, groups, teams, gidBuf, attrBuf, bfBuf, teamBuf, heatBuf] = await Promise.all([
 			fetchJson<MetaJson>(`${baseUrl}/data/meta.json`),
 			fetchJson<GroupMeta[]>(`${baseUrl}/data/groups.json`),
 			fetchJson<TeamMeta[]>(`${baseUrl}/data/teams.json`),
 			fetchBuffer(`${baseUrl}/data/group_ids.u16`),
 			fetchBuffer(`${baseUrl}/data/attrs.u8`),
 			fetchBuffer(`${baseUrl}/data/ballsfaced.u8`),
-			fetchBuffer(`${baseUrl}/data/team.u8`)
+			fetchBuffer(`${baseUrl}/data/team.u8`),
+			fetchBuffer(`${baseUrl}/data/wallheat.u8`)
 		]);
 
 		const n = meta.n_points;
@@ -30,6 +31,8 @@ export async function loadFieldData(baseUrl: string): Promise<FieldData> {
 			throw new Error(`ballsfaced.u8 byteLength ${bfBuf.byteLength} ≠ n_points (${n})`);
 		if (teamBuf.byteLength !== n)
 			throw new Error(`team.u8 byteLength ${teamBuf.byteLength} ≠ n_points (${n})`);
+		if (heatBuf.byteLength !== n)
+			throw new Error(`wallheat.u8 byteLength ${heatBuf.byteLength} ≠ n_points (${n})`);
 		if (!Array.isArray(groups) || groups.length === 0) throw new Error('groups.json empty');
 		if (!Array.isArray(teams) || teams.length === 0) throw new Error('teams.json empty');
 		const counted = groups.reduce((s, g) => s + g.count, 0);
@@ -48,6 +51,7 @@ export async function loadFieldData(baseUrl: string): Promise<FieldData> {
 			attrs: new Uint8Array(attrBuf),
 			ballsFaced: new Uint8Array(bfBuf),
 			team: new Uint8Array(teamBuf),
+			wallHeat: new Uint8Array(heatBuf),
 			synthetic: false
 		};
 	} catch (err) {

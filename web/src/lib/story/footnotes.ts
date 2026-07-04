@@ -64,11 +64,13 @@ export const FOOTNOTES = {
 		title: 'How the wall is built',
 		paragraphs: [
 			'Every ball is placed by how long its batter had been in when it was bowled: the x-axis is the batter’s balls-faced count (1 at the left, a capped 30+ bucket at the right edge), and each row is a season — 2008 at the bottom, 2026 at the top, with the WPL’s four seasons on their own shelf above.',
-			'Wides are not balls faced; no-balls are. Brightness is runs off the bat — hue never encodes a quantity.',
-			'The era bands behind the chip: IPL 2008-2010 (the league’s first three seasons) versus 2023-2026 (its last four). The middle bands — 2011-2015, 2016-2019, 2020-2022 — are computed too and drive the payoff cards.',
-			'Exact figures: strike rate on the first ten balls of an innings, 108.0 in 2008-2010 → 135.3 in 2023-2026. Sample sizes: 20,101 first-ten balls across 2,733 batter-innings then; 33,882 across 4,579 now.',
+			'Wides are not balls faced; no-balls are. In the establishing shot, brightness is runs off the bat and hue is the outcome — dot, single, four, six.',
+			'The thesis recolour: in the second half of the wall each ball is re-tinted by how hard it was hit versus a 2008-2010 batter at the very same point in the innings. For every balls-faced column — ball 1, ball 2, and so on — the pooled 2008-2010 strike rate at that ball-count is the neutral pivot; a cell (one season × one ball-count) reads cool when it sits at or below its 2008-2010 mark and hot when it runs well above it.',
+			'Why baseline each column to its own 2008-2010 value: batters always speed up once they are set, so raw strike rate climbs across the first twenty-odd balls in every era — a left-to-right gradient that swamps the year-on-year change in colour. Subtracting the 2008-2010 batter at each ball-count cancels that shared acceleration and leaves only the era difference, so the early-ball corner ignites bottom-to-top exactly where recent seasons most exceed 2008.',
+			'The scale is diverging: deep blue below the 2008-2010 batter, grey-blue at it, amber-to-red well above. The chip’s exact figures — strike rate on the first ball of the innings — 73.7 in 2008-2010 → 95.5 in 2023-2026. Pooled over the first ten balls it is 108.0 → 135.3.',
+			'The era bands: IPL 2008-2010 (the league’s first three seasons, the recolour baseline) versus 2023-2026 (its last four). The middle bands — 2011-2015, 2016-2019, 2020-2022 — are computed too and drive the payoff cards. Sample sizes on the first ten balls: 20,101 across 2,733 batter-innings then; 33,882 across 4,579 now.',
 			'The start of the innings outgrew the game itself: the first-ten-ball strike rate rose about +25% while the all-innings strike rate rose about +21% — the revolution concentrates at the top.',
-			'The wall is computed on your device from two small per-ball attributes; no positions are downloaded.'
+			'The wall is computed on your device from three small per-ball attributes (balls faced, season, and the era-relative heat byte); no positions are downloaded.'
 		]
 	},
 	sixes: {

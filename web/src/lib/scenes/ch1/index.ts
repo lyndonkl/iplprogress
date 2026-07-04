@@ -7,7 +7,7 @@ import Fireworks from './Fireworks.svelte';
 import WplBeat from './WplBeat.svelte';
 import PayoffCard from './PayoffCard.svelte';
 import Close from './Close.svelte';
-import { twoTone } from './data';
+import { twoTone, wallHeatMixAt } from './data';
 
 /**
  * CHAPTER 1 — The Death of the Sighter (storyboard §3, scenes C1-1..C1-8).
@@ -47,7 +47,21 @@ export const scenes: SceneDef[] = [
 		chapter: 'ch1',
 		scrollLength: 300,
 		morphLength: 150, // THE controlling morph: free field → ignition wall
+		// Establishing shot (outcome colour) as the points fly in and through
+		// caption steps 1-2 (heat 0). Steps 3-4 are the THESIS beat: dynamicState
+		// ramps wallHeatMix 0→1 during the hold, recolouring every ball by how
+		// far it beats the 2008-2010 batter at the same ball-index — the wall's
+		// horizontal acceleration gradient cancels and the early-ball corner
+		// ignites bottom→top. No re-sort here → the heat beat is staged ALONE.
 		fieldState: { layout: 'wall', wplDim: 0.55 },
+		// step 3's recolor ramp + step 4's hold live in the HOLD (post-morph), so
+		// they can't ride the free→wall morph; drive them from progress. The
+		// settle-back is free — ch1-pivot declares wallHeatMix 0 (default), so the
+		// heat lerps 1→0 as the pivot morphs in, well before the fireworks lift.
+		dynamicState: (progress, held) => ({ ...held, wallHeatMix: wallHeatMixAt(progress) }),
+		// reduced motion jump-cuts to the beat's rest position: the heated wall
+		// (wallHeatMix 1) rendered statically, team glow intact.
+		reducedMotionEndState: { layout: 'wall', wplDim: 0.55, wallHeatMix: 1 },
 		annotations: Wall,
 		footnote: 'ignition-wall'
 	},

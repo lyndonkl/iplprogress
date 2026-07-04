@@ -32,6 +32,13 @@ actual point buffer, so the order in these buffers IS the assembly order).
   team.u8           per delivery: canonical batting-franchise id (league-
                     scoped; renames collapse — Delhi Daredevils deliveries
                     carry the Delhi Capitals id). Ids defined in teams.json.
+  wallheat.u8       per delivery: era-relative intent for the Ch 1 ignition-
+                    wall thesis beat — a diverging byte for how much hotter
+                    this ball's (league, season, clamped ball-index) cell
+                    strike rate is than the pooled IPL 2008-2010 batter at the
+                    same ball-index (neutral = the 2008-10 batter; wides carry
+                    the neutral byte). Scale/legend live in scenes/ch1.json
+                    (ignition.wallheat); see wallheat.py.
   teams.json        the 20-franchise table: [{id, name, short, league,
                     color, active}] (canon.TEAMS verbatim).
   columnar.json.gz  sandbox dataset: 12 parallel arrays + name dictionaries
@@ -50,6 +57,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import canon
+import wallheat
 
 # ---------------------------------------------------------------------------
 # Outcome classes (contract values — also mirrored in attrs.u8 bits 0-2)
@@ -269,11 +277,20 @@ def main(out_root: Path = canon.OUT_ROOT) -> dict:
             path.write_bytes(raw)
             files[name] = {"bytes_raw": len(raw), "bytes_gz": len(gz_bytes(raw))}
 
+    # Ch 1 ignition-wall era-relative-intent buffer (thesis-beat recolour).
+    # Computed off the arrays this pass already built — no re-read (see
+    # wallheat.py); scenes.py emits the matching scale/legend into ch1.json.
+    wallheat_bytes, _wallheat_cfg = wallheat.compute(
+        col["league"], col["season"], ballsfaced, col["runs_batter"]
+    )
+    assert len(wallheat_bytes) == n_points
+
     emit("groups.json", compact_json(groups))
     emit("group_ids.u16", group_ids.tobytes())
     emit("attrs.u8", bytes(attrs))
     emit("ballsfaced.u8", bytes(ballsfaced))
     emit("team.u8", bytes(team_u8))
+    emit("wallheat.u8", bytes(wallheat_bytes))
     emit("teams.json", compact_json(list(canon.TEAMS), sort_keys=True))
     emit(
         "columnar.json.gz",

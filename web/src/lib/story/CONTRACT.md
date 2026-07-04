@@ -66,6 +66,9 @@ scrubs the field from the previous scene's `fieldState` to this scene's
                       //   (C1-5: the IPL's sixes lift; the WPL's stay shelved)
   } | null;
   teamIgnite?: boolean; // default true — the picked team STAYS lit (§2 rule)
+  wallHeatMix?: number; // C1-2 thesis beat: 0 = outcome colour · 1 = era-relative
+                        //   heat recolor (§10). Default 0. Drive 0→1 in the HOLD
+                        //   via dynamicState; must be 0 wherever a re-sort engages.
 }
 ```
 
@@ -304,3 +307,48 @@ The two-tone tint reads `attrs.u8` **bit 5** (mask `0x20`). Until the pipeline
 re-encodes that bit (season-top-10-six-hitter flag), it reads 0 everywhere and
 the re-sort degrades gracefully to a single-tone column. The re-sort itself
 (positions, columns, arc) needs no new bytes.
+
+---
+
+## 10. The era-relative recolor (C1-2 thesis beat)
+
+The ignition wall positions every ball by (balls-faced → x, season → y) and by
+default colours it by **outcome** (dot → blue … six → red). That produces a
+strong left→right strike-rate gradient — batters accelerate once set in every
+era — which visually **drowns out** the chapter's actual thesis: the *early*
+balls got more aggressive over the YEARS. The recolor is the fix (owner-approved
+"colour by era, not outcome").
+
+**What it is.** A per-point attribute `aWallHeat` (from `wallheat.u8`, one byte
+per point, same order as `ballsfaced.u8`, uploaded NORMALIZED to 0..1) encodes
+how hot a ball's **(season × clamped balls-faced) cell** strike rate runs versus
+the pooled **IPL 2008-2010** batter at the **same ball-index**. Baselining each
+ball-index column to its own 2008-2010 value **removes the horizontal
+acceleration gradient**, leaving only the era difference — so the early-ball
+corner ignites bottom→top exactly where recent seasons most exceed 2008.
+
+**How a scene drives it.** `SceneFieldState.wallHeatMix` (0 = outcome colour, 1 =
+era-relative) → uniform `uWallHeatMix`. In the shader the final base colour is
+`mix(outcomeColour, heatColour(aWallHeat), uWallHeatMix)`, where `heatColour` is
+a DIVERGING ramp about `WALLHEAT_NEUTRAL` (= the pipeline's neutral byte 73/255,
+the 2008-2010 batter): cool deep-blue below → neutral grey-blue at it → amber →
+six-red well above, reusing the outcome palette constants. **Team-ignite still
+wins on top** (personalization survives). At `wallHeatMix: 0` the mix is a no-op,
+so the establishing outcome shot AND the C1-5 fireworks two-tone are
+pixel-identical — this is the ONE authored place hue encodes a quantity, gated
+entirely to the beat.
+
+**Staging (invariants).** The beat runs in the wall scene's HOLD (post-morph),
+so drive `wallHeatMix` 0→1 from `dynamicState(progress, held)` — it can't ride
+the free→wall morph. The next scene declares `wallHeatMix` 0 (default), so it
+lerps back to 0 as that scene morphs in — the settle-back is free, and the heat
+is 0 well before the fireworks lift. It must be **0 wherever a re-sort is
+engaged**, and the fireworks scene keeps it 0 (a dev-only `field.ts` assertion
+warns if both are non-zero). Reduced motion jump-cuts to the beat's rest
+position (`reducedMotionEndState.wallHeatMix: 1`), rendered live. Scenes name the
+diverging scale on screen (a legend built from `ch1.json`
+`ignition.wallheat.legend_labels`).
+
+**No new position buffers.** The recolor is a per-point colour blend only; the
+one new byte (`wallheat.u8`, ≈316KB raw / tens of KB gz) is in the pipeline
+ledger and inside the Ch 1 budget.

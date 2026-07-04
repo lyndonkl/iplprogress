@@ -6,9 +6,9 @@ them against the standing budgets:
   * Cold-open critical set (R1a): everything that must arrive before the
     cold-open can play — the R0 spike set (meta.json + groups.json +
     group_ids.u16 + attrs.u8) plus the R1a addendum per-point attributes
-    (ballsfaced.u8 for the ignition wall, team.u8 + teams.json for the
-    picker ignition) and scenes/coldopen.json (the You-Draw-It truth data) —
-    <= 3 MB gz.
+    (ballsfaced.u8 + wallheat.u8 for the ignition wall, team.u8 + teams.json
+    for the picker ignition) and scenes/coldopen.json (the You-Draw-It truth
+    data) — <= 3 MB gz.
   * Per-chapter incremental payloads <= 2 MB gz each (here: Chapter 1 =
     scenes/ch1.json + payoff/ch1.json; the sandbox columnar dataset held to
     the same bar).
@@ -39,6 +39,7 @@ BUDGET_FULL_READ_GZ = 25 * MB
 SPIKE_SET = ("meta.json", "groups.json", "group_ids.u16", "attrs.u8")
 COLD_OPEN_SET = SPIKE_SET + (
     "ballsfaced.u8",  # R1a: the Ch 1 ignition-wall per-point attribute
+    "wallheat.u8",  # R1a refinement: ignition-wall era-relative-intent recolour
     "team.u8",  # R1a: batting-franchise id per point (picker ignition)
     "teams.json",  # R1a: the 20-franchise id/color table
     "scenes/coldopen.json",  # R1a: You-Draw-It truth series + corpus facts

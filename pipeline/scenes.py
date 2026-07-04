@@ -46,6 +46,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import canon
 import flatten
+import wallheat
 
 SCENES_DIR = canon.OUT_ROOT / "scenes"
 
@@ -317,10 +318,15 @@ def ignition_section(bands, seasons) -> dict:
     for (league, season), ss in sorted(seasons.items()):
         if ss.first10_balls:
             first10[league][str(season)] = r1(100.0 * ss.first10_runs / ss.first10_balls)
+    # Era-relative-intent scale + legend for the wall thesis-beat recolour.
+    # wallheat.build() recomputes off its own corpus pass; the emitted
+    # wallheat.u8 (flatten) uses the identical core, so buffer and scale agree.
+    _wh_bytes, wh_config = wallheat.build()
     return {
         "sr_by_ball_index": sr_by_ball,
         "balls_by_ball_index": balls_by_ball,
         "first10_sr_by_season": first10,
+        "wallheat": wh_config,
         "definition": (
             "Strike rate per balls-faced index (wides are not balls faced; "
             "no-balls are). Index n = the batter's n-th ball of the innings."

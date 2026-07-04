@@ -76,6 +76,28 @@ export interface BallIndexAxis {
 	note: string;
 }
 
+/**
+ * The era-relative recolor encoding for the C1-2 thesis beat (pipeline
+ * `ignition.wallheat`). Each ball's wallheat.u8 byte says how hot its (season ×
+ * clamped balls-faced) cell strike rate runs versus the pooled IPL 2008-2010
+ * batter at the SAME ball-index; `neutral_byte` (73) is that 2008-2010 batter.
+ * The scene reads `legend`/`legend_labels` to name the diverging scale on screen.
+ */
+export interface WallHeatLegendStop {
+	byte: number;
+	key: 'cool' | 'neutral' | 'hot';
+	label: string;
+	sr_delta: number;
+}
+
+export interface WallHeatMeta {
+	neutral_byte: number;
+	legend_labels: string[];
+	legend: WallHeatLegendStop[];
+	/** pooled 2008-2010 SR per ball-index (the per-column baseline the recolor removes) */
+	baseline_sr: number[];
+}
+
 export interface Ch1Data {
 	era_bands: EraBand[];
 	ball_index_axis: BallIndexAxis;
@@ -87,6 +109,7 @@ export interface Ch1Data {
 			ipl: Record<string, number>;
 			wpl: Record<string, number>;
 		};
+		wallheat: WallHeatMeta;
 	};
 	outrate: {
 		definition: string;
@@ -168,6 +191,32 @@ export function pooledSr(d: Ch1Data, band: BandKey, fromBall = 1, toBall = 10): 
 		n += balls[i];
 	}
 	return n > 0 ? (100 * runs) / n : 0;
+}
+
+/**
+ * Strike rate on the batter's n-th ball of the innings for a band (0-indexed:
+ * ballIndex 1 = the first ball). The C1-2 chip quotes ball 1 — the cleanest
+ * single column of the era-relative recolor (73.7 in 2008-10 → 95.5 in 2023-26).
+ */
+export function srAtBall(d: Ch1Data, band: BandKey, ballIndex = 1): number {
+	const sr = d.ignition.sr_by_ball_index[band];
+	return sr && ballIndex >= 1 && ballIndex <= sr.length ? sr[ballIndex - 1] : 0;
+}
+
+/* ---- C1-2 heat-beat staging (shared by Wall.svelte and the ch1-wall scene def)
+ * The thesis beat lives entirely in the wall scene's HOLD (after the free→wall
+ * morph). These progress thresholds must match Wall.svelte's caption steps:
+ * step 3 (the recolor ramp) spans [RAMP_START, RAMP_END); step 4 (the ball-1
+ * chip) holds heat at 1 from RAMP_END. Steps 1-2 (establishing outcome shot)
+ * sit below RAMP_START at heat 0. */
+export const WALL_HEAT_RAMP_START = 0.76;
+export const WALL_HEAT_RAMP_END = 0.88;
+
+/** uWallHeatMix as a function of the wall scene's progress (0 → establishing, 1 → heated). */
+export function wallHeatMixAt(progress: number): number {
+	if (progress >= WALL_HEAT_RAMP_END) return 1;
+	if (progress <= WALL_HEAT_RAMP_START) return 0;
+	return (progress - WALL_HEAT_RAMP_START) / (WALL_HEAT_RAMP_END - WALL_HEAT_RAMP_START);
 }
 
 /** Format helpers — tabular figures, en-US separators (storyboard §0.1). */

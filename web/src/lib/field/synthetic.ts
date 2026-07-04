@@ -50,6 +50,11 @@ export function syntheticFieldData(): FieldData {
 	const attrs = new Uint8Array(SYNTH_N);
 	const ballsFaced = new Uint8Array(SYNTH_N);
 	const team = new Uint8Array(SYNTH_N);
+	const wallHeat = new Uint8Array(SYNTH_N);
+	// neutral byte = the pooled 2008-2010 batter (matches the pipeline encoding);
+	// synthetic heat rises for recent seasons at low ball-index so the dev wall
+	// visibly ignites bottom→top when the C1-2 heat beat is exercised.
+	const NEUTRAL01 = 73 / 255;
 	let p = 0;
 	for (const g of groups) {
 		const isWpl = g.league === 'wpl';
@@ -62,6 +67,11 @@ export function syntheticFieldData(): FieldData {
 			attrs[p] = syntheticAttrByte(rng, eraLift, isWpl);
 			// rough balls-faced ramp: most balls are early-innings balls
 			ballsFaced[p] = Math.min(255, bf);
+			// era-relative intent: early balls (low bf) in recent seasons run hot
+			// above the neutral 2008-2010 pivot; 2008 rows sit near neutral.
+			const earlyWeight = 1 - Math.min(1, (bf - 1) / 29);
+			const heat01 = NEUTRAL01 + eraLift * earlyWeight * 0.62 + (rng() - 0.5) * 0.08;
+			wallHeat[p] = Math.max(0, Math.min(255, Math.round(heat01 * 255)));
 			if (rng() < 0.12) bf = 1; // "new batter"
 			else bf = Math.min(255, bf + 1);
 			if (rng() < 0.008) battingTeam = pickTeam(rng, isWpl); // "new innings"
@@ -79,6 +89,7 @@ export function syntheticFieldData(): FieldData {
 		attrs,
 		ballsFaced,
 		team,
+		wallHeat,
 		synthetic: true
 	};
 }
