@@ -6,6 +6,12 @@ Chapter-1 ("Death of the Sighter") card. R1a full spec per variant:
 
   { team, league, first10_sr_early_era, first10_sr_recent_era, delta,
     sample_balls, headline,                       # the R0 thesis card
+    team_pair, honesty,                           # discrete copy fields: the
+                                                  #   team-pair sentence and the
+                                                  #   small-sample honesty line
+                                                  #   ("" when not small-sample)
+                                                  #   — the scene renders fields,
+                                                  #   never regex-parses prose
     ignition_by_era: [{era, sr_1_10, sr_11_20, balls_1_10, balls_11_20}],
     fastest_starter: {name, first10_sr, first10_balls},  # min 100 balls
     maturity_clock: {...} }                       # WPL variants only
@@ -261,30 +267,51 @@ def maturity_clock(agg) -> dict:
 
 
 def make_card(team: str, league: str, early, recent) -> dict:
-    """early/recent are (balls, runs) tuples; balls may be 0 (empty state)."""
+    """early/recent are (balls, runs) tuples; balls may be 0 (empty state).
+
+    Ships the honesty sentence and the team-pair sentence as DISCRETE fields
+    (`honesty`, `team_pair`) so the scene renders fields, never regex-parses
+    the headline (finding #6/#8). `honesty` is the small-sample sentence, or
+    "" when the variant is not small-sample; the headline is composed from the
+    same pieces so it stays byte-identical to v1 for every card.
+    """
     labels = ERA_LABELS[league]
     sr_early = sr(*early)
     sr_recent = sr(*recent)
     sample = early[0] + recent[0]
     small = min(b for b in (early[0], recent[0]) if b > 0) < SMALL_SAMPLE_BALLS
 
+    # The honesty sentence: non-empty for every small-sample variant, "" else.
+    if small:
+        honesty = (
+            "Early days for a young league — small sample, honest numbers."
+            if league == "wpl"
+            else "Small sample — read these as early signals, not verdicts."
+        )
+    else:
+        honesty = ""
+
     if sr_early is None:
-        # Designed empty state: franchise born after the early era.
-        headline = (
+        # Designed empty state: franchise born after the early era. (Born-late
+        # franchises always clear the small-sample floor on their live era, so
+        # honesty is "" here — asserted by the harness.)
+        team_pair = (
             f"{team} was born into the attack era — it has no {labels['early']} "
             f"innings to compare. Its batters' first ten balls already run at "
             f"a strike rate of {sr_recent}."
         )
+        headline = team_pair
         delta = None
     else:
         delta = round(sr_recent - sr_early, 1)
-        headline = (
+        team_pair = (
             f"{team}'s first ten balls: strike rate {sr_early} in "
             f"{labels['early']}, {sr_recent} in {labels['recent']} — "
             f"{delta:+.1f} points of intent."
         )
-        if small and league == "wpl":
-            headline += " Early days for a young league — small sample, honest numbers."
+        headline = team_pair
+        if honesty and league == "wpl":
+            headline += " " + honesty
 
     return {
         "team": team,
@@ -294,6 +321,8 @@ def make_card(team: str, league: str, early, recent) -> dict:
         "delta": delta,
         "sample_balls": sample,
         "headline": headline,
+        "team_pair": team_pair,
+        "honesty": honesty,
         "era_labels": labels,
         "sample_balls_early": early[0],
         "sample_balls_recent": recent[0],
@@ -364,6 +393,20 @@ def assert_non_degenerate(doc: dict) -> list[str]:
         headline = v.get("headline")
         if not (isinstance(headline, str) and headline.strip()):
             errors.append(f"{tag}: headline missing/empty")
+
+        # --- Discrete copy fields (finding #6/#8): the scene renders these,
+        #     never regex-parses the headline. ---
+        team_pair = v.get("team_pair")
+        if not (isinstance(team_pair, str) and team_pair.strip()):
+            errors.append(f"{tag}: team_pair missing/empty")
+        honesty = v.get("honesty")
+        if not isinstance(honesty, str):
+            errors.append(f"{tag}: honesty must be a string ('' when not small-sample)")
+        elif v.get("small_sample"):
+            if not honesty.strip():
+                errors.append(f"{tag}: small_sample variant must ship a non-empty honesty sentence")
+        elif honesty != "":
+            errors.append(f"{tag}: non-small-sample variant must have empty honesty")
         recent = v.get("first10_sr_recent_era")
         if not (isinstance(recent, (int, float)) and recent > 0):
             errors.append(f"{tag}: first10_sr_recent_era missing")

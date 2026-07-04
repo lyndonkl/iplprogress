@@ -281,6 +281,15 @@
 		if (phase === 'revealing' && Math.abs(progress - revealStartProgress) > 0.02) finishReveal();
 	});
 
+	// CO-2 auto-resolve (finding #6): a reader who scrolls past the draw without
+	// tapping Reveal OR Just-show-me still gets the truth line + the universal
+	// bridge — the cold open's beat is never lost behind a tap (CONTRACT §8.3:
+	// interaction adds depth, never carries a beat). The buttons stay the
+	// primary path; this only fires once the reader has clearly scrolled on.
+	$effect(() => {
+		if (phase === 'draw' && progress > 0.85) onJustShow();
+	});
+
 	onMount(() => {
 		void loadColdOpenData().then((d) => (data = d));
 		// returning reader with a real sketch: restore it (their reveal stands;
@@ -317,17 +326,7 @@
 	<div class="draw-screen">
 		<div class="prompt scene-card interactive">
 			<p class="ask"><strong>How many times a season does someone put 200 on the board?</strong></p>
-			<p class="sub">
-				We’ve drawn 2008–2012 for you. You draw the rest.
-				<button
-					class="info"
-					onclick={() => footnotesOpen.set('draw-200')}
-					aria-haspopup="dialog"
-					aria-label="How a 200-run innings is counted"
-				>
-					ⓘ
-				</button>
-			</p>
+			<p class="sub">We’ve drawn 2008–2012 for you. You draw the rest.</p>
 		</div>
 
 		<div class="chart interactive" bind:clientWidth={w} bind:clientHeight={h}>
@@ -457,6 +456,18 @@
 				<div class="cue" aria-hidden="true">↓</div>
 			</div>
 		{/if}
+
+		<!-- footnote ⓘ on the prompt (storyboard CO-1). LAST in DOM so [Just show
+		     me] is the first focusable control (finding #14); CSS pins it back to
+		     the prompt's top-right corner. -->
+		<button
+			class="info prompt-info"
+			onclick={() => footnotesOpen.set('draw-200')}
+			aria-haspopup="dialog"
+			aria-label="How a 200-run innings is counted"
+		>
+			ⓘ
+		</button>
 	</div>
 </div>
 
@@ -507,6 +518,8 @@
 	.prompt .ask {
 		font-size: clamp(1.05rem, 2.8vw, 1.3rem);
 		line-height: 1.35;
+		/* reserve the top-right corner for the absolutely-placed ⓘ */
+		padding-right: 1.9rem;
 	}
 
 	.prompt .sub {
@@ -534,6 +547,18 @@
 		outline: 2px solid var(--teal);
 		outline-offset: 2px;
 		border-radius: 8px;
+	}
+
+	/* moved LAST in DOM (finding #14: [Just show me] first-focusable); pinned
+	   back to the prompt card's top-right corner. .draw-screen is the positioned
+	   ancestor and its padding matches these offsets, so this lands on the card
+	   edge on every viewport. */
+	.prompt-info {
+		position: absolute;
+		top: max(12px, env(safe-area-inset-top));
+		right: 14px;
+		margin: 0;
+		z-index: 2;
 	}
 
 	.chart {

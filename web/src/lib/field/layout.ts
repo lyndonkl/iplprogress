@@ -130,3 +130,54 @@ export function basePointPx(cssW: number, cssH: number, nPoints: number): number
 	const perPoint = (cssW * cssH) / Math.max(1, nPoints);
 	return Math.min(3.2, Math.max(1.3, Math.sqrt(perPoint) * 1.15));
 }
+
+/**
+ * Subset re-sort column geometry (Ch 1 fireworks, §7 capability): one column
+ * per season group in the subset, laid evenly across the width so the columns
+ * fill the stage (C1-5: "19 thin columns fit portrait width"). Only the
+ * grouping (which gi's get a column) is geometry; the column HEIGHTS come from
+ * the per-group subset counts computed on-device in field.ts. Positions never
+ * cross the wire.
+ */
+export interface ResortLayout {
+	/** world x of each subset group's column centre, indexed by gi (NaN = excluded) */
+	xs: number[];
+	/** half-width of a column body, world units (jitter bound) */
+	colHalfWidth: number;
+	/** world y of the column base (shared with the season-columns layout) */
+	bottom: number;
+	/** world height at the tallest column (subset max count) */
+	usableH: number;
+	/** the gi's that received a column, in season order */
+	gis: number[];
+}
+
+export function computeResortColumns(
+	groups: GroupMeta[],
+	halfW: number,
+	halfH: number,
+	columns: 'ipl' | 'all'
+): ResortLayout {
+	const subset = groups
+		.filter((g) => columns === 'all' || g.league === 'ipl')
+		.sort((a, b) => a.season - b.season);
+
+	const sideMargin = 0.06 * (2 * halfW);
+	const usableW = 2 * halfW - 2 * sideMargin;
+	const slotW = usableW / Math.max(1, subset.length);
+
+	const xs: number[] = new Array(groups.length).fill(NaN);
+	const gis: number[] = [];
+	subset.forEach((g, i) => {
+		xs[g.gi] = -halfW + sideMargin + (i + 0.5) * slotW;
+		gis.push(g.gi);
+	});
+
+	return {
+		xs,
+		colHalfWidth: slotW * 0.34,
+		bottom: -0.68 * halfH,
+		usableH: 1.38 * halfH,
+		gis
+	};
+}

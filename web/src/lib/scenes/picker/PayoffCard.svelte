@@ -92,20 +92,18 @@
 	const wplRR = $derived(clock?.rr_by_year.wpl ?? []);
 
 	/**
-	 * The JSON's small-sample honesty sentence, rendered between the league
-	 * clause and the team pair (storyboard C1-7 snapshot-review note). It ships
-	 * inside the variant headline; if the extraction ever misses, the whole
-	 * headline renders verbatim instead so the sentence is never dropped.
+	 * The JSON's discrete small-sample honesty sentence (v2 field: non-empty ⟺
+	 * small_sample), rendered verbatim between the league clause and the team
+	 * pair (storyboard C1-7 snapshot-review note). No prose parsing — the
+	 * template renders the field as shipped (finding #8).
 	 */
-	const honesty = $derived.by(() => {
-		if (v === null || !v.small_sample) return null;
-		const m = /points of intent\.\s+(.+)$/.exec(v.headline);
-		return m !== null ? m[1] : null;
-	});
+	const honesty = $derived(v !== null && v.honesty !== '' ? v.honesty : null);
 
-	/** team pair as numbers when available AND the honesty sentence was extracted */
+	/** the team pair as its two discrete strike-rate numbers — the compact
+	 *  ≤3-number form the WPL headline wants; the verbose team_pair sentence is
+	 *  the fallback below, never the regex-spliced full headline */
 	const teamPair = $derived.by(() => {
-		if (v === null || (v.small_sample && honesty === null)) return null;
+		if (v === null) return null;
 		if (v.first10_sr_early_era === null || v.first10_sr_recent_era === null) return null;
 		return { early: v.first10_sr_early_era, recent: v.first10_sr_recent_era };
 	});
@@ -218,7 +216,9 @@
 					<strong class="wpl-num">{f1(teamPair.early)} → {f1(teamPair.recent)}</strong>.
 				</p>
 			{:else}
-				<p class="headline pair">{v.headline}</p>
+				<!-- discrete team-pair field (no honesty tail) — never the full
+				     headline, which would duplicate the honesty sentence above -->
+				<p class="headline pair">{v.team_pair}</p>
 			{/if}
 			<p class="plant">Remember that clock. We’ll come back to it.</p>
 		{:else}

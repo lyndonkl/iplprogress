@@ -22,25 +22,39 @@
 	});
 
 	let ch1 = $state<Ch1Data | null>(null);
+	/* mobile legibility (MF2): a narrower viewBox + bigger user-unit type so
+	   every axis/tick/end label renders >=11px EFFECTIVE at 320px and 375px. */
+	let narrow = $state(false);
 	onMount(() => {
 		let alive = true;
 		loadCh1Data().then((d) => {
 			if (alive) ch1 = d;
 		});
+		const mql = window.matchMedia('(max-width: 640px)');
+		const sync = (): void => {
+			narrow = mql.matches;
+		};
+		sync();
+		mql.addEventListener('change', sync);
 		return () => {
 			alive = false;
+			mql.removeEventListener('change', sync);
 		};
 	});
 
 	/* ---- chart geometry (SVG user units; y fixed 0-10%) ---------------------- */
-	const W = 640;
-	const H = 300;
-	const ML = 42;
-	const MR = 92;
+	// narrow: W=430 displayed at ~300px (320px viewport, 94vw) → scale ~0.70, so
+	// FONT=17 user units → ~11.9px effective; at 375px → ~13.9px. Desktop keeps
+	// the wider frame and 11px type (it renders at ~1:1).
+	const W = $derived(narrow ? 430 : 640);
+	const H = $derived(narrow ? 330 : 300);
+	const ML = $derived(narrow ? 40 : 42);
+	const MR = $derived(narrow ? 84 : 92);
 	const MT = 16;
-	const MB = 38;
-	const plotW = W - ML - MR;
-	const plotH = H - MT - MB;
+	const MB = $derived(narrow ? 50 : 38);
+	const FONT = $derived(narrow ? 18 : 11);
+	const plotW = $derived(W - ML - MR);
+	const plotH = $derived(H - MT - MB);
 	const Y_MAX = 10; // spec, not a choice (storyboard C1-4)
 
 	const xAt = (ball: number): number => ML + ((ball - 1) / 29) * plotW;
@@ -50,18 +64,31 @@
 		return vals.map((v, i) => `${xAt(i + 1).toFixed(1)},${yAt(v).toFixed(1)}`).join(' ');
 	}
 
+	/* right-edge label from the pipeline's axis convention (NOT hardcoded): the
+	   per-ball curves end at exactly ball 30 (max_is_capped:false → "30"); only
+	   the ignition wall caps and reads "30+". Every axis label traces here. */
+	const axis = $derived(ch1 ? ch1.ball_index_axis : null);
+	const maxLabel = $derived(axis ? axis.max_label : '30');
+
+	/* text metrics that scale with FONT so labels stay centred at either size */
+	const vc = $derived(FONT * 0.34); // vertical-centering nudge for baseline text
+	const tickLabY = $derived(narrow ? 26 : 18); // tick-label drop below the axis
+
 	const ghost = $derived(ch1 ? ch1.outrate.hazard_pct_by_ball_index[GHOST_BAND] : null);
 	const bold = $derived(ch1 ? ch1.outrate.hazard_pct_by_ball_index[BOLD_BAND] : null);
 
-	/* direct end-of-line labels, nudged apart when the ends nearly touch */
+	/* direct end-of-line labels, nudged apart when the ends nearly touch (the two
+	   era lines end close together — that's the thesis — so the gap scales with
+	   FONT to keep both readable on the larger mobile type) */
 	const endLabels = $derived.by(() => {
 		if (!ghost || !bold) return null;
+		const half = (FONT + 2) / 2;
 		let gy = yAt(ghost[29]);
 		let by = yAt(bold[29]);
-		if (Math.abs(gy - by) < 16) {
+		if (Math.abs(gy - by) < half * 2) {
 			const mid = (gy + by) / 2;
-			gy = mid + (gy >= by ? 8 : -8);
-			by = mid + (gy >= by ? -8 : 8);
+			gy = mid + (gy >= by ? half : -half);
+			by = mid + (gy >= by ? -half : half);
 		}
 		return { gy, by };
 	});
@@ -70,7 +97,9 @@
 	const first10Recent = $derived(ch1 ? ch1.outrate.first10[BOLD_BAND].hazard_pct : null);
 
 	/* ---- defier interaction (adds names, never thesis) ------------------------ */
-	const TAP_BALLS = [5, 10, 15, 20];
+	// storyboard C1-4's labelled/tappable set; the pipeline ships defier lists
+	// for all six (balls 1 and 3 — the sighter's heart — included).
+	const TAP_BALLS = [1, 3, 5, 10, 15, 20];
 	let selectedBall = $state<number | null>(null);
 
 	const defierCard = $derived.by(() => {
@@ -82,16 +111,21 @@
 		return { ball: selectedBall, top3: list.slice(0, 3), baseline };
 	});
 
-	const ticks = [1, 5, 10, 15, 20, 25, 30];
+	/* labelled ticks match the tappable set (the right edge is drawn separately
+	   with the artifact's max label). */
+	const ticks = TAP_BALLS;
 </script>
 
 <div class="pin" class:reduced class:active>
 	{#if ch1 && ghost && bold}
 		<div class="chart-slot" class:shown={step >= 1}>
-			<figure class="chart" aria-label="The out-rate, ball by ball: 2008-10 and 2023-26">
+			<figure
+				class="chart"
+				aria-label="The out-rate, ball by ball, over balls 1 to {maxLabel} of the innings — IPL 2008-10 and 2023-26 on a fixed 0 to 10 percent scale"
+			>
 				<figcaption class="chart-title">The out-rate, ball by ball</figcaption>
-				<svg viewBox="0 0 {W} {H}" role="img" aria-hidden="true">
-					<!-- fixed-scale gridlines: 0 / 2.5 / 5 / 7.5 / 10% -->
+				<svg viewBox="0 0 {W} {H}" style="font-size:{FONT}px" role="img" aria-hidden="true">
+					<!-- fixed-scale gridlines: 0 / 2.5 / 5 / 7.5 / 10% (y honesty-locked) -->
 					{#each [0, 2.5, 5, 7.5, 10] as g (g)}
 						<line
 							x1={ML}
@@ -102,25 +136,23 @@
 							class:major={g % 5 === 0}
 						/>
 						{#if g % 5 === 0}
-							<text x={ML - 6} y={yAt(g) + 3.5} class="ylab">{g}%</text>
+							<text x={ML - 6} y={yAt(g) + vc} class="ylab">{g}%</text>
 						{/if}
 					{/each}
 
-					<!-- x ticks -->
+					<!-- x ticks (labelled = tappable) -->
 					{#each ticks as t (t)}
 						<line x1={xAt(t)} x2={xAt(t)} y1={yAt(0)} y2={yAt(0) + 5} class="tickmark" />
-						<text
-							x={xAt(t)}
-							y={yAt(0) + 18}
-							class="xlab"
-							class:tappable={TAP_BALLS.includes(t)}>{t}</text
-						>
+						<text x={xAt(t)} y={yAt(0) + tickLabY} class="xlab tappable">{t}</text>
 					{/each}
-					<text x={ML + plotW / 2} y={H - 2} class="axis-name">ball of the innings</text>
+					<!-- right edge: exactly ball 30 (not the wall's capped 30+) — artifact label -->
+					<line x1={xAt(30)} x2={xAt(30)} y1={yAt(0)} y2={yAt(0) + 5} class="tickmark" />
+					<text x={xAt(30)} y={yAt(0) + tickLabY} class="xlab">{maxLabel}</text>
+					<text x={ML + plotW / 2} y={H - 5} class="axis-name">ball of the innings</text>
 
 					<!-- 2008-10: the era ghost, always visible -->
 					<polyline points={line(ghost)} class="curve ghost" />
-					<text x={xAt(30) + 8} y={(endLabels?.gy ?? 0) + 3.5} class="endlab ghost-lab">
+					<text x={xAt(30) + 8} y={(endLabels?.gy ?? 0) + vc} class="endlab ghost-lab">
 						2008-10
 					</text>
 
@@ -132,7 +164,7 @@
 						pathLength="1"
 					/>
 					{#if step >= 2}
-						<text x={xAt(30) + 8} y={(endLabels?.by ?? 0) + 3.5} class="endlab bold-lab">
+						<text x={xAt(30) + 8} y={(endLabels?.by ?? 0) + vc} class="endlab bold-lab">
 							2023-26
 						</text>
 					{/if}
@@ -148,7 +180,7 @@
 					></button>
 				{/each}
 			</figure>
-			<p class="hint">Tap ball 5 · 10 · 15 · 20 — who most defied the out-rate.</p>
+			<p class="hint">Tap ball 1 · 3 · 5 · 10 · 15 · 20 — who most defied the out-rate.</p>
 		</div>
 	{/if}
 
@@ -281,11 +313,12 @@
 		stroke-width: 1;
 	}
 
+	/* font-size is inherited from the <svg> inline style (reactive user units —
+	   MF2 scales type up on the narrow viewBox); never hardcode it here */
 	.ylab,
 	.xlab,
 	.endlab,
 	.axis-name {
-		font-size: 11px;
 		fill: var(--ink-dim);
 		font-variant-numeric: tabular-nums;
 	}
@@ -491,7 +524,9 @@
 			transform: translateX(-50%);
 			width: 92vw;
 			max-width: 92vw;
-			bottom: max(9vh, calc(env(safe-area-inset-bottom) + 7vh));
+			/* clear the shell's fixed "how we computed this" affordance (bottom 14px,
+			   ~44px tall) — same formula the assembly scene uses (finding #10) */
+			bottom: max(72px, calc(env(safe-area-inset-bottom) + 60px));
 		}
 	}
 </style>

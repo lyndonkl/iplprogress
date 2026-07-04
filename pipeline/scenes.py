@@ -18,9 +18,11 @@ tests/test_r1a.py against an independent recount):
               batters at faced-count 0..10 — non-striker run-outs and
               dismissals on wides included — per first-10 ball faced: the
               catalog's 5.04% vs 4.93%); (c) out-rate defiers per ball index
-              5/10/15/20 (min 300 balls in band); (d) six democratization
+              1/3/5/10/15/20 (min 300 balls in band); (d) six democratization
               per season (>=10-six players; top-10 share over >=30-ball
-              qualifiers — the catalog's 35.9% -> 28.1%); (e) the Aerial
+              qualifiers — the catalog's 35.9% -> 28.1%; plus per-season
+              legal-ball counts + balls_per_six so "a six every 21 -> every
+              12" traces to an artifact); (e) the Aerial
               Risk Ledger (attempt proxy = sixes + caught excl. caught-and-
               bowled, per 100 balls faced, with the catalog's caveat text);
               (f) the WPL beat (first-10 SR, four-led run DNA, and the
@@ -48,7 +50,10 @@ import flatten
 SCENES_DIR = canon.OUT_ROOT / "scenes"
 
 MAX_BALL_INDEX = 30  # ignition + out-rate curves cover balls-faced 1..30
-DEFIER_INDICES = (5, 10, 15, 20)
+# Ball indices the out-rate strip lets the reader tap for era defiers. Balls 1
+# and 3 (the sighter's heart) are included so the scene's tap set — 1, 3, 5,
+# 10, 15, 20 — is fully data-backed (storyboard C1-4 / finding #11).
+DEFIER_INDICES = (1, 3, 5, 10, 15, 20)
 DEFIER_MIN_BALLS = 300  # min balls faced in the era band to qualify
 SIX_QUALIFIER_BALLS = 30  # >=30 balls faced -> six-concentration universe
 RETIRED_KINDS = frozenset({"retired hurt", "retired out"})  # censored, not out
@@ -412,10 +417,13 @@ def defiers_section(bands) -> dict:
     return {
         "bands": out,
         "definition": (
-            "For each ball index n: the batters (min 300 balls faced in the "
-            "era band) who most defied the era's out-rate — score = "
-            "(share of innings surviving to ball n / era survival) + "
-            "(SR through balls 1..n / era SR through n) - 2. Top 5 per index."
+            "For each ball index n in {1, 3, 5, 10, 15, 20}: the batters (min "
+            "300 balls faced in the era band) who most defied the era's "
+            "out-rate — score = (share of innings surviving to ball n / era "
+            "survival) + (SR through balls 1..n / era SR through n) - 2. Top 5 "
+            "per index, sorted by score then name; a band+index with fewer "
+            "than five qualifiers ships a shorter list (empty if none clear "
+            "the 300-ball floor)."
         ),
     }
 
@@ -438,6 +446,11 @@ def sixes_section(seasons) -> dict:
             {
                 "season": season,
                 "sixes": total,
+                # legal balls (wides AND no-balls excluded) so the on-screen
+                # "a six every 21 balls -> every 12" figure traces to an
+                # artifact instead of being hardcoded (finding #12/#17c).
+                "legal_balls": ss.legal_balls,
+                "balls_per_six": round(ss.legal_balls / total, 1) if total else None,
                 "players_10plus_sixes": sum(
                     1 for v in ss.batter_sixes.values() if v >= 10
                 ),
@@ -450,7 +463,11 @@ def sixes_section(seasons) -> dict:
             "Sixes = runs.batter == 6. Top-10 share = the top ten hitters' "
             "sixes as a share of all sixes by qualifying batters (>= 30 "
             "balls faced that season) — the concentration universe the "
-            "catalog's Gini uses."
+            "catalog's Gini uses. balls_per_six = legal balls (wides AND "
+            "no-balls excluded) / sixes: IPL 2008 = 20.8, 2026 = 11.7 (the "
+            "caption's rounded 'every 21 -> every 12'). Column heights are "
+            "raw six counts; balls_per_six is the denominator-honest rate "
+            "because seasons grew (more matches, more balls)."
         ),
     }
 
@@ -530,9 +547,45 @@ def wpl_beat_section(bands, seasons) -> dict:
     }
 
 
+def ball_index_axis() -> dict:
+    """The shared balls-faced x-axis convention for the ignition/out-rate/SR
+    curves — so scenes label the right edge honestly (finding #4/#13).
+
+    The per-ball curves (ignition sr_by_ball_index, outrate
+    hazard_pct_by_ball_index, and the WPL SR curves) run over the batter's
+    EXACT n-th ball faced, n = 1..30. The final index (30) is exactly ball 30
+    — it is NOT a capped "30+" aggregate: capping the discrete hazard at 30
+    would fold the whole survival tail into one point and spike it, so these
+    curves stop at ball 30 by design. The ignition WALL (ballsfaced.u8, in
+    shader) is the surface that caps: it clamps balls-faced >= 30 into a
+    single right-edge column labeled "30+". Scenes should therefore label the
+    per-ball charts' right edge "30" (the shared "1-30" span still matches the
+    wall visually); only the wall's clamped column is a genuine "30+" bucket.
+    """
+    return {
+        "min": 1,
+        "max": MAX_BALL_INDEX,
+        "max_is_capped": False,
+        "max_label": str(MAX_BALL_INDEX),
+        "wall_capped_index": MAX_BALL_INDEX,
+        "wall_capped_label": f"{MAX_BALL_INDEX}+",
+        "note": (
+            f"Per-ball curves run over the batter's exact n-th ball faced, "
+            f"n = 1..{MAX_BALL_INDEX}; index {MAX_BALL_INDEX} is exactly ball "
+            f"{MAX_BALL_INDEX}, NOT a capped {MAX_BALL_INDEX}+ aggregate "
+            f"(capping the discrete hazard there would spike it). The ignition "
+            f"wall (ballsfaced.u8) is the only surface that caps: it clamps "
+            f"balls-faced >= {MAX_BALL_INDEX} into one '{MAX_BALL_INDEX}+' "
+            f"column. Label the per-ball charts' right edge "
+            f"'{MAX_BALL_INDEX}', the wall's right column '{MAX_BALL_INDEX}+'."
+        ),
+    }
+
+
 def ch1_doc(bands, seasons) -> dict:
     return {
         "era_bands": band_meta(),
+        "ball_index_axis": ball_index_axis(),
         "ignition": ignition_section(bands, seasons),
         "outrate": outrate_section(bands),
         "defiers": defiers_section(bands),
@@ -572,10 +625,9 @@ def main(out_root: Path = canon.OUT_ROOT) -> dict:
         # ids) and per-league match counts, consistent by construction with
         # scenes/coldopen.json's corpus block (same pass, same definitions).
         meta["n_players"] = len(players)
-        meta["n_matches"] = {
-            "ipl": sum(seasons[("ipl", s)].matches for s in canon.IPL_SEASONS),
-            "wpl": sum(seasons[("wpl", s)].matches for s in canon.WPL_SEASONS),
-        }
+        n_ipl = sum(seasons[("ipl", s)].matches for s in canon.IPL_SEASONS)
+        n_wpl = sum(seasons[("wpl", s)].matches for s in canon.WPL_SEASONS)
+        meta["n_matches"] = {"ipl": n_ipl, "wpl": n_wpl, "total": n_ipl + n_wpl}
         meta_path.write_bytes(flatten.compact_json(meta))
 
     for name, s in sizes.items():

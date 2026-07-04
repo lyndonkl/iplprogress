@@ -19,9 +19,11 @@
 	let { field, reduced }: SceneAnnotationProps = $props();
 
 	const AUTO_ADVANCE_MS = 1200;
-	// ~1.2s here + ~1s into C1-1: the change-anytime reassurance travels with
-	// the reader instead of racing the auto-advance (storyboard §2).
-	const TOAST_LIFE_MS = 2200;
+	// ~1.2s here + ~1.2s into C1-1 (finding #19 / storyboard §2): the
+	// change-anytime reassurance travels with the reader instead of racing the
+	// auto-advance, and persists long enough for the now-wrapping two-line toast
+	// (finding #9) to be read before it dismisses itself early in C1-1.
+	const TOAST_LIFE_MS = 2400;
 
 	const teams = $derived(field?.data.teams.filter((t) => t.active) ?? []);
 	const ipl = $derived(teams.filter((t) => t.league === 'ipl'));
@@ -137,7 +139,9 @@
 		<span class="chip" style:background={t.color} style:color={crestText(t.color)}>
 			{t.short}
 		</span>
-		<span class="name">{t.name}</span>
+		<!-- sr-only " (WPL)" gives the sister franchises unique accessible names
+		     regardless of whether the SR announces the group label (finding #15) -->
+		<span class="name">{t.name}{#if t.league === 'wpl'}<span class="sr-only"> (WPL)</span>{/if}</span>
 		{#if t.league === 'wpl'}<span class="tag" aria-hidden="true">WPL</span>{/if}
 	</button>
 {/snippet}
@@ -327,6 +331,18 @@
 		line-height: 1.3;
 	}
 
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		margin: -1px;
+		padding: 0;
+		overflow: hidden;
+		clip: rect(0 0 0 0);
+		white-space: nowrap;
+		border: 0;
+	}
+
 	.tag {
 		position: absolute;
 		top: 8px;
@@ -377,16 +393,19 @@
 		bottom: max(20px, env(safe-area-inset-bottom));
 		transform: translateX(-50%);
 		z-index: 70;
-		max-width: 92vw;
+		/* wrap rather than ellipsize — the "Change anytime in ☰" reassurance is
+		   the line that justifies the no-confirm design and must never be cut
+		   (finding #9). Bottom-anchored, so a two-line toast still clears the
+		   safe area and never covers the neutral tile at the top of the panel. */
+		max-width: min(92vw, 30rem);
 		padding: 0.65rem 1.15rem;
-		border-radius: 999px;
+		border-radius: 14px;
 		border: 1px solid rgba(46, 196, 182, 0.4);
 		background: rgba(11, 14, 20, 0.88);
 		color: var(--ink);
 		font-size: 0.9rem;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
+		white-space: normal;
+		text-align: center;
 		pointer-events: none;
 	}
 

@@ -46,6 +46,11 @@ export interface PayoffVariant {
 	delta: number | null;
 	sample_balls: number;
 	headline: string;
+	/** discrete team-pair clause (v2): the team's first-ten-balls sentence,
+	 *  without the small-sample honesty tail — template renders it, never parses */
+	team_pair: string;
+	/** discrete small-sample honesty sentence (v2): non-empty ⟺ small_sample */
+	honesty: string;
 	era_labels: PayoffEraLabels;
 	sample_balls_early: number;
 	sample_balls_recent: number;

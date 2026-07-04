@@ -1,6 +1,6 @@
-import { HL_CLASS, type FieldRenderState } from '$lib/field/types';
+import { HL_CLASS, type FieldRenderState, type ResortColumns } from '$lib/field/types';
 import { ASSEMBLY_RAIN_WINDOW } from '$lib/field/shaders';
-import type { SceneDef, SceneFieldState, SubsetHighlight } from './types';
+import type { SceneDef, SceneFieldState, SubsetHighlight, SubsetResort } from './types';
 
 /**
  * Pure scene-state math for the scroll orchestrator: resolves a (from, to, t)
@@ -17,6 +17,7 @@ interface ResolvedSceneState {
 	wplDim: number;
 	labels: number;
 	highlight: SubsetHighlight | null;
+	resort: SubsetResort | null;
 	teamIgnite: boolean;
 }
 
@@ -28,8 +29,14 @@ export function withDefaults(s: SceneFieldState): ResolvedSceneState {
 		wplDim: s.wplDim ?? 1,
 		labels: s.labels ?? 0,
 		highlight: s.highlight ?? null,
+		resort: s.resort ?? null,
 		teamIgnite: s.teamIgnite ?? true
 	};
+}
+
+/** Default column grouping for a re-sort: IPL-only when WPL is skipped. */
+function resortColumns(r: SubsetResort): ResortColumns {
+	return r.columns ?? (r.skipWpl ? 'ipl' : 'all');
 }
 
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
@@ -52,6 +59,14 @@ export function resolveRenderState(
 			? HL_CLASS[fromHl.class]
 			: HL_CLASS.none;
 
+	// Re-sort resolves like the highlight: whichever side declares it fixes the
+	// discrete fields (class / skipWpl / column grouping) while engage / lift /
+	// tint / othersDim lerp — so the subset glides into and out of its columns.
+	const fromRs = f.resort;
+	const toRs = g.resort;
+	const rs = toRs ?? fromRs;
+	const rsClass = rs ? HL_CLASS[rs.class] : HL_CLASS.none;
+
 	return {
 		layoutA: f.layout,
 		layoutB: g.layout,
@@ -67,8 +82,37 @@ export function resolveRenderState(
 		// discrete like the class: whichever side declares the highlight decides
 		highlightSkipWpl: (toHl ?? fromHl)?.skipWpl ?? false,
 		// the team stays lit through morphs; a scene may opt out explicitly
-		teamId: (clampedT < 0.5 ? f.teamIgnite : g.teamIgnite) ? teamId : -1
+		teamId: (clampedT < 0.5 ? f.teamIgnite : g.teamIgnite) ? teamId : -1,
+		resortClass: rsClass,
+		resortSkipWpl: rs?.skipWpl ?? false,
+		resortColumns: rs ? resortColumns(rs) : 'ipl',
+		// engage/tint/othersDim/lift lerp — a side with no re-sort reads as
+		// engage 0, tint 0, othersDim 1 (fully settled, no dimming)
+		resortEngage: lerp(fromRs?.engage ?? 0, toRs?.engage ?? 0, clampedT),
+		resortLift: lerp(fromRs?.lift ?? 0.5, toRs?.lift ?? 0.5, clampedT),
+		resortTint: lerp(fromRs?.tint ?? 0, toRs?.tint ?? 0, clampedT),
+		resortOthersDim: lerp(fromRs?.othersDim ?? 1, toRs?.othersDim ?? 1, clampedT)
 	};
+}
+
+/**
+ * A scene's fully-settled HELD state (post-morph): its fieldState resolved
+ * through dynamicState at progress 1. This is the correct morph SOURCE for the
+ * NEXT scene — a re-sort that engaged and tinted to completion must settle back
+ * FROM that completed state, not from the un-modulated fieldState (no pop). The
+ * orchestrator uses it for the `from` side; reduced motion ignores it (t = 1).
+ */
+export function heldState(scene: SceneDef): SceneFieldState {
+	return scene.dynamicState ? scene.dynamicState(1, scene.fieldState) : scene.fieldState;
+}
+
+/**
+ * A scene's live TARGET state at a given progress: its fieldState resolved
+ * through dynamicState (so a caption step can drive a one-change field update
+ * during the hold). The morph interpolates toward this on every tick.
+ */
+export function dynamicTarget(scene: SceneDef, progress: number): SceneFieldState {
+	return scene.dynamicState ? scene.dynamicState(progress, scene.fieldState) : scene.fieldState;
 }
 
 /** The scene's end state for prefers-reduced-motion jump-cuts. */

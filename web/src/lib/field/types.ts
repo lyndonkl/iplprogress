@@ -80,7 +80,8 @@ export const LAYOUT_CODE: Record<LayoutId, number> = {
 
 /**
  * Subset-highlight class codes (uHlClass). 0-5 match the outcome classes in
- * attrs.u8; 6 selects the wicket bit; -1 = no highlight active.
+ * attrs.u8; 6 selects the wicket bit; -1 = no highlight active. The subset
+ * re-sort (uResortClass, §7 capability) reuses the SAME class codes.
  */
 export const HL_CLASS = {
 	none: -1,
@@ -94,6 +95,22 @@ export const HL_CLASS = {
 } as const;
 
 export type HighlightClass = Exclude<keyof typeof HL_CLASS, 'none'>;
+
+/**
+ * attrs.u8 bit 5 — the "hit by that season's top-10 six-hitter" flag, packed by
+ * the pipeline into the spare bit above outcome (0-2) / wicket (3) / WPL (4).
+ * Drives the C1-5 two-tone re-sort recolor (top-10 specialists vs everyone
+ * else) as a per-point LUMINANCE split within the six-ember hue — never a hue
+ * change. Until the pipeline re-encodes the bit it reads 0 everywhere, so the
+ * re-sort degrades to a single-tone column (graceful).
+ */
+export const ATTR_TOP10_BIT = 32;
+
+/**
+ * Which season groups form re-sort columns. 'ipl' = IPL seasons only (the C1-5
+ * fireworks: 19 columns, WPL sixes stay on the shelf); 'all' = every group.
+ */
+export type ResortColumns = 'ipl' | 'all';
 
 /**
  * One fully-resolved GPU state for the persistent field. The story
@@ -131,6 +148,30 @@ export interface FieldRenderState {
 	highlightSkipWpl: boolean;
 	/** picked-team id (teams.json) whose balls ignite in team color; -1 = none */
 	teamId: number;
+
+	/* ---- subset re-sort (§7 capability — the C1-5 fireworks) ----------------
+	 * A cross-cutting modifier (composes with any base layout, like the
+	 * highlight): points matching `resortClass` fly from their current layout
+	 * position into per-season firework columns as `resortEngage` scrubs 0→1,
+	 * arcing up out of the wall on the way (staggered per point → object
+	 * constancy), and settle back as it scrubs 1→0. Everything else dims by
+	 * `resortOthersDim`. A per-point two-tone recolor (attrs.u8 bit 5) fades in
+	 * with `resortTint`. Fully reversible; no new position buffers cross the
+	 * wire — the per-group stacking ordinal is derived on-device. */
+	/** re-sort subset class code (HL_CLASS values; -1 = no re-sort active) */
+	resortClass: number;
+	/** WPL points never re-sort (they stay on the wall — C1-5 skipWpl) */
+	resortSkipWpl: boolean;
+	/** which season groups form columns (group selection + column count) */
+	resortColumns: ResortColumns;
+	/** 0 = points on their base layout · 1 = matching points fully in columns */
+	resortEngage: number;
+	/** world-units peak of the lift arc while flying to/from the columns */
+	resortLift: number;
+	/** two-tone recolor strength 0..1 (top-10 specialists vs everyone else) */
+	resortTint: number;
+	/** luminance × for non-matching points while the re-sort is engaged */
+	resortOthersDim: number;
 }
 
 export const DEFAULT_RENDER_STATE: FieldRenderState = {
@@ -146,5 +187,12 @@ export const DEFAULT_RENDER_STATE: FieldRenderState = {
 	highlightBoost: 0,
 	othersDim: 1,
 	highlightSkipWpl: false,
-	teamId: -1
+	teamId: -1,
+	resortClass: HL_CLASS.none,
+	resortSkipWpl: false,
+	resortColumns: 'ipl',
+	resortEngage: 0,
+	resortLift: 0,
+	resortTint: 0,
+	resortOthersDim: 1
 };

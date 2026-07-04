@@ -38,9 +38,20 @@ new artifacts key-sorted) — verified by rebuilding and diffing checksums.
 
 ## The point stream (contract)
 
-Every delivery in every innings, **excluding super-over innings**, sorted by
-(match date, match_id, innings index, over, delivery index) across both leagues:
+Every delivery in every innings, **excluding super-over innings**, in
+**season-blocked order** — the calendar year of play, then **IPL before WPL
+within a shared year**, then chronological (match date, match_id, innings
+index, over, delivery index):
 
+- **Season-blocked, not raw-chronological (R1a MF3).** Across seasons the
+  stream stays strictly chronological, but within 2023 every IPL-2023 delivery
+  precedes every WPL-2023 delivery (the WPL's March-2023 matches would
+  otherwise interleave *ahead* of IPL 2023). This assembles "season by season"
+  and restores the cold-open caption order — CO-3's "2023: the year the ceiling
+  broke" fires a beat **before** the WPL constellation starts — with no scene
+  change (the assembly scene measures its counter stops from the actual point
+  buffer, so the buffer order *is* the assembly order). `meta.json` /
+  `columnar.json.gz` carry `point_order: "season-blocked"`.
 - **n_points = 316,199.** (The blueprint's headline 316,388 counts the 189 super-over
   balls; the standing rule excludes them from the stream, so 316,388 − 189 = 316,199.
   On-screen count is always 316,199 — the corpus total lives in the footnote layer.)
@@ -53,7 +64,7 @@ Every delivery in every innings, **excluding super-over innings**, sorted by
 
 | artifact | contents |
 |---|---|
-| `meta.json` | `{ n_points, built_at: "unknown", point_order: "chronological", files: {name: {bytes_raw, bytes_gz}}, n_players, n_matches: {ipl, wpl} }` — the v2 count fields (storyboard CO-3 traceability) are added by `scenes.py`; `test_r1a` asserts they equal `scenes/coldopen.json`'s corpus block |
+| `meta.json` | `{ n_points, built_at: "unknown", point_order: "season-blocked", files: {name: {bytes_raw, bytes_gz}}, n_players, n_matches: {ipl, wpl, total} }` — the v2 count fields (storyboard CO-3 title-card traceability: `n_players`, per-league + **total** `n_matches`) are added by `scenes.py`; `test_r1a` asserts they equal `scenes/coldopen.json`'s corpus block |
 | `groups.json` | ordered array, index = `gi`: `{ gi, league, season, count }` × 23 |
 | `group_ids.u16` | little-endian Uint16 per delivery → `gi` |
 | `attrs.u8` | one byte per delivery — bits 0–2 outcome class: 0 dot · 1 single · 2 two-or-three · 3 four · 4 six · 5 other scoring ball; bit 3 wicket fell; bit 4 WPL; bits 5–7 zero |
@@ -61,7 +72,7 @@ Every delivery in every innings, **excluding super-over innings**, sorted by
 | `team.u8` **(R1a)** | per delivery: canonical **batting-franchise id** (league-scoped; renames collapse — every Delhi Daredevils ball carries the Delhi Capitals id). Ids defined in `teams.json`. |
 | `teams.json` **(R1a)** | the 20-franchise table `[{id, name, short, league, color, active}]` (`canon.TEAMS` verbatim; colors are recognizable approximate kit hexes, not official style guides). |
 | `scenes/coldopen.json` **(R1a)** | per season+league: `matches`, `deliveries`, **`totals200`**, **`avg_first_innings_full`** (+ its innings count); plus `corpus` facts `{points_rendered: 316199, corpus_total: 316388, superover_balls: 189, matches: 1331, players: 938, ipl_seasons: 19, wpl_seasons: 4}` and a `definitions` block. |
-| `scenes/ch1.json` **(R1a)** | Chapter 1: `ignition` (SR per balls-faced index 1..30 per era band + first-10-ball SR per season per league), `outrate` (KM-style hazard per index 1..30 per band, sample sizes, first-10 headline), `defiers` (top-5 per ball index 5/10/15/20 per band), `sixes` (per season), `aerial` (per band, with caveat), `wpl_beat` (incl. the League Maturity Clock). |
+| `scenes/ch1.json` **(R1a)** | Chapter 1: `ball_index_axis` (the shared balls-faced x-axis convention — per-ball curves end at exactly ball 30, NOT a capped `30+` bucket; only the wall caps — so scenes label the strips' right edge `30` and the wall's `30+`), `ignition` (SR per balls-faced index 1..30 per era band + first-10-ball SR per season per league), `outrate` (KM-style hazard per index 1..30 per band, sample sizes, first-10 headline), `defiers` (top-5 per ball index **1/3/5/10/15/20** per band — balls 1 & 3 added so the strip's tap set is fully data-backed), `sixes` (per season, incl. **`legal_balls` + `balls_per_six`** so "a six every 21 → every 12" traces to an artifact), `aerial` (per band, with caveat), `wpl_beat` (incl. the League Maturity Clock). |
 | `columnar.json.gz` | sandbox dataset: 12 parallel arrays over the same point order + `dicts` mapping codes → names. gzip level 9 |
 | `payoff/ch1.json` | 16 Chapter-1 payoff variants, R1a full spec (below) |
 | `ledger.json` | the payload audit (build report, excluded from its own budget math) |
@@ -90,6 +101,10 @@ here and asserted by `tests/test_r1a.py` via independent recounts.
   over the ≥30-balls-faced qualifier universe** (the same universe as the catalog's
   Gini): **35.9% → 28.1%** ✅ (over *all* league sixes it would be 34.3% → 27.4% —
   the qualifier denominator is the catalog's definition and is what ships).
+  **`balls_per_six` = legal balls (wides AND no-balls excluded) / sixes:** 2008
+  **20.8** → 2026 **11.7** ✅ (the caption's rounded "every 21 → every 12";
+  `legal_balls` ships per season alongside it — column heights are raw six
+  counts, so the per-ball rate is the denominator-honest comparison).
 - **Aerial Risk Ledger:** attempt proxy = sixes + caught dismissals (caught-and-bowled
   excluded), per 100 balls faced; execution = sixes/(sixes+caught):
   **7.3 → 11.4 attempts/100, 58.7% → 67.3% execution** ✅ exact. The catalog's caveat
@@ -108,10 +123,12 @@ here and asserted by `tests/test_r1a.py` via independent recounts.
   109.9 / 101.2 / 112.8 / 104.6 vs WPL 108.2 / 104.6 / 116.7 / **112.2**.
 - **Run DNA:** % of all runs (extras included) from fours (4 × count of batter fours):
   WPL **46.8%** vs modern IPL (2023-26) **33.9%**; six-share **15.5% vs 29.0%**. ✅
-- **Defiers:** per ball index n ∈ {5,10,15,20} and era band, batters with ≥ 300 balls
-  faced in the band, scored by
+- **Defiers:** per ball index n ∈ {1,3,5,10,15,20} and era band, batters with ≥ 300
+  balls faced in the band, scored by
   `(survival-to-n / band survival) + (SR through 1..n / band SR) − 2`; top 5 ship with
-  their survival %, SR, innings and sample size. **players = 938** = distinct people
+  their survival %, SR, innings and sample size (a band+index with fewer than five
+  qualifiers ships a shorter list, empty if none clear the floor; every band clears
+  ≥ 5 at every index in this corpus). **players = 938** = distinct people
   who faced or bowled ≥ 1 ball (939 if non-striker-only appearances counted — the
   blueprint's 938 is the faced-or-bowled definition).
 
@@ -122,6 +139,12 @@ Exactly 16 variants: 10 current IPL franchises + 5 WPL franchises + `Neutral`
 
 - the R0 thesis fields (first-10 SR early/recent era, delta, samples, headline;
   eras IPL 2008–2010 vs 2023–2026, WPL 2023–2024 vs 2025–2026);
+- **`team_pair` + `honesty`** — the team-pair sentence and the small-sample honesty
+  line as **discrete fields** so the scene renders fields instead of regex-parsing
+  the headline (finding #6/#8). `honesty` is non-empty for every `small_sample`
+  variant (all five WPL cards) and `""` otherwise; the headline is *composed* from
+  these pieces, so it stays byte-identical to v1. The harness asserts the
+  invariant (non-empty honesty ⟺ small_sample);
 - **`ignition_by_era`** — SR on balls 1–10 and 11–20 per era band (IPL: the five R1a
   bands; WPL: its two card eras). Bands where a franchise bowled no balls carry null
   SRs — designed sparsity for born-late franchises, asserted, never a blank;
@@ -140,26 +163,37 @@ exist, are non-degenerate under the extended spec, and exits non-zero otherwise.
 
 - **Cold-open critical set** (`meta.json` + `groups.json` + `group_ids.u16` +
   `attrs.u8` + **`ballsfaced.u8` + `team.u8` + `teams.json` + `scenes/coldopen.json`**
-  — everything needed before the cold open plays): **≤ 3 MB gz → actual 259,467 B gz
-  (~0.26 MB)**. Largest members: ballsfaced.u8 139,334 B gz, attrs.u8 112,860 B gz;
-  team.u8 compresses to 4,696 B gz.
-- **Chapter 1** (`scenes/ch1.json` + `payoff/ch1.json`): ≤ 2 MB gz → actual 9,552 B gz.
-- Sandbox columnar ≤ 2 MB gz → actual 625,823 B gz (also under the blueprint's ~0.8 MB
+  — everything needed before the cold open plays): **≤ 3 MB gz → actual 259,110 B gz
+  (~0.26 MB)**. Largest members: ballsfaced.u8 139,311 B gz, attrs.u8 112,505 B gz;
+  team.u8 compresses to 4,680 B gz. (The season-blocked reorder shifts these gz
+  sizes a few hundred bytes vs the pre-fix build — the byte sequence changed, the
+  budget didn't.)
+- **Chapter 1** (`scenes/ch1.json` + `payoff/ch1.json`): ≤ 2 MB gz → actual 11,409 B gz
+  (grew from 9,552 B: the balls-1/3 defiers, per-season `legal_balls`/`balls_per_six`,
+  `ball_index_axis`, and the payoff `team_pair`/`honesty` fields).
+- Sandbox columnar ≤ 2 MB gz → actual 625,569 B gz (also under the blueprint's ~0.8 MB
   target).
-- Full read-through ≤ 25 MB gz → actual 894,842 B gz (~0.89 MB).
+- Full read-through ≤ 25 MB gz → actual 896,088 B gz (~0.90 MB).
+- The `ledger.py` rows enumerate exactly the shipped filenames (no phantom
+  `draw/truth.json` / `ch1/outrate.json` rows — those never shipped; the R1a scene
+  data lives in `scenes/coldopen.json` + `scenes/ch1.json`).
 
 ## Tests
 
 ```sh
-python3 -m unittest discover -s pipeline/tests -q     # 62 tests
+python3 -m unittest discover -s pipeline/tests -q     # 68 tests
 ```
 
 - `test_canon.py` — canonicalization tables exhaustive over the corpus in **both**
   directions, season set + `dates[0]` agreement, 23 groups, D/L = 23, super-over
   innings = 36, Gujarat teams distinct.
-- `test_flatten.py` — independent recount (own ordering, own season derivation, own
-  bit-packer): n_points = 316,199, full group-id + attrs stream equality, per-bit
-  round-trips, super-over exclusion on the known 2017 tie, columnar integrity.
+- `test_flatten.py` — independent recount (own **season-blocked** ordering, own season
+  derivation, own bit-packer): n_points = 316,199, full group-id + attrs stream
+  equality, per-bit round-trips, super-over exclusion on the known 2017 tie, columnar
+  integrity, `point_order == "season-blocked"`; and the **order invariant asserted
+  directly** — every IPL-2023 delivery precedes every WPL-2023 delivery, the year of
+  play is non-decreasing across the stream, and the CO-3 counter stops still land at
+  13,489 (2008) / 122,434 (thru 2015).
 - `test_r1a.py` — the addendum artifacts against an independent recount **plus
   hand-checked anchors**: `ballsfaced.u8` full-stream equality + the hand-checked
   match (335982: McCullum 158* off **73** balls, Ganguly 12, Kohli 5 — public
@@ -169,14 +203,19 @@ python3 -m unittest discover -s pipeline/tests -q     # 62 tests
   (1358929: MI-W); `teams.json` contract (20 teams, unique shorts, 5 inactive, hex
   colors); `scenes/coldopen.json` vs the hard-coded data-profile tables (200+ series
   incl. the 65-in-2026 reveal, full-first-innings averages, match counts, corpus
-  facts) and cross-artifact delivery counts vs `groups.json`; `scenes/ch1.json` —
+  facts) and cross-artifact delivery counts vs `groups.json` + `meta.json` v2 counts
+  (`n_players` 938, per-league + **total** `n_matches` == 1331); `scenes/ch1.json` —
   every curve/section recounted independently + all catalog teasers asserted as
   constants (108.0/135.3/110.5, 5.04/4.93, 7.3→11.4 + 58.7→67.3, 18→58 + 35.9→28.1,
-  46.8/33.9, RR year 1–4 lists) + a full independent re-derivation of one defiers cell
-  (ipl 2023-2026 @ ball 10: top-5 membership, order and scores); `payoff/ch1.json` —
-  harness assertions re-run on the on-disk file, neutral reproduces the thesis, era
-  labels, starter floors, WPL maturity clocks, designed sparsity for born-late
-  franchises.
+  **balls-per-six 20.8→11.7** with an independent legal-ball recount, 46.8/33.9, RR
+  year 1–4 lists) + `ball_index_axis` convention (per-ball curves end at exactly ball
+  30, not a capped 30+ bucket) + defiers keyed **{1,3,5,10,15,20}** with 5 per index
+  and a full independent re-derivation of one cell (ipl 2023-2026 @ ball 10: top-5
+  membership, order and scores); `payoff/ch1.json` — harness assertions re-run on the
+  on-disk file, neutral reproduces the thesis, era labels, starter floors, WPL
+  maturity clocks, designed sparsity for born-late franchises, and the **discrete
+  `team_pair`/`honesty` fields** (non-empty honesty ⟺ small_sample; the WPL headline is
+  `team_pair + " " + honesty`, no regex).
 
 Snapshot constants live at the top of each test file; a new Cricsheet drop that changes
 the corpus must update them consciously.

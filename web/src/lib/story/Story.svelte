@@ -3,7 +3,13 @@
 	import { base } from '$app/paths';
 	import type { FieldHandle, FieldStats } from '$lib/field/field';
 	import { chapterProgress, footnotesOpen, pickedTeam } from '$lib/state';
-	import { morphFraction, resolveRenderState, sceneEndState } from './fieldstate';
+	import {
+		dynamicTarget,
+		heldState,
+		morphFraction,
+		resolveRenderState,
+		sceneEndState
+	} from './fieldstate';
 	import type { SceneDef } from './types';
 	import FootnotePanel from './FootnotePanel.svelte';
 
@@ -23,9 +29,15 @@
 		scenes: SceneDef[];
 		/** notified whenever the active scene changes (nav visibility, progress) */
 		onSceneChange?: (index: number, scene: SceneDef) => void;
+		/**
+		 * notified when a set-piece field morph (the assembly scrub or the
+		 * ignition-wall morph) enters/leaves flight — the nav dims to 40% while
+		 * true so the ☰ never fights a set piece (storyboard §6).
+		 */
+		onSetPieceChange?: (inFlight: boolean) => void;
 	}
 
-	let { scenes, onSceneChange }: Props = $props();
+	let { scenes, onSceneChange, onSetPieceChange }: Props = $props();
 
 	let canvas: HTMLCanvasElement;
 	let stickyViewport: HTMLDivElement;
@@ -62,19 +74,42 @@
 		return t ? t.id : -1;
 	});
 
-	/* ---- the one field-application path (scroll, team, motion-pref, scene) --- */
+	/* ---- the one field-application path (scroll, team, motion-pref, scene) ---
+	   `to` is the scene's live target (fieldState resolved through its optional
+	   dynamicState at the current progress — so a caption step can drive a
+	   one-change held-state update, e.g. C1-5's two-tone re-sort recolor).
+	   `from` is the previous scene's fully-SETTLED held state, so a re-sort that
+	   engaged and tinted to completion settles back from that state (no pop). */
 	$effect(() => {
 		const f = fieldHandle;
 		if (!f) return;
 		const cur = currentIdx;
 		const scene = scenes[cur];
-		const target = (s: SceneDef) => (reduced ? sceneEndState(s) : s.fieldState);
-		const to = target(scene);
-		const from = scene.fromState ?? (cur > 0 ? target(scenes[cur - 1]) : to);
+		const p = progresses[cur];
+		const to = reduced ? sceneEndState(scene) : dynamicTarget(scene, p);
+		const from =
+			scene.fromState ??
+			(cur > 0 ? (reduced ? sceneEndState(scenes[cur - 1]) : heldState(scenes[cur - 1])) : to);
 		const t = reduced
 			? 1 // live end-state jump-cut, no interpolation
-			: Math.min(1, Math.max(0, progresses[cur] / morphFraction(scene)));
+			: Math.min(1, Math.max(0, p / morphFraction(scene)));
 		f.applyState(resolveRenderState(from, to, t, teamId));
+	});
+
+	/* ---- set-piece morph in flight → nav dims (storyboard §6). A set piece is
+	   a big field move: a layout change (ignition wall, close return) OR a
+	   reveal scrub (the assembly). Detected structurally so no scene id is
+	   hard-coded here. Never in flight under reduced motion (jump-cut). */
+	const setPieceInFlight = $derived.by(() => {
+		if (reduced) return false;
+		const cur = currentIdx;
+		const scene = scenes[cur];
+		const to = scene.fieldState;
+		const from = scene.fromState ?? (cur > 0 ? scenes[cur - 1].fieldState : to);
+		const bigMove = from.layout !== to.layout || (from.reveal ?? 1) !== (to.reveal ?? 1);
+		if (!bigMove) return false;
+		const t = progresses[cur] / morphFraction(scene);
+		return t > 0.001 && t < 0.999;
 	});
 
 	/* ---- scene-change notifications + progress persistence ------------------- */
@@ -82,6 +117,10 @@
 		const scene = scenes[currentIdx];
 		onSceneChange?.(currentIdx, scene);
 		chapterProgress.set({ scene: scene.anchor ?? scene.id, ts: Date.now() });
+	});
+
+	$effect(() => {
+		onSetPieceChange?.(setPieceInFlight);
 	});
 
 	onMount(() => {

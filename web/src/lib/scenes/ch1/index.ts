@@ -7,14 +7,16 @@ import Fireworks from './Fireworks.svelte';
 import WplBeat from './WplBeat.svelte';
 import PayoffCard from './PayoffCard.svelte';
 import Close from './Close.svelte';
+import { twoTone } from './data';
 
 /**
  * CHAPTER 1 — The Death of the Sighter (storyboard §3, scenes C1-1..C1-8).
  *
  * Morph budget: exactly ONE controlling morph — free field → ignition wall
  * (ch1-wall), returned in ch1-close (the same morph's return leg). Everything
- * between is a subset-highlight (ch1-sixes) or a 2D annotation-plane scene;
- * every intermediate scene keeps layout 'wall' so no second re-sort exists.
+ * between keeps layout 'wall'; ch1-sixes adds the CONTRACT §7 subset RE-SORT
+ * (a cross-cutting modifier that composes with the wall — it does NOT spend a
+ * second controlling morph), and the others are 2D annotation-plane scenes.
  *
  * WPL shelf staging (storyboard C1-2/C1-6): wplDim 0.55 from the wall's
  * completion through the fireworks — the shelf's dark left edge must not
@@ -73,15 +75,56 @@ export const scenes: SceneDef[] = [
 		chapter: 'ch1',
 		scrollLength: 170,
 		morphLength: 70,
-		// the chapter's one subset-highlight: the IPL's sixes lift out of the
-		// wall and brighten while everything else dims hard (no re-sort —
-		// CONTRACT §3). skipWpl: the WPL's sixes stay on its shelf — the
-		// caption names the omission as deliberate (storyboard C1-5).
+		// The chapter's signature subset moment (storyboard C1-5, CONTRACT §7/§9):
+		// every IPL six lifts vertically out of the ignition wall (two-phase — it
+		// arcs up as the wall dims hard via othersDim) and RE-SORTS into 19
+		// per-season firework columns, height = that season's six count, each
+		// point a real six. Reversible: the next scene (ch1-wpl) declares no
+		// resort, so `engage` lerps 1→0 and the sixes settle back onto the wall.
+		// skipWpl keeps the WPL's sixes on its shelf — the caption names the
+		// omission as deliberate. columns:'ipl' → 19 IPL season columns only.
 		fieldState: {
 			layout: 'wall',
 			wplDim: 0.55,
-			highlight: { class: 'six', lift: 0.14, boost: 0.6, othersDim: 0.12, skipWpl: true }
+			resort: {
+				class: 'six',
+				skipWpl: true,
+				columns: 'ipl',
+				engage: 1,
+				lift: 0.5,
+				othersDim: 0.12,
+				tint: 0
+			}
 		},
+		// reduced motion jump-cuts straight to the stacked columns (the two-phase
+		// lift collapses). tint stays 0 until the pipeline ships attrs.u8 bit 5
+		// (the season-top-10-hitter flag) — with the bit absent the shader would
+		// dim every six uniformly. When it ships, set tint: 1 here so the
+		// reduced-motion jump-cut lands on the two-toned columns (the animated
+		// path already auto-enables via the twoTone gate below).
+		reducedMotionEndState: {
+			layout: 'wall',
+			wplDim: 0.55,
+			resort: {
+				class: 'six',
+				skipWpl: true,
+				columns: 'ipl',
+				engage: 1,
+				lift: 0.5,
+				othersDim: 0.12,
+				tint: 0
+			}
+		},
+		// step 3's one change: raise the two-tone recolor tint once the caption
+		// crosses its threshold — but ONLY when the top-10 bit is actually
+		// populated (twoTone.available, set by Fireworks after scanning attrs).
+		// With the bit absent the shader dims every six uniformly (misleading),
+		// so we hold tint at 0 and Fireworks drops the "watch the slice shrink"
+		// line to match (pixels == copy in both states).
+		dynamicState: (progress, held) => ({
+			...held,
+			resort: { ...held.resort!, tint: progress >= 0.8 && twoTone.available ? 1 : 0 }
+		}),
 		annotations: Fireworks,
 		footnote: 'sixes'
 	},

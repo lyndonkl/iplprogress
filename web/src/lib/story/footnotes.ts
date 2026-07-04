@@ -9,11 +9,38 @@
  * technical names are introduced as "the technical name for this".
  */
 
+/**
+ * An optional small static 2D figure a footnote may carry (storyboard C1-4's
+ * "Over as a Clock Face" demoted exhibit). Data-only — no markup — so the
+ * registry stays plain-text-friendly; FootnotePanel owns the rendering. Only
+ * the 'over-clock' radial exists in R1a; the union grows as scenes need it.
+ */
+export interface OverClockFigure {
+	kind: 'over-clock';
+	/** balls per over on the dial (6) */
+	balls: number;
+	/** radial axis maximum, run-rate units */
+	max: number;
+	/**
+	 * one entry per era line. `points` carries ONLY verified (ball, rr) anchors
+	 * — the renderer marks and labels exactly those, never inventing the
+	 * unmeasured balls between them (honesty invariant: no on-screen number
+	 * without a source).
+	 */
+	series: { label: string; tone: 'ghost' | 'bold'; points: { ball: number; rr: number }[] }[];
+	/** one-line reading of the figure */
+	caption: string;
+}
+
+export type FootnoteFigure = OverClockFigure;
+
 export interface FootnoteEntry {
 	/** panel heading, fan-legible */
 	title: string;
 	/** paragraphs of plain text (no markup — keep the layer honest and simple) */
 	paragraphs: string[];
+	/** optional small static 2D figure rendered below the prose (C1-4 radial) */
+	figure?: FootnoteFigure;
 }
 
 export const FOOTNOTES = {
@@ -47,7 +74,7 @@ export const FOOTNOTES = {
 	sixes: {
 		title: 'Counting the sixes',
 		paragraphs: [
-			'A six is any ball the batter hit for six (runs off the bat, not extras). The columns chart counts every IPL six by season; behind the rounded “every 21 → every 12” sit 20.8 balls per six in 2008 and 11.7 in 2026.',
+			'A six is any ball the batter hit for six (runs off the bat, not extras). Each firework column is that season’s real IPL sixes; the raw heights run 623 in 2008 to 1,426 in 2026, and behind the rounded “every 21 → every 12” sit 20.8 balls per six then and 11.7 now.',
 			'Seasons grew too — more matches, more balls (13,489 deliveries in 2008 versus far more now) — so raw six counts flatter the modern game; the per-ball rate is the honest comparison, and it is the one the caption quotes.',
 			'The “big swings” pair uses an aerial-attempt proxy: attempts = sixes + caught dismissals (caught-and-bowled excluded) per 100 balls; execution = sixes ÷ (sixes + caught). Caught includes keeper and slip edges — the data carries no fielding positions — a fixed noise floor that leaves era-over-era comparisons valid so long as edge rates are stable. True shot-level intent would need non-public ball-tracking.',
 			'Attempts rose as well as landings: 7.3 per 100 balls (2008-2010) → 11.4 (2023-2026), about +56%, while execution rose 58.7% → 67.3%.',
@@ -64,7 +91,32 @@ export const FOOTNOTES = {
 			'Conventions: wides don’t count toward balls faced (a batter can still be out on one, and that dismissal counts); no-balls do. The first-ten-balls headline — 5.04% then, 4.93% now — counts every dismissal at a faced-count of ten or fewer. Per-era samples: 2,733 batter-innings and 20,101 first-ten balls (2008-2010); 4,579 and 33,882 (2023-2026).',
 			'A demoted exhibit — the over as a clock face: even inside the over the sighter died. 2008-10 overs ran quiet-loud-quiet: the over’s first ball scored at a 7.34 run rate with a ball-three peak of 8.02. 2023-26 overs start hot and fade: ball one at 9.20, ball six at 8.89.',
 			'The environment moved too — pitches, rules (the 2023 Impact Player among them). Chapters 4, 7 and 10 apportion the credit; the early-innings out-rate stayed flat across all of it.'
-		]
+		],
+		figure: {
+			kind: 'over-clock',
+			balls: 6,
+			max: 10,
+			series: [
+				{
+					label: '2008-10',
+					tone: 'ghost',
+					points: [
+						{ ball: 1, rr: 7.34 },
+						{ ball: 3, rr: 8.02 }
+					]
+				},
+				{
+					label: '2023-26',
+					tone: 'bold',
+					points: [
+						{ ball: 1, rr: 9.2 },
+						{ ball: 6, rr: 8.89 }
+					]
+				}
+			],
+			caption:
+				'Run rate by ball of the over. 2008-10 ran quiet-loud-quiet (a ball-three peak); 2023-26 starts hot off ball one and eases. Only the verified balls are marked.'
+		}
 	},
 	'wpl-two-clocks': {
 		title: 'Two clocks, one beat',

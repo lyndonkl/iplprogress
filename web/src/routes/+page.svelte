@@ -28,20 +28,14 @@
 	// Snapshot BEFORE the story starts writing progress: this is the previous
 	// visit's "last anchor reached", powering the nav's Continue affordance.
 	const resumeAnchor = browser ? (get(chapterProgress)?.scene ?? null) : null;
-	// Deep entries (shared links, nav jumps) get the nav immediately.
-	const deepEntry = browser && window.location.hash.length > 1;
 
 	let currentAnchor = $state(scenes[0].anchor ?? scenes[0].id);
-	let currentChapter = $state(scenes[0].chapter);
+	// the ☰ dims to 40% while a set-piece morph is in flight (storyboard §6)
+	let navDimmed = $state(false);
 
 	function onSceneChange(_index: number, scene: SceneDef): void {
 		currentAnchor = scene.anchor ?? scene.id;
-		currentChapter = scene.chapter;
 	}
-
-	// Chapter nav appears after the cold open (blueprint §2) — or immediately
-	// for deep entries and returning readers.
-	const navVisible = $derived(currentChapter !== 'coldopen' || deepEntry || resumeAnchor !== null);
 </script>
 
 <svelte:head>
@@ -52,6 +46,6 @@
 	/>
 </svelte:head>
 
-<Story {scenes} {onSceneChange} />
+<Story {scenes} {onSceneChange} onSetPieceChange={(inFlight) => (navDimmed = inFlight)} />
 
-<ChapterNav items={navItems} visible={navVisible} {currentAnchor} {resumeAnchor} />
+<ChapterNav items={navItems} dimmed={navDimmed} {currentAnchor} {resumeAnchor} />

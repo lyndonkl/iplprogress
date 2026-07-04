@@ -95,7 +95,7 @@
 				id: 'ceiling',
 				at: tCeiling,
 				pinned: false,
-				text: '2023: the year the ceiling broke.'
+				text: '2023: the year the ceiling broke —'
 			});
 		const tWpl = first.get(marks[3]); // the WPL's first delivery rains in
 		if (tWpl !== undefined)
@@ -106,25 +106,28 @@
 				text: `And a second league assembles — deliberately apart, its own body of light. The WPL: ${fmt(wplTotal)} deliveries.`
 			});
 		// captions fire in buffer order — each names what is actually raining in.
-		// Chronology puts the WPL's March-2023 arrival BEFORE IPL 2023 (the
-		// pixels rule outranks the storyboard's assumed order), so the pinned
-		// WPL caption fires first and the ceiling stop follows ~5k points later
-		// — still one change per beat, in the true order.
+		// The pipeline now emits IPL 2023 before WPL 2023 (season-blocked point
+		// order), restoring the authored sequence: the ceiling micro fires a
+		// beat BEFORE the pinned WPL caption. The em dash on "the ceiling
+		// broke —" hands into the WPL card that follows it.
 		out.sort((a, b) => a.at - b.at);
 		return out;
-	});
-
-	const micro = $derived.by((): Stop | null => {
-		if (reduced || showTitle || reveal >= 1) return null;
-		let cur: Stop | null = null;
-		for (const s of stops) if (!s.pinned && count >= s.at) cur = s;
-		return cur;
 	});
 
 	const pinnedStop = $derived.by((): Stop | null => {
 		if (reduced || showTitle) return null;
 		for (const s of stops) if (s.pinned && count >= s.at) return s;
 		return null;
+	});
+
+	const micro = $derived.by((): Stop | null => {
+		if (reduced || showTitle || reveal >= 1) return null;
+		// one caption card at a time: once the WPL card pins the slot, the
+		// ephemeral ceiling micro yields to it (§12 one-change-per-beat rule).
+		if (pinnedStop !== null) return null;
+		let cur: Stop | null = null;
+		for (const s of stops) if (!s.pinned && count >= s.at) cur = s;
+		return cur;
 	});
 </script>
 

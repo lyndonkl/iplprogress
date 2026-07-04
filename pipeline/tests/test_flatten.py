@@ -26,6 +26,7 @@ import flatten
 EXPECTED_N_POINTS = 316_199  # all deliveries minus the 189 super-over balls
 EXPECTED_SUPER_OVER_DELIVERIES = 189
 EXPECTED_GROUPS = 23
+EXPECTED_POINT_ORDER = "season-blocked"  # R1a MF3: IPL-before-WPL within a year
 SAMPLED_IPL_MATCH = "1082591.json"  # IPL 2017 opener, SRH v RCB
 SAMPLED_WPL_MATCH = "1358929.json"  # WPL 2023 opener
 TIE_MATCH = "1082625.json"  # IPL 2017 tie -> super over (excluded balls)
@@ -51,7 +52,10 @@ def independent_recount():
             with open(path) as fh:
                 date0 = str(json.load(fh)["info"]["dates"][0])
             entries.append((date0, int(path.stem), league, path))
-    entries.sort(key=lambda e: (e[0], e[1]))
+    # Season-blocked order (R1a MF3), derived independently: year of play, then
+    # IPL before WPL within a year (`league != "ipl"` -> False<True), then
+    # chronological. Must reproduce flatten's stream byte-for-byte.
+    entries.sort(key=lambda e: (int(e[0][:4]), e[2] != "ipl", e[0], e[1]))
 
     order = [("ipl", y) for y in range(2008, 2027)] + [
         ("wpl", y) for y in range(2023, 2027)
@@ -133,7 +137,12 @@ class TestMetaAndCounts(unittest.TestCase):
 
     def test_meta_contract_fields(self):
         self.assertEqual(ART["meta"]["built_at"], "unknown")
-        self.assertEqual(ART["meta"]["point_order"], "chronological")
+        self.assertEqual(ART["meta"]["point_order"], EXPECTED_POINT_ORDER)
+        self.assertEqual(
+            json.loads(gzip.decompress((canon.OUT_ROOT / "columnar.json.gz").read_bytes()))
+            ["point_order"],
+            EXPECTED_POINT_ORDER,
+        )
         for name in ("groups.json", "group_ids.u16", "attrs.u8", "columnar.json.gz"):
             sizes = ART["meta"]["files"][name]
             self.assertGreater(sizes["bytes_raw"], 0)
@@ -181,6 +190,60 @@ class TestAttrs(unittest.TestCase):
         self.assertEqual(wickets, sum(1 for b in REF["attrs"] if b & (1 << 3)))
         self.assertGreater(wickets, 10_000)
         self.assertLess(wickets, 20_000)
+
+
+class TestSeasonBlockedOrder(unittest.TestCase):
+    """R1a MF3: the point stream assembles season by season — strictly
+    chronological across seasons, but IPL before WPL within a shared year."""
+
+    def _stream_gis(self):
+        gis = array("H")
+        gis.frombytes(ART["group_ids"])
+        if sys.byteorder == "big":
+            gis.byteswap()
+        return gis
+
+    def test_ipl_2023_precedes_wpl_2023_delivery_for_delivery(self):
+        """Every IPL-2023 delivery lands before every WPL-2023 delivery — the
+        invariant that restores the cold open's authored caption order (the
+        '2023: the ceiling broke' micro fires a beat BEFORE the WPL start)."""
+        order = REF["order"]
+        gi_ipl = order.index(("ipl", 2023))
+        gi_wpl = order.index(("wpl", 2023))
+        gis = self._stream_gis()
+        ipl_idx = [i for i, g in enumerate(gis) if g == gi_ipl]
+        wpl_idx = [i for i, g in enumerate(gis) if g == gi_wpl]
+        self.assertTrue(ipl_idx and wpl_idx, "both 2023 seasons must be present")
+        self.assertLess(max(ipl_idx), min(wpl_idx))
+
+    def test_year_of_play_is_non_decreasing(self):
+        """Across seasons the stream stays strictly chronological: the calendar
+        year of play never goes backwards (WPL's year sits with its own year,
+        just after that year's IPL block)."""
+        order = REF["order"]
+        gis = self._stream_gis()
+        prev = 0
+        for g in gis:
+            year = order[g][1]
+            self.assertGreaterEqual(year, prev)
+            prev = year
+
+    def test_counter_stops_match_storyboard(self):
+        """CO-3 §9 counter stops are cumulative offsets in the stream; the
+        pre-2023 blocks are unaffected by the IPL/WPL swap, so 2008 fully in =
+        13,489 and thru-2015 = 122,434 must still hold."""
+        order = REF["order"]
+        gis = self._stream_gis()
+        first = {}
+        for i, g in enumerate(gis):
+            if g not in first:
+                first[g] = i
+        self.assertEqual(first[order.index(("ipl", 2009))], 13_489)
+        self.assertEqual(first[order.index(("ipl", 2016))], 122_434)
+        # The WPL constellation starts strictly after the IPL-2023 ceiling stop.
+        self.assertLess(
+            first[order.index(("ipl", 2023))], first[order.index(("wpl", 2023))]
+        )
 
 
 class TestSuperOverExclusion(unittest.TestCase):

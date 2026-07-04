@@ -21,6 +21,17 @@
  *                      (uHlBoost); everything else dims (uOthersDim).
  *                      uHlSkipWpl excludes WPL points from the match (C1-5:
  *                      the WPL's sixes stay on its shelf while the IPL's lift)
+ *   subset re-sort   — points matching uResortClass fly from their base layout
+ *                      into per-season firework columns as uResortEngage scrubs
+ *                      0→1 (x = uResortX[gi] column centre, y stacked by the
+ *                      per-point subset ordinal aSubOrd / uResortInvMax),
+ *                      arcing up out of the wall (uResortLift) with the SAME
+ *                      per-point stagger so object constancy holds; everything
+ *                      else dims (uResortOthersDim). A per-point two-tone
+ *                      recolor fades in with uResortTint (attrs.u8 bit 5 =
+ *                      top-10 specialist → bright, else dim — LUMINANCE only).
+ *                      uResortSkipWpl keeps WPL points on the wall. Reversible:
+ *                      the settle-back is just uResortEngage lerping 1→0. §7.
  *   team ignite      — points whose aTeam == uPickedTeam render in uTeamColor
  *                      and resist the global dim (personalization survives)
  *   dims             — uDim (whole field) and uWplDim (WPL points only) are
@@ -31,9 +42,12 @@
  *   position.x = point index (chronological)
  *   position.y = group index gi
  *   position.z = ordinal within group (client-computed in one pass)
- *   aAttrs      = packed outcome byte (bits 0-2 class, bit 3 wicket, bit 4 WPL)
+ *   aAttrs      = packed outcome byte (bits 0-2 class, bit 3 wicket, bit 4 WPL,
+ *                 bit 5 = hit by that season's top-10 six-hitter — C1-5 two-tone)
  *   aBallsFaced = batter balls-faced index (u8, capped 255)
  *   aTeam       = batting-team id (u8, matches teams.json)
+ *   aSubOrd     = point's ordinal among its group's re-sort subset (client-
+ *                 computed on demand; 0 for non-subset points — no wire cost)
  */
 
 /** Fraction of the reveal range a point spends "raining in" (assembly layout). */
@@ -68,12 +82,21 @@ uniform float uHlLift;        // world-units vertical lift for highlighted point
 uniform float uHlBoost;       // brightness boost for highlighted points
 uniform float uOthersDim;     // luminance multiplier for non-highlighted points
 uniform float uHlSkipWpl;     // 1 = WPL points never match the highlight (C1-5)
+uniform float uResortClass;   // subset re-sort class code (-1 none · 0-5 outcome · 6 wicket)
+uniform float uResortSkipWpl; // 1 = WPL points never re-sort (stay on the wall)
+uniform float uResortEngage;  // 0 = base layout · 1 = matching points in columns
+uniform float uResortLift;    // world-units peak of the flight arc
+uniform float uResortTint;    // two-tone recolor strength 0..1 (top-10 vs rest)
+uniform float uResortOthersDim; // luminance × for non-matching points while engaged
+uniform float uResortInvMax;  // 1 / max per-group subset count (column height norm)
+uniform float uResortX[GROUP_COUNT]; // per-group re-sort column centre x (world)
 uniform float uPickedTeam;    // picked-team id (-1 = none)
 uniform vec3 uTeamColor;      // picked team's color
 
 in float aAttrs;
 in float aBallsFaced;
 in float aTeam;
+in float aSubOrd;
 
 out vec3 vColor;
 out float vGlow;
@@ -124,6 +147,16 @@ void main() {
 	int outcome = a & 7;
 	bool wicket = (a & 8) != 0;
 	bool wpl = (a & 16) != 0;
+	bool top10 = (a & 32) != 0; // hit by that season's top-10 six-hitter (C1-5 two-tone)
+
+	// ---- Subset re-sort membership (drives both position and color below).
+	bool resortOn = uResortClass >= 0.0;
+	bool matchResort = false;
+	if (resortOn) {
+		int rc = int(uResortClass + 0.5);
+		matchResort = (rc == 6) ? wicket : (outcome == rc);
+		if (matchResort && uResortSkipWpl > 0.5 && wpl) matchResort = false;
+	}
 
 	// ---- Layout: the free field — procedural scatter from the index hash,
 	//      slight z-jitter for depth on the 2.5D ortho camera. The WPL is its
@@ -173,6 +206,22 @@ void main() {
 		pickLayout(uLayoutB, posFree, posCols, posWall),
 		t
 	);
+
+	// ---- Subset re-sort: matching points fly from the base layout into their
+	//      season's firework column, arcing up on the way. Staggered by the
+	//      SAME per-point delay as the layout morph, so every point traces one
+	//      continuous path (object constancy); reversible via uResortEngage 1→0.
+	if (matchResort) {
+		float re = clamp(uResortEngage * 1.55 - delay, 0.0, 1.0);
+		re = re * re * (3.0 - 2.0 * re);
+		vec3 posCol = vec3(
+			uResortX[gi] + (h4 * 2.0 - 1.0) * uColHalfWidth,
+			uColBottom + (aSubOrd + 0.5 + h2 * 0.6) * uResortInvMax * uColUsableH,
+			(h3 - 0.5) * 0.25
+		);
+		pos = mix(pos, posCol, re);
+		pos.y += 4.0 * re * (1.0 - re) * uResortLift; // lift arc, symmetric both legs
+	}
 
 	float alphaMul = 1.0;
 
@@ -232,6 +281,25 @@ void main() {
 		} else {
 			alphaMul *= uOthersDim;
 			c *= mix(0.8, 1.0, uOthersDim);
+		}
+	}
+
+	// ---- Subset re-sort recolor: matching points brighten as they lift and
+	//      carry the two-tone LUMINANCE split (top-10 specialist bright vs rest
+	//      dim, within the six-ember hue — never a second hue); everything else
+	//      dims hard so the columns read on a cleared stage. Weighted by engage
+	//      so it fades in with the flight and back out on the settle.
+	if (resortOn) {
+		float reAmt = clamp(uResortEngage, 0.0, 1.0);
+		if (matchResort) {
+			float tone = mix(1.0, top10 ? 1.4 : 0.5, uResortTint);
+			c *= mix(1.0, tone, reAmt);
+			glow = max(glow, 0.4 * reAmt);
+			sizeMul *= 1.0 + 0.15 * reAmt;
+		} else {
+			float od = mix(1.0, uResortOthersDim, reAmt);
+			alphaMul *= od;
+			c *= mix(0.75, 1.0, od);
 		}
 	}
 

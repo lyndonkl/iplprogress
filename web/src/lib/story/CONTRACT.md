@@ -136,7 +136,16 @@ scene's held `fieldState` isn't the right jump-cut target, declare
 reference it via `SceneDef.footnote`. The shell renders the per-scene
 "ⓘ how we computed this" affordance and the accessible slide-over
 (`FootnotePanel.svelte`: dialog, focus-trapped, ESC, tap/keyboard — never
-hover). Plain-text paragraphs only.
+hover; opening it **locks background scroll** so the field can't scrub under a
+stray swipe). Every sheet carries a persistent **"Full methods →"** footer link
+to `${base}/methods/` — the progressive-disclosure chain reaches the methods
+page from any sheet.
+
+Entries are plain-text `paragraphs` plus an OPTIONAL data-only `figure` slot
+(`FootnoteFigure`) for a small static 2D exhibit (R1a: the `over-clock` radial,
+C1-4). The figure is numbers + labels only — no markup — and the panel owns the
+rendering; only plot values that trace to an artifact/§9 (the over-clock figure
+marks only verified balls, never invented intermediates).
 
 ## 5. Reader state (lib/state/)
 
@@ -153,18 +162,23 @@ No scene may gate content on any of these existing (deep links always work).
 
 ## 6. Nav & deep links
 
-Scenes with `navLabel` appear in the persistent chapter nav (☰, appears after
-the cold open; immediately on deep entry / return visits). Anchors are section
-ids; the shell calls `ScrollTrigger.update()` on hashchange and honors an
-entry hash after triggers mount. Future chapters are titles + `soon` tags in
-`navplan.ts` — titles are commitments, numbers aren't.
+Scenes with `navLabel` appear in the persistent chapter nav (☰). The ☰ is
+**visible in every scene — including the cold open — and never hidden**
+(storyboard §6); it **dims to 40% opacity while a set-piece field morph is in
+flight** (the assembly scrub and the ignition-wall morph) so it never fights a
+set piece. The shell detects a set piece structurally (a layout change or a
+reveal scrub) and passes `dimmed` to `<ChapterNav>` — no scene id is hard-coded.
+Opening the sheet **locks background scroll**. Anchors are section ids; the
+shell calls `ScrollTrigger.update()` on hashchange and honors an entry hash
+after triggers mount. Future chapters are titles + `soon` tags in `navplan.ts`
+— titles are commitments, numbers aren't.
 
 ## 7. File ownership map
 
 | Path | Owner | Notes |
 |---|---|---|
 | `src/lib/story/**` | **shell** | scene system, orchestrator, footnote UI, nav, this contract |
-| `src/lib/field/**` | **shell** | renderer, shaders, layouts, data loading — request changes, don't fork |
+| `src/lib/field/**` | **shell** | renderer, shaders, layouts, data loading — request changes, don't fork; subset re-sort capability in §9 |
 | `src/lib/state/**` | **shell** | store schemas are contract; additions by PR to the shell |
 | `src/lib/scenes/coldopen/` | cold-open builder | CO-1 draw · CO-2 reveal branches · CO-3 assembly + title card (replace `Assembly.svelte`/`Columns.svelte`) |
 | `src/lib/scenes/picker/` | picker builder | TP tile screen (replace `PickerStub.svelte`; keep writing `pickedTeam`) |
@@ -193,3 +207,100 @@ directory's anchors.
 5. `?hud=1` stays dev-only; zero HUD DOM on default load.
 6. Byte-determinism and the numbers: every on-screen figure traces to a
    pipeline artifact or the storyboard's verified-number index (§9).
+
+---
+
+## 9. The subset re-sort capability (C1-5 fireworks — the signature moment)
+
+A **reversible, in-shader re-sort** of one class of points into per-season
+firework columns and back. It is a cross-cutting modifier (like the highlight)
+— it composes with the base layout and does **not** spend a second controlling
+morph; the free→wall morph remains Ch 1's only layout morph. No positions cross
+the wire: the per-season stacking ordinal is derived on-device from `attrs` +
+group ids the first time a class engages (cached; zero recompute on scrub).
+
+### 9.1 Declaring it — `SceneFieldState.resort`
+
+```ts
+resort?: {
+  class: HighlightClass;   // which points re-sort ('six' for C1-5)
+  skipWpl?: boolean;       // WPL points stay on the wall (default false)
+  columns?: 'ipl' | 'all'; // which season groups become columns
+                           //   (default 'ipl' when skipWpl, else 'all')
+  engage: number;          // 0 = base layout · 1 = fully stacked in columns
+  lift?: number;           // world-units peak of the flight arc (default 0.5)
+  tint?: number;           // two-tone recolor strength 0..1 (default 0)
+  othersDim?: number;      // luminance × for everything else (default 0.12)
+} | null;
+```
+
+**How it animates.** `engage` lerps like any scalar during the scene's morph:
+the scene that DECLARES the re-sort pulls `engage` 0→1 (matching points fly out
+of the wall, arc up — staggered per point so each traces one continuous path,
+object constancy — and stack into their season's column, height = that season's
+count). The **next scene declares no `resort`**, so `engage` lerps 1→0 and the
+points settle back onto the wall — the reverse leg is free. The two-tone recolor
+is a per-point **luminance** split within the class hue (never a second hue),
+driven by `attrs.u8` **bit 5** (= hit by that season's top-10 six-hitter):
+top-10 bright, everyone else dim, weighted by `tint`.
+
+### 9.2 The two-tone recolor is a caption STEP → use `dynamicState`
+
+The recolor lands during the HOLD (after the morph), as a one-change caption
+step — so it can't ride the morph. Drive it with the optional
+`SceneDef.dynamicState(progress, held)`, which the orchestrator resolves the
+held state through on every tick (and which the settle-back reads at progress 1
+so there is no pop). It may only touch scalar aspects — never a new layout:
+
+```ts
+{
+  id: 'ch1-sixes',
+  scrollLength: 170, morphLength: 70,
+  fieldState: {
+    layout: 'wall', wplDim: 0.55,
+    resort: { class: 'six', skipWpl: true, engage: 1, lift: 0.5, othersDim: 0.12, tint: 0 }
+  },
+  // reduced motion jump-cuts straight to the stacked, two-toned columns:
+  reducedMotionEndState: {
+    layout: 'wall', wplDim: 0.55,
+    resort: { class: 'six', skipWpl: true, engage: 1, lift: 0.5, othersDim: 0.12, tint: 1 }
+  },
+  // step 3's one change: raise the two-tone tint once the caption crosses its
+  // threshold (the field re-renders once — demand mode holds):
+  dynamicState: (progress, held) => ({
+    ...held,
+    resort: { ...held.resort!, tint: progress >= 0.8 ? 1 : 0 }
+  }),
+  annotations: Fireworks,
+  footnote: 'sixes'
+}
+```
+
+The following scene (`ch1-wpl`) declares **no** `resort` → the columns dissolve
+back to the wall as its morph runs. (It keeps `layout: 'wall'`.)
+
+### 9.3 Anchoring DOM column labels — `field.getResortLayout()`
+
+Returns `null` until a re-sort has engaged, then:
+
+```ts
+{
+  xs: number[];      // world x of each group's column centre, indexed by gi (NaN = no column)
+  counts: number[];  // subset point count per gi (the column's raw height)
+  bottom: number;    // world y of the column base
+  usableH: number;   // world height at the tallest column
+  invMax: number;    // 1 / max subset count
+  gis: number[];     // gi's with a column, in season order
+}
+```
+
+Column top for group `gi` (world) = `bottom + counts[gi] * invMax * usableH`;
+project it with `field.projectToCss(xs[gi], top)` to place a `2008 / 2023 / 2026`
+label exactly over its column of points. Rebuilt on resize.
+
+### 9.4 Pipeline dependency (integration)
+
+The two-tone tint reads `attrs.u8` **bit 5** (mask `0x20`). Until the pipeline
+re-encodes that bit (season-top-10-six-hitter flag), it reads 0 everywhere and
+the re-sort degrades gracefully to a single-tone column. The re-sort itself
+(positions, columns, arc) needs no new bytes.

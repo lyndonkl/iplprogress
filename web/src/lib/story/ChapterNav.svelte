@@ -1,32 +1,43 @@
 <script lang="ts">
 	import { base } from '$app/paths';
 	import { pickedTeam } from '$lib/state';
+	import { lockScroll, unlockScroll } from './scrollLock';
 	import type { NavItem } from './navplan';
 
 	/**
-	 * Persistent chapter nav (blueprint §2, ships from R1): a fixed ☰ button
-	 * (44×44, top-right) opening a sheet (mobile) / right rail (desktop) of
-	 * chapter entries. Built scenes are real links (hash deep-links; the story
-	 * shell calls ScrollTrigger.update() on hashchange); unbuilt chapters are
-	 * titles with a `soon` tag. Chapters stand alone: jumping anywhere works
-	 * with no sketch or team state.
+	 * Persistent chapter nav (storyboard §6): a fixed ☰ button (44×44, top-right)
+	 * VISIBLE IN EVERY SCENE — including the cold open — and never hidden; it
+	 * DIMS to 40% opacity while a set-piece morph (the assembly scrub, the
+	 * ignition-wall morph) is in flight so it never fights a set piece. Opens a
+	 * sheet (mobile) / right rail (desktop) of chapter entries. Built scenes are
+	 * real links (hash deep-links; the shell calls ScrollTrigger.update() on
+	 * hashchange); unbuilt chapters are titles with a `soon` tag. Chapters stand
+	 * alone: jumping anywhere works with no sketch or team state.
 	 */
 
 	interface Props {
 		items: NavItem[];
-		/** appears after the cold open (or immediately on deep entry / return visits) */
-		visible: boolean;
+		/** dim the ☰ to 40% while a set-piece field morph is in flight (§6) */
+		dimmed?: boolean;
 		/** anchor of the currently-active scene */
 		currentAnchor: string;
 		/** stored progress anchor from a previous visit, if any */
 		resumeAnchor?: string | null;
 	}
 
-	let { items, visible, currentAnchor, resumeAnchor = null }: Props = $props();
+	let { items, dimmed = false, currentAnchor, resumeAnchor = null }: Props = $props();
 
 	let open = $state(false);
 	let sheetEl = $state<HTMLElement | null>(null);
 	let buttonEl = $state<HTMLButtonElement | null>(null);
+
+	// lock background scroll while the sheet is open (finding #18) — a stray
+	// swipe must not scrub the field underneath
+	$effect(() => {
+		if (!open) return;
+		lockScroll();
+		return unlockScroll;
+	});
 
 	const teamLine = $derived(
 		$pickedTeam === null || $pickedTeam.team === 'neutral'
@@ -74,19 +85,19 @@
 	}
 </script>
 
-{#if visible || open}
-	<button
-		class="nav-button"
-		bind:this={buttonEl}
-		onclick={toggle}
-		aria-label="Chapters"
-		aria-expanded={open}
-		aria-controls="chapter-nav-sheet"
-	>
-		<span class="glyph" aria-hidden="true">☰</span>
-		{#if showResume && !open}<span class="dot" aria-hidden="true"></span>{/if}
-	</button>
-{/if}
+<!-- always rendered — visible in every scene (storyboard §6), never gated -->
+<button
+	class="nav-button"
+	class:dimmed={dimmed && !open}
+	bind:this={buttonEl}
+	onclick={toggle}
+	aria-label="Chapters"
+	aria-expanded={open}
+	aria-controls="chapter-nav-sheet"
+>
+	<span class="glyph" aria-hidden="true">☰</span>
+	{#if showResume && !open}<span class="dot" aria-hidden="true"></span>{/if}
+</button>
 
 {#if open}
 	<div class="scrim" onclick={close} aria-hidden="true"></div>
@@ -158,11 +169,26 @@
 		color: var(--ink);
 		font-size: 1.05rem;
 		cursor: pointer;
+		opacity: 1;
+		transition: opacity 200ms ease;
+	}
+
+	/* dims while a set piece is in flight — never fights the assembly scrub or
+	   the ignition morph (storyboard §6); still fully clickable */
+	.nav-button.dimmed {
+		opacity: 0.4;
 	}
 
 	.nav-button:focus-visible {
 		outline: 2px solid var(--teal);
 		outline-offset: 2px;
+		opacity: 1;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.nav-button {
+			transition: none;
+		}
 	}
 
 	.dot {

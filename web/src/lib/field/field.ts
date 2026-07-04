@@ -9,6 +9,7 @@ import {
 import {
 	computeColumns,
 	computeWall,
+	computeResortColumns,
 	basePointPx,
 	type ColumnLayout,
 	type WallLayout
@@ -59,8 +60,30 @@ export interface FieldHandle {
 	getColumnLayout(): ColumnLayout | null;
 	/** current ignition-wall geometry (null before first resize) */
 	getWallLayout(): WallLayout | null;
+	/**
+	 * current subset re-sort column geometry (§7) — column centres, per-group
+	 * subset counts and the height normalizer, for anchoring DOM column labels.
+	 * null until a re-sort has been applied at least once.
+	 */
+	getResortLayout(): ResortColumnInfo | null;
 	readonly data: FieldData;
 	readonly stats: Readonly<FieldStats>;
+}
+
+/** Subset re-sort column geometry exposed to scenes (§7 — the C1-5 fireworks). */
+export interface ResortColumnInfo {
+	/** world x of each group's column centre, indexed by gi (NaN = no column) */
+	xs: number[];
+	/** subset point count per group, indexed by gi (the column's raw height) */
+	counts: number[];
+	/** world y of the column base */
+	bottom: number;
+	/** world height at the tallest column */
+	usableH: number;
+	/** 1 / max per-group subset count — column top = bottom + counts[gi]*invMax*usableH */
+	invMax: number;
+	/** the gi's that received a column, in season order */
+	gis: number[];
 }
 
 interface LabelEntry {
@@ -107,6 +130,10 @@ export function createField(opts: FieldOptions): FieldHandle {
 	// per-group table: x = column centre x · y = wall row centre y
 	const colVectors: THREE.Vector2[] = data.groups.map(() => new THREE.Vector2());
 
+	// per-point re-sort ordinal (filled on demand, §7) and per-group column x
+	const subOrd = new Float32Array(n);
+	const resortX = new Float32Array(groupCount);
+
 	const uniforms: Record<string, THREE.IUniform> = {
 		uProgress: { value: 0 },
 		uLayoutA: { value: LAYOUT_CODE.free },
@@ -132,6 +159,14 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uHlBoost: { value: 0 },
 		uOthersDim: { value: 1 },
 		uHlSkipWpl: { value: 0 },
+		uResortClass: { value: -1 },
+		uResortSkipWpl: { value: 0 },
+		uResortEngage: { value: 0 },
+		uResortLift: { value: 0 },
+		uResortTint: { value: 0 },
+		uResortOthersDim: { value: 1 },
+		uResortInvMax: { value: 1 },
+		uResortX: { value: resortX },
 		uPickedTeam: { value: -1 },
 		uTeamColor: { value: new THREE.Color('#ffffff') }
 	};
@@ -141,6 +176,8 @@ export function createField(opts: FieldOptions): FieldHandle {
 	geometry.setAttribute('aAttrs', new THREE.BufferAttribute(data.attrs, 1, false));
 	geometry.setAttribute('aBallsFaced', new THREE.BufferAttribute(data.ballsFaced, 1, false));
 	geometry.setAttribute('aTeam', new THREE.BufferAttribute(data.team, 1, false));
+	geometry.setAttribute('aSubOrd', new THREE.BufferAttribute(subOrd, 1, false));
+	const subOrdAttr = geometry.getAttribute('aSubOrd') as THREE.BufferAttribute;
 	// positions are procedural in-shader; give THREE an all-covering bound
 	geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 100);
 
@@ -165,6 +202,71 @@ export function createField(opts: FieldOptions): FieldHandle {
 	let wallLayout: WallLayout | null = null;
 	let cssW = 1;
 	let cssH = 1;
+
+	/* ---- subset re-sort state (§7 — the C1-5 fireworks) --------------------- */
+	// per-point ordinals are derived on-device the first time a given
+	// (class, skipWpl) re-sort is applied, then cached — no wire cost, no
+	// recompute on scrub. Column geometry rebuilds on resize.
+	const resortCache = new Map<
+		string,
+		{ ord: Float32Array; counts: number[]; invMax: number }
+	>();
+	let resortKey = ''; // the (class,skipWpl) pair currently uploaded to aSubOrd
+	let resortColumnsMode: 'ipl' | 'all' | null = null;
+	let resortInfo: ResortColumnInfo | null = null;
+	let halfWCache = 1;
+	let halfHCache = 1;
+
+	function ensureResortData(classCode: number, skipWpl: boolean, columns: 'ipl' | 'all'): void {
+		const key = `${classCode}:${skipWpl ? 1 : 0}`;
+		let entry = resortCache.get(key);
+		if (!entry) {
+			const ord = new Float32Array(n);
+			const counts = new Array<number>(groupCount).fill(0);
+			for (let i = 0; i < n; i++) {
+				const at = data.attrs[i];
+				const match = classCode === 6 ? (at & 8) !== 0 : (at & 7) === classCode;
+				if (!match) continue;
+				if (skipWpl && (at & 16) !== 0) continue;
+				const g = data.groupIds[i];
+				ord[i] = counts[g];
+				counts[g]++;
+			}
+			let maxc = 1;
+			for (let g = 0; g < groupCount; g++) if (counts[g] > maxc) maxc = counts[g];
+			entry = { ord, counts, invMax: 1 / maxc };
+			resortCache.set(key, entry);
+		}
+		if (resortKey !== key) {
+			(subOrdAttr.array as Float32Array).set(entry.ord);
+			subOrdAttr.needsUpdate = true;
+			uniforms.uResortInvMax.value = entry.invMax;
+			resortKey = key;
+		}
+		if (resortColumnsMode !== columns || !resortInfo) {
+			resortColumnsMode = columns;
+			rebuildResortColumns();
+		}
+	}
+
+	function rebuildResortColumns(): void {
+		if (resortColumnsMode === null) return;
+		const rl = computeResortColumns(data.groups, halfWCache, halfHCache, resortColumnsMode);
+		for (let gi = 0; gi < groupCount; gi++) {
+			const x = rl.xs[gi];
+			resortX[gi] = Number.isNaN(x) ? 0 : x;
+		}
+		uniforms.uResortX.value = resortX;
+		const entry = resortCache.get(resortKey);
+		resortInfo = {
+			xs: rl.xs,
+			counts: entry ? entry.counts.slice() : new Array<number>(groupCount).fill(0),
+			bottom: rl.bottom,
+			usableH: rl.usableH,
+			invMax: entry ? entry.invMax : 1,
+			gis: rl.gis
+		};
+	}
 
 	const proj = new THREE.Vector3();
 	function toCss(worldX: number, worldY: number): { x: number; y: number } {
@@ -238,7 +340,14 @@ export function createField(opts: FieldOptions): FieldHandle {
 			a.highlightBoost === b.highlightBoost &&
 			a.othersDim === b.othersDim &&
 			a.highlightSkipWpl === b.highlightSkipWpl &&
-			a.teamId === b.teamId
+			a.teamId === b.teamId &&
+			a.resortClass === b.resortClass &&
+			a.resortSkipWpl === b.resortSkipWpl &&
+			a.resortColumns === b.resortColumns &&
+			a.resortEngage === b.resortEngage &&
+			a.resortLift === b.resortLift &&
+			a.resortTint === b.resortTint &&
+			a.resortOthersDim === b.resortOthersDim
 		);
 	}
 
@@ -257,6 +366,22 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uniforms.uHlBoost.value = s.highlightBoost;
 		uniforms.uOthersDim.value = s.othersDim;
 		uniforms.uHlSkipWpl.value = s.highlightSkipWpl ? 1 : 0;
+
+		// subset re-sort (§7): lazily derive the per-point ordinals + column
+		// geometry the first time a given class engages; every scalar is set
+		// each apply so engage/tint/lift lerp exactly like the highlight.
+		uniforms.uResortEngage.value = s.resortEngage;
+		uniforms.uResortLift.value = s.resortLift;
+		uniforms.uResortTint.value = s.resortTint;
+		uniforms.uResortOthersDim.value = s.resortOthersDim;
+		uniforms.uResortSkipWpl.value = s.resortSkipWpl ? 1 : 0;
+		if (s.resortClass >= 0) {
+			ensureResortData(s.resortClass, s.resortSkipWpl, s.resortColumns);
+			uniforms.uResortClass.value = s.resortClass;
+		} else {
+			uniforms.uResortClass.value = -1;
+		}
+
 		uniforms.uPickedTeam.value = s.teamId;
 		const tc = teamColorById.get(s.teamId);
 		if (tc) (uniforms.uTeamColor.value as THREE.Color).copy(tc);
@@ -282,6 +407,8 @@ export function createField(opts: FieldOptions): FieldHandle {
 
 		const halfH = 1;
 		const halfW = w / h;
+		halfWCache = halfW;
+		halfHCache = halfH;
 		camera.left = -halfW;
 		camera.right = halfW;
 		camera.top = halfH;
@@ -303,6 +430,9 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uniforms.uWallRowHalfH.value = wallLayout.rowHalfH;
 		for (let gi = 0; gi < groupCount; gi++)
 			colVectors[gi].set(columnLayout.xs[gi], wallLayout.rowYs[gi]);
+
+		// re-sort column x's follow the width; rebuild if a re-sort is live
+		if (resortColumnsMode !== null) rebuildResortColumns();
 
 		// label density: rotate to vertical when column pitch gets tight (mobile)
 		const slotPx = (columnLayout.slotW / (2 * halfW)) * w;
@@ -339,6 +469,7 @@ export function createField(opts: FieldOptions): FieldHandle {
 		projectToCss: toCss,
 		getColumnLayout: () => columnLayout,
 		getWallLayout: () => wallLayout,
+		getResortLayout: () => resortInfo,
 		dispose(): void {
 			disposed = true;
 			if (rafId !== null) cancelAnimationFrame(rafId);

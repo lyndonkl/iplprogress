@@ -18,25 +18,36 @@
 	const shown = $derived(progress >= 0.42);
 
 	let ch1 = $state<Ch1Data | null>(null);
+	/* mobile legibility (MF2): narrower viewBox + bigger user-unit type so the
+	   three end labels, ticks and axis names clear 11px effective at 320/375px. */
+	let narrow = $state(false);
 	onMount(() => {
 		let alive = true;
 		loadCh1Data().then((d) => {
 			if (alive) ch1 = d;
 		});
+		const mql = window.matchMedia('(max-width: 640px)');
+		const sync = (): void => {
+			narrow = mql.matches;
+		};
+		sync();
+		mql.addEventListener('change', sync);
 		return () => {
 			alive = false;
+			mql.removeEventListener('change', sync);
 		};
 	});
 
 	/* ---- strike-rate peer curves (y zero-based, fixed max — axis honesty) ---- */
-	const W = 640;
-	const H = 300;
-	const ML = 48;
-	const MR = 110;
+	const W = $derived(narrow ? 430 : 640);
+	const H = $derived(narrow ? 320 : 300);
+	const ML = $derived(narrow ? 44 : 48);
+	const MR = $derived(narrow ? 96 : 110); // room for the "2023-26" end label at FONT 18
 	const MT = 18;
-	const MB = 36;
-	const plotW = W - ML - MR;
-	const plotH = H - MT - MB;
+	const MB = $derived(narrow ? 52 : 36);
+	const FONT = $derived(narrow ? 18 : 11);
+	const plotW = $derived(W - ML - MR);
+	const plotH = $derived(H - MT - MB);
 	const Y_MAX = 200; // fixed; data max ≈ 180
 
 	const xAt = (ball: number): number => ML + ((ball - 1) / 29) * plotW;
@@ -46,20 +57,38 @@
 		return vals.map((v, i) => `${xAt(i + 1).toFixed(1)},${yAt(v).toFixed(1)}`).join(' ');
 	}
 
+	/* text metrics that scale with FONT */
+	const vc = $derived(FONT * 0.34);
+	const tickLabY = $derived(narrow ? 26 : 18);
+
+	/* right-edge label from the pipeline's axis convention (per-ball curves end
+	   at exactly ball 30 → "30"; only the wall caps at "30+"). Not hardcoded. */
+	const axis = $derived(ch1 ? ch1.ball_index_axis : null);
+	const maxLabel = $derived(axis ? axis.max_label : '30');
+
+	/* end labels: drop the "IPL " prefix on the narrow frame to fit (hue already
+	   carries league — grey/ink are IPL, teal is WPL) */
+	const iplGhostLab = $derived(narrow ? '2008-10' : 'IPL 2008-10');
+	const iplBoldLab = $derived(narrow ? '2023-26' : 'IPL 2023-26');
+
+	const ticks = [1, 5, 10, 15, 20, 25];
+
 	const ghost = $derived(ch1 ? ch1.ignition.sr_by_ball_index[GHOST_BAND] : null);
 	const bold = $derived(ch1 ? ch1.ignition.sr_by_ball_index[BOLD_BAND] : null);
 	const wpl = $derived(ch1 ? ch1.ignition.sr_by_ball_index[WPL_BAND] : null);
 
-	/* direct end-of-line labels with collision nudging */
+	/* direct end-of-line labels with collision nudging (gap scales with FONT so
+	   the three labels never overlap on the larger mobile type) */
 	const endLabels = $derived.by(() => {
 		if (!ghost || !bold || !wpl) return null;
+		const gap = FONT + 2;
 		const raw = [
 			{ id: 'ghost', y: yAt(ghost[29]) },
 			{ id: 'bold', y: yAt(bold[29]) },
 			{ id: 'wpl', y: yAt(wpl[29]) }
 		].sort((a, b) => a.y - b.y);
 		for (let i = 1; i < raw.length; i++) {
-			if (raw[i].y - raw[i - 1].y < 15) raw[i].y = raw[i - 1].y + 15;
+			if (raw[i].y - raw[i - 1].y < gap) raw[i].y = raw[i - 1].y + gap;
 		}
 		const out: Record<string, number> = {};
 		for (const r of raw) out[r.id] = r.y;
@@ -78,7 +107,12 @@
 			<!-- deliberately distinct frame: teal edge + header band (≠ out-rate strip) -->
 			<div class="panel">
 				<p class="panel-title">Strike rate, ball by ball</p>
-				<svg viewBox="0 0 {W} {H}" role="img" aria-label="Strike rate by ball of the innings: IPL 2008-10, IPL 2023-26, and the WPL as peers">
+				<svg
+					viewBox="0 0 {W} {H}"
+					style="font-size:{FONT}px"
+					role="img"
+					aria-label="Strike rate, ball by ball, over balls 1 to {maxLabel} of the innings, on a zero-based fixed scale: IPL 2008-10, IPL 2023-26, and the WPL as peers"
+				>
 					{#each [0, 50, 100, 150, 200] as g (g)}
 						<line
 							x1={ML}
@@ -89,34 +123,39 @@
 							class:major={g % 100 === 0}
 						/>
 						{#if g % 100 === 0}
-							<text x={ML - 6} y={yAt(g) + 3.5} class="ylab">{g}</text>
+							<text x={ML - 6} y={yAt(g) + vc} class="ylab">{g}</text>
 						{/if}
 					{/each}
 					<text x={12} y={MT + plotH / 2} class="yname" transform="rotate(-90 12 {MT + plotH / 2})">
 						strike rate
 					</text>
 
-					{#each [1, 5, 10, 15, 20, 25, 30] as t (t)}
+					{#each ticks as t (t)}
 						<line x1={xAt(t)} x2={xAt(t)} y1={yAt(0)} y2={yAt(0) + 5} class="tickmark" />
-						<text x={xAt(t)} y={yAt(0) + 18} class="xlab">{t}</text>
+						<text x={xAt(t)} y={yAt(0) + tickLabY} class="xlab">{t}</text>
 					{/each}
-					<text x={ML + plotW / 2} y={H - 2} class="axis-name">ball of the innings</text>
+					<!-- right edge: exactly ball 30 (not the wall's capped 30+) — artifact label -->
+					<line x1={xAt(30)} x2={xAt(30)} y1={yAt(0)} y2={yAt(0) + 5} class="tickmark" />
+					<text x={xAt(30)} y={yAt(0) + tickLabY} class="xlab">{maxLabel}</text>
+					<text x={ML + plotW / 2} y={H - 5} class="axis-name">ball of the innings</text>
 
 					<polyline points={line(ghost)} class="curve ghost" />
 					<polyline points={line(bold)} class="curve bold" />
 					<polyline points={line(wpl)} class="curve wplline" />
 
 					{#if endLabels}
-						<text x={xAt(30) + 8} y={endLabels.ghost + 3.5} class="endlab ghost-lab">IPL 2008-10</text>
-						<text x={xAt(30) + 8} y={endLabels.bold + 3.5} class="endlab bold-lab">IPL 2023-26</text>
-						<text x={xAt(30) + 8} y={endLabels.wpl + 3.5} class="endlab wpl-lab">WPL</text>
+						<text x={xAt(30) + 8} y={endLabels.ghost + vc} class="endlab ghost-lab">{iplGhostLab}</text>
+						<text x={xAt(30) + 8} y={endLabels.bold + vc} class="endlab bold-lab">{iplBoldLab}</text>
+						<text x={xAt(30) + 8} y={endLabels.wpl + vc} class="endlab wpl-lab">WPL</text>
 					{/if}
 				</svg>
 
 				<!-- the engine pair: share of runs scored in fours (zero-based bars) -->
 				{#if foursWpl !== null && foursIpl !== null}
-					<div class="engine" role="img" aria-label="Share of runs scored in fours: WPL {fmt1(foursWpl)} percent, IPL 2023-26 {fmt1(foursIpl)} percent">
-						<p class="engine-title">Share of runs scored in fours</p>
+					<div class="engine" role="img" aria-label="Share of runs scored in fours, bars on a fixed 0 to 50 percent scale: WPL {fmt1(foursWpl)} percent, IPL 2023-26 {fmt1(foursIpl)} percent">
+						<p class="engine-title">
+							Share of runs scored in fours <span class="scale-note">— 0–50% scale</span>
+						</p>
 						<div class="bar-row">
 							<span class="bar-name wpl-ink">WPL</span>
 							<div class="bar-track">
@@ -235,12 +274,13 @@
 		stroke-width: 1;
 	}
 
+	/* font-size is inherited from the <svg> inline style (reactive user units —
+	   MF2 scales type up on the narrow viewBox); never hardcode it here */
 	.ylab,
 	.xlab,
 	.endlab,
 	.axis-name,
 	.yname {
-		font-size: 11px;
 		fill: var(--ink-dim);
 		font-variant-numeric: tabular-nums;
 	}
@@ -306,6 +346,13 @@
 		font-weight: 700;
 		letter-spacing: 0.06em;
 		color: var(--ink-dim);
+	}
+
+	/* names the bars' track so the WPL's 46.8% can't read as "nearly all" (#13) */
+	.scale-note {
+		font-weight: 500;
+		letter-spacing: 0.02em;
+		opacity: 0.85;
 	}
 
 	.bar-row {
@@ -375,7 +422,8 @@
 			transform: translateX(-50%);
 			width: 92vw;
 			max-width: 92vw;
-			bottom: max(7vh, calc(env(safe-area-inset-bottom) + 5vh));
+			/* clear the shell's fixed "how we computed this" affordance (finding #10) */
+			bottom: max(72px, calc(env(safe-area-inset-bottom) + 60px));
 		}
 	}
 </style>

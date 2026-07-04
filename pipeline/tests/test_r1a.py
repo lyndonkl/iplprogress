@@ -60,6 +60,9 @@ TEASER_AERIAL_EARLY = (7.3, 58.7)  # attempts/100, execution%
 TEASER_AERIAL_RECENT = (11.4, 67.3)
 TEASER_SIXES_2008 = {"sixes": 623, "players_10plus_sixes": 18, "top10_share_pct": 35.9}
 TEASER_SIXES_2026 = {"sixes": 1426, "players_10plus_sixes": 58, "top10_share_pct": 28.1}
+# balls_per_six = legal balls (wides AND no-balls excluded) / sixes — the
+# denominator behind the caption's rounded "a six every 21 -> every 12".
+TEASER_BALLS_PER_SIX = {2008: 20.8, 2026: 11.7}
 TEASER_FOURS_PCT = {"wpl": 46.8, "ipl_recent": 33.9}
 TEASER_SIXSHARE_PCT = {"wpl": 15.5, "ipl_recent": 29.0}
 TEASER_RR_Y1_4 = {"ipl": [8.31, 7.48, 8.13, 7.73], "wpl": [8.08, 7.86, 8.37, 8.54]}
@@ -121,7 +124,10 @@ def independent_recount():
             with open(path) as fh:
                 date0 = str(json.load(fh)["info"]["dates"][0])
             entries.append((date0, int(path.stem), league, path))
-    entries.sort(key=lambda e: (e[0], e[1]))
+    # Season-blocked order (R1a MF3), derived independently: year, then IPL
+    # before WPL within a year, then chronological — must reproduce the
+    # ballsfaced.u8 / team.u8 streams byte-for-byte.
+    entries.sort(key=lambda e: (int(e[0][:4]), e[2] != "ipl", e[0], e[1]))
 
     teams_doc = json.loads((canon.OUT_ROOT / "teams.json").read_text())
     tid = {(t["league"], t["name"]): t["id"] for t in teams_doc}
@@ -423,6 +429,9 @@ class TestColdOpenScene(unittest.TestCase):
         self.assertEqual(
             meta["n_matches"]["ipl"] + meta["n_matches"]["wpl"], c["matches"]
         )
+        # n_matches now carries an explicit total (title-card count source).
+        self.assertEqual(meta["n_matches"]["total"], c["matches"])
+        self.assertEqual(meta["n_matches"]["total"], 1331)
         rows = ART["coldopen"]["seasons"]
         for league in ("ipl", "wpl"):
             self.assertEqual(
@@ -472,6 +481,26 @@ class TestCh1Ignition(unittest.TestCase):
                 for n in range(1, 31)
             ]
             self.assertEqual(art_sr, expected, key)
+
+    def test_ball_index_axis_convention(self):
+        """finding #4/#13: the artifact documents that the per-ball curves end
+        at exactly ball 30 (not a capped 30+ bucket — only the wall caps), so
+        scenes label the right edge honestly."""
+        axis = ART["ch1"]["ball_index_axis"]
+        self.assertEqual(axis["min"], 1)
+        self.assertEqual(axis["max"], 30)
+        self.assertFalse(axis["max_is_capped"])
+        self.assertEqual(axis["max_label"], "30")
+        self.assertEqual(axis["wall_capped_label"], "30+")
+        self.assertTrue(axis["note"].strip())
+        # the curves it describes are exactly `max` long
+        self.assertEqual(
+            len(band_art("ignition", "sr_by_ball_index")["ipl 2008-2010"]), axis["max"]
+        )
+        self.assertEqual(
+            len(band_art("outrate", "hazard_pct_by_ball_index")["ipl 2008-2010"]),
+            axis["max"],
+        )
 
     def test_first10_sr_by_season_matches_recount(self):
         art = band_art("ignition", "first10_sr_by_season")
@@ -544,8 +573,14 @@ class TestCh1Defiers(unittest.TestCase):
         defiers = ART["ch1"]["defiers"]["bands"]
         self.assertEqual(set(defiers), set(REF["bands"]))
         for key, block in defiers.items():
-            self.assertEqual(set(block["by_ball_index"]), {"5", "10", "15", "20"}, key)
+            # Balls 1 and 3 (the sighter's heart) now ship alongside 5/10/15/20
+            # so the strip's tap set is fully data-backed (finding #11).
+            self.assertEqual(
+                set(block["by_ball_index"]), {"1", "3", "5", "10", "15", "20"}, key
+            )
             for idx, rows in block["by_ball_index"].items():
+                # Every band clears the 300-ball floor for >= 5 qualifiers at
+                # every index (asserted, not assumed).
                 self.assertEqual(len(rows), 5, (key, idx))
                 scores = [r["score"] for r in rows]
                 self.assertEqual(scores, sorted(scores, reverse=True), (key, idx))
@@ -586,10 +621,21 @@ class TestCh1SixesAerialWpl(unittest.TestCase):
         for league in ("ipl", "wpl"):
             for row in art[league]:
                 ss = REF["seasons"][(league, row["season"])]
-                self.assertEqual(row["sixes"], sum(ss.sixes.values()), row)
+                total_sixes = sum(ss.sixes.values())
+                self.assertEqual(row["sixes"], total_sixes, row)
                 self.assertEqual(
                     row["players_10plus_sixes"],
                     sum(1 for v in ss.sixes.values() if v >= 10),
+                    row,
+                )
+                # Per-season legal-ball count + balls_per_six trace the
+                # "every 21 -> every 12" caption to the artifact (finding
+                # #12/#17c). REF Season.runs[3] = legal balls (wides AND
+                # no-balls excluded), recounted independently.
+                self.assertEqual(row["legal_balls"], ss.runs[3], row)
+                self.assertEqual(
+                    row["balls_per_six"],
+                    round(ss.runs[3] / total_sixes, 1) if total_sixes else None,
                     row,
                 )
                 qual = {b for b, n in ss.balls_faced.items() if n >= 30}
@@ -605,6 +651,9 @@ class TestCh1SixesAerialWpl(unittest.TestCase):
         for season, teaser in ((2008, TEASER_SIXES_2008), (2026, TEASER_SIXES_2026)):
             for field, value in teaser.items():
                 self.assertEqual(by_season[season][field], value, (season, field))
+        # The rounded caption figures resolve to 20.8 -> 11.7 balls per six.
+        for season, bps in TEASER_BALLS_PER_SIX.items():
+            self.assertEqual(by_season[season]["balls_per_six"], bps, season)
 
     def test_aerial_matches_recount_and_teasers(self):
         art = ART["ch1"]["aerial"]["bands"]
@@ -654,6 +703,27 @@ class TestCh1SixesAerialWpl(unittest.TestCase):
 class TestPayoffCh1FullSpec(unittest.TestCase):
     def test_harness_assertions_hold_on_disk(self):
         self.assertEqual(payoff_harness.assert_non_degenerate(ART["payoff"]), [])
+
+    def test_discrete_copy_fields(self):
+        """finding #6/#8: honesty + team_pair ship as discrete fields so the
+        scene renders fields instead of regex-parsing the headline."""
+        for v in ART["payoff"]["variants"]:
+            tag = f"{v['league']}/{v['team']}"
+            self.assertTrue(
+                isinstance(v.get("team_pair"), str) and v["team_pair"].strip(), tag
+            )
+            self.assertIsInstance(v.get("honesty"), str)
+            if v["small_sample"]:
+                self.assertTrue(v["honesty"].strip(), tag)  # non-empty for small-sample
+            else:
+                self.assertEqual(v["honesty"], "", tag)  # empty string otherwise
+        wpl = [v for v in ART["payoff"]["variants"] if v["league"] == "wpl"]
+        self.assertEqual(len(wpl), 5)
+        for v in wpl:
+            self.assertTrue(v["small_sample"], v["team"])
+            self.assertIn("small sample", v["honesty"].lower())
+            # the headline is composed from the discrete fields — no regex.
+            self.assertEqual(v["headline"], v["team_pair"] + " " + v["honesty"], v["team"])
 
     def test_neutral_reproduces_the_thesis(self):
         neutral = [v for v in ART["payoff"]["variants"] if v["team"] == "Neutral"][0]

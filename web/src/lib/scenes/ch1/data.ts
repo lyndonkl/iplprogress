@@ -49,12 +49,36 @@ export interface DefierEntry {
 export interface SeasonSixes {
 	season: number;
 	sixes: number;
+	/** legal balls bowled that season (wides AND no-balls excluded) — the six denominator */
+	legal_balls: number;
+	/** legal balls per six (the honest per-ball rate; caption quotes round(): 21 → 12) */
+	balls_per_six: number;
 	players_10plus_sixes: number;
 	top10_share_pct: number;
 }
 
+/**
+ * The ball-index x-axis convention (pipeline `ball_index_axis`), shared by the
+ * out-rate strip and the WPL strike-rate panel. The per-ball curves run over the
+ * batter's exact n-th ball, n = min..max; `max_is_capped` is FALSE for these
+ * strips (index 30 is exactly ball 30, not a 30+ aggregate — capping the
+ * discrete hazard there would spike it), so their right edge is labelled
+ * `max_label` ("30"). Only the ignition wall caps (`wall_capped_label` = "30+").
+ * Every axis label traces here instead of a hardcoded literal.
+ */
+export interface BallIndexAxis {
+	min: number;
+	max: number;
+	max_is_capped: boolean;
+	max_label: string;
+	wall_capped_index: number;
+	wall_capped_label: string;
+	note: string;
+}
+
 export interface Ch1Data {
 	era_bands: EraBand[];
+	ball_index_axis: BallIndexAxis;
 	ignition: {
 		definition: string;
 		sr_by_ball_index: Record<BandKey, number[]>;
@@ -151,3 +175,16 @@ export const fmt1 = (n: number): string =>
 	n.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 export const fmt2 = (n: number): string =>
 	n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/**
+ * C1-5 two-tone gate (shared between Fireworks.svelte and the ch1-sixes scene
+ * def's `dynamicState`). The step-3 recolor reads `attrs.u8` bit 5 (= hit by
+ * that season's top-10 six-hitter). Until the pipeline re-encodes that bit it
+ * reads 0 everywhere, and the shader's `mix(1.0, top10 ? 1.4 : 0.5, tint)` would
+ * dim EVERY six uniformly (reads as "zero specialists") — a pixels-vs-copy
+ * miss. Fireworks scans the buffer once, sets `available`, and the scene def
+ * only raises `resort.tint` (and the caption only shows the "watch the slice
+ * shrink" line) when it is true. When the pipeline ships the bit, the two-tone
+ * lights up with no code change on the animated path (see integration notes).
+ */
+export const twoTone = { available: false };

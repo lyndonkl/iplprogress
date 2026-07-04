@@ -1,8 +1,17 @@
 """Flatten Cricsheet ball-by-ball JSON into the R0 data-contract artifacts.
 
-One pass over data/ipl_json + data/wpl_json in strict chronological order
-(match date, match_id, innings index, over, delivery index), super-over
-innings excluded, emitting into web/static/data/:
+One pass over data/ipl_json + data/wpl_json in SEASON-BLOCKED order — the
+calendar year of play, then IPL before WPL WITHIN a shared year, then
+chronological (match date, match_id, innings index, over, delivery index),
+super-over innings excluded, emitting into web/static/data/:
+
+The stream stays strictly chronological ACROSS seasons, but assembles "season
+by season": within 2023 every IPL-2023 delivery precedes every WPL-2023
+delivery (the WPL's March-2023 matches would otherwise interleave ahead of
+IPL 2023). This restores the authored cold-open caption sequence — CO-3's
+"2023: the year the ceiling broke" fires a beat BEFORE the WPL constellation
+starts — with no scene change (the assembly scene measures its stops from the
+actual point buffer, so the order in these buffers IS the assembly order).
 
   meta.json         { n_points, built_at: "unknown", point_order, files }
                     (scenes.py augments it to v2: + n_players, per-league
@@ -45,6 +54,12 @@ import canon
 # ---------------------------------------------------------------------------
 # Outcome classes (contract values — also mirrored in attrs.u8 bits 0-2)
 # ---------------------------------------------------------------------------
+
+# Point-stream ordering label recorded in meta.json / columnar.json.gz.
+# Not "chronological": across seasons it is, but within a shared calendar year
+# IPL is deliberately placed before WPL (see sorted_match_files / the module
+# docstring / R1a MF3).
+POINT_ORDER = "season-blocked"
 
 OUT_DOT = 0
 OUT_SINGLE = 1
@@ -94,7 +109,15 @@ def pack_attr(delivery: dict, wpl: bool) -> int:
 
 
 def sorted_match_files(data_root: Path = canon.DATA_ROOT):
-    """[(date0, match_id, league, path)] sorted by (date, match_id).
+    """[(date0, match_id, league, path)] in season-blocked order.
+
+    Sort key: (year of play, league rank [IPL 0 / WPL 1], date, match_id).
+    Grouping by the year first, then IPL-before-WPL within the year, keeps the
+    stream strictly chronological ACROSS seasons while assembling season by
+    season — so within 2023 all IPL-2023 matches precede all WPL-2023 matches
+    (R1a MF3 / storyboard CO-3). The year of play equals dates[0][:4] for every
+    match in the corpus (canon guarantees canon_season == dates[0] year), so the
+    string prefix is a safe primary key without re-deriving the season here.
 
     Cheap first pass: parse each file once just for its sort key, then the
     caller re-parses in order (memory stays flat; the corpus parses in <1s).
@@ -105,7 +128,7 @@ def sorted_match_files(data_root: Path = canon.DATA_ROOT):
             with open(path) as fh:
                 info = json.load(fh)["info"]
             entries.append((str(info["dates"][0]), int(path.stem), league, path))
-    entries.sort(key=lambda e: (e[0], e[1]))
+    entries.sort(key=lambda e: (e[0][:4], 0 if e[2] == "ipl" else 1, e[0], e[1]))
     return entries
 
 
@@ -257,7 +280,7 @@ def main(out_root: Path = canon.OUT_ROOT) -> dict:
         compact_json(
             {
                 "n_points": n_points,
-                "point_order": "chronological",
+                "point_order": POINT_ORDER,
                 "arrays": col,
                 "dicts": dicts,
             }
@@ -268,7 +291,7 @@ def main(out_root: Path = canon.OUT_ROOT) -> dict:
     meta = {
         "n_points": n_points,
         "built_at": "unknown",
-        "point_order": "chronological",
+        "point_order": POINT_ORDER,
         "files": files,
     }
     (out_root / "meta.json").write_bytes(compact_json(meta))

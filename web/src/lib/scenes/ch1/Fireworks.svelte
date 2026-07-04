@@ -2,19 +2,26 @@
 	import { onMount } from 'svelte';
 	import type { SceneAnnotationProps } from '$lib/story/types';
 	import { footnotesOpen } from '$lib/state';
-	import { loadCh1Data, fmt1, GHOST_BAND, BOLD_BAND, type Ch1Data } from './data';
+	import { OUTCOME_SIX, ATTR_TOP10_BIT } from '$lib/field/types';
+	import { loadCh1Data, fmt1, GHOST_BAND, BOLD_BAND, twoTone, type Ch1Data } from './data';
 
 	/**
-	 * C1-5 — The fireworks (storyboard §3): every IPL six lifts out of the
-	 * wall (the chapter's one subset-highlight — uniform-driven, no re-sort;
-	 * CONTRACT §3 keeps every Ch 1 layout on the wall), while the per-season
-	 * stacking claim is carried by this 2D annotation-plane chart: 19 columns,
-	 * height = that season's six count. Step 3's one change is the two-tone
-	 * split — the top-10 hitters' slice vs everyone else's — on columns
-	 * already on screen. WPL sixes are deliberately absent from the columns
-	 * (framing rule); the caption names the omission.
+	 * C1-5 — The fireworks (storyboard §3, the chapter's signature subset moment).
+	 * The choreography lives in the FIELD, not this DOM layer: the ch1-sixes scene
+	 * def declares the CONTRACT §7 subset RE-SORT, so every IPL six lifts out of
+	 * the ignition wall (two-phase — arcing up as the wall dims hard) and re-sorts
+	 * into 19 per-season firework columns where each point is a real six; the
+	 * settle-back is free (the next scene declares no re-sort). This component only
+	 * (1) anchors the 2008 / 2023 / 2026 DOM labels over their field columns via
+	 * field.getResortLayout() + projectToCss, and (2) steps the captions.
+	 *
+	 * Step 3's one change is a per-point two-tone recolor (attrs.u8 bit 5 = a
+	 * top-10 hitter's six) driven by resort.tint. It is gated on the bit actually
+	 * being populated (twoTone.available): until the pipeline ships it, raising the
+	 * tint would dim every six uniformly, so we hold the field single-tone and drop
+	 * the "watch the slice shrink" line — pixels == copy either way.
 	 */
-	let { progress, active, reduced }: SceneAnnotationProps = $props();
+	let { progress, active, field, reduced }: SceneAnnotationProps = $props();
 
 	/* morphLength / scrollLength from index.ts: 70 / 170 */
 	const step = $derived.by(() => {
@@ -25,107 +32,120 @@
 	});
 
 	let ch1 = $state<Ch1Data | null>(null);
+	let tick = $state(0); // resize signal for label re-anchoring
 	onMount(() => {
 		let alive = true;
 		loadCh1Data().then((d) => {
 			if (alive) ch1 = d;
 		});
+		const onResize = (): void => {
+			requestAnimationFrame(() => {
+				tick++;
+			});
+		};
+		window.addEventListener('resize', onResize);
 		return () => {
 			alive = false;
+			window.removeEventListener('resize', onResize);
 		};
 	});
 
-	/**
-	 * Balls-per-six headline pair ("a six every 21 balls → every 12").
-	 * scenes/ch1.json carries no per-season legal-ball counts, so these two
-	 * rounded figures trace to the storyboard §9 verified-number index
-	 * (balls per six 20.8 → 11.7) — see the integration note in the report.
-	 */
-	const BALLS_PER_SIX_2008 = 21;
-	const BALLS_PER_SIX_2026 = 12;
+	/* ---- two-tone availability: scan attrs once for the top-10 bit ----------- */
+	let twoToneAvailable = $state(false);
+	$effect(() => {
+		const f = field;
+		if (!f || twoToneAvailable) return;
+		const attrs = f.data.attrs;
+		for (let i = 0; i < attrs.length; i++) {
+			if ((attrs[i] & 7) === OUTCOME_SIX && (attrs[i] & ATTR_TOP10_BIT) !== 0) {
+				twoToneAvailable = true;
+				break;
+			}
+		}
+		twoTone.available = twoToneAvailable;
+	});
 
+	/* ---- on-screen numbers (every one from the artifact) --------------------- */
 	const seasons = $derived(ch1 ? ch1.sixes.seasons.ipl : null);
+	const s2008 = $derived(seasons ? (seasons.find((s) => s.season === 2008) ?? null) : null);
+	const s2026 = $derived(seasons ? (seasons.find((s) => s.season === 2026) ?? null) : null);
+
+	/* balls-per-six headline pair — the pipeline's per-season field, rounded (the
+	   caption's "every 21 → every 12"; 20.8 → 11.7 live in the dagger). */
+	const bpsFirst = $derived(s2008 ? Math.round(s2008.balls_per_six) : null);
+	const bpsLast = $derived(s2026 ? Math.round(s2026.balls_per_six) : null);
+
 	const aerialEarly = $derived(ch1 ? ch1.aerial.bands[GHOST_BAND] : null);
 	const aerialRecent = $derived(ch1 ? ch1.aerial.bands[BOLD_BAND] : null);
-	const p10First = $derived(seasons ? seasons[0] : null);
-	const p10Last = $derived(seasons ? seasons[seasons.length - 1] : null);
 
-	/* ---- columns chart geometry ---------------------------------------------- */
-	const W = 640;
-	const H = 250;
-	const ML = 14;
-	const MR = 14;
-	const MT = 30;
-	const MB = 28;
-	const plotW = W - ML - MR;
-	const plotH = H - MT - MB;
-
-	const maxSixes = $derived(seasons ? Math.max(...seasons.map((s) => s.sixes)) : 1);
-
-	interface Column {
+	/* ---- DOM column labels anchored to the FIELD columns --------------------- */
+	interface ColLabel {
 		season: number;
 		x: number;
-		w: number;
-		yTop: number;
-		h: number;
-		hTop10: number;
-		labeled: boolean;
-		sixes: number;
+		y: number;
 	}
 
-	const columns = $derived.by((): Column[] => {
-		if (!seasons) return [];
-		const slot = plotW / seasons.length;
-		const w = slot * 0.62;
-		return seasons.map((s, i) => {
-			const h = (s.sixes / maxSixes) * plotH;
-			return {
-				season: s.season,
-				x: ML + i * slot + (slot - w) / 2,
-				w,
-				yTop: MT + plotH - h,
-				h,
-				hTop10: h * (s.top10_share_pct / 100),
-				labeled: s.season === 2008 || s.season === 2023 || s.season === 2026,
-				sixes: s.sixes
-			};
-		});
+	// getResortLayout() is IMPERATIVE — it turns non-null a frame or two after the
+	// re-sort first applies, and a reader who deep-links / jump-cuts in parks at a
+	// static progress where no tracked dep changes to re-run a $derived. So drive
+	// it from an $effect that re-anchors on progress/resize AND rAF-retries while
+	// the geometry is still building (self-terminates once it resolves).
+	let colLabels = $state<ColLabel[]>([]);
+	let retry = $state(0);
+	$effect(() => {
+		void progress; // re-anchor as the reader scrubs
+		void tick; // and on resize
+		void retry; // and on the rAF retry while geometry builds
+		const f = field;
+		if (!f || !seasons || !active) {
+			colLabels = [];
+			return;
+		}
+		const rl = f.getResortLayout();
+		if (!rl) {
+			if (retry < 240) {
+				const id = requestAnimationFrame(() => retry++);
+				return () => cancelAnimationFrame(id);
+			}
+			return;
+		}
+		const groups = f.data.groups;
+		const giOf = (season: number): number | null => {
+			const g = groups.find((gr) => gr.league === 'ipl' && gr.season === season);
+			return g ? g.gi : null;
+		};
+		const out: ColLabel[] = [];
+		for (const season of [2008, 2023, 2026]) {
+			const gi = giOf(season);
+			if (gi === null || Number.isNaN(rl.xs[gi])) continue;
+			// anchor just above the column TOP (not the base — the base sits
+			// behind the bottom-anchored caption card on mobile)
+			const topWorld = rl.bottom + rl.counts[gi] * rl.invMax * rl.usableH;
+			const p = f.projectToCss(rl.xs[gi], topWorld);
+			out.push({ season, x: p.x, y: p.y });
+		}
+		colLabels = out;
 	});
+
+	/* the two-tone split is legible only once it is actually rendered */
+	const showTwoTone = $derived(step >= 3 && twoToneAvailable);
+	/* labels appear once the columns have formed (the morph has completed) */
+	const labelsShown = $derived(step >= 1 && colLabels.length > 0);
 </script>
 
 <div class="pin" class:reduced class:active>
-	{#if seasons}
-		<div class="chart-slot" class:shown={step >= 1}>
-			<figure class="chart" aria-label="IPL sixes per season, 2008 to 2026">
-				<figcaption class="chart-title">
-					IPL sixes per season
-					{#if step >= 3}
-						<span class="legend">bright slice = that season's top-10 hitters</span>
-					{/if}
-				</figcaption>
-				<svg viewBox="0 0 {W} {H}" role="img" aria-hidden="true">
-					{#each columns as c (c.season)}
-						{#if step >= 3}
-							<!-- two-tone: everyone else below, the specialists' slice on top -->
-							<rect
-								x={c.x}
-								y={c.yTop + c.hTop10}
-								width={c.w}
-								height={c.h - c.hTop10}
-								class="bar rest"
-							/>
-							<rect x={c.x} y={c.yTop} width={c.w} height={c.hTop10} class="bar top10" />
-						{:else}
-							<rect x={c.x} y={c.yTop} width={c.w} height={c.h} class="bar" />
-						{/if}
-						{#if c.labeled}
-							<text x={c.x + c.w / 2} y={MT + plotH + 16} class="xlab">{c.season}</text>
-							<text x={c.x + c.w / 2} y={c.yTop - 5} class="countlab">{c.sixes}</text>
-						{/if}
-					{/each}
-					<line x1={ML} x2={ML + plotW} y1={MT + plotH} y2={MT + plotH} class="axis" />
-				</svg>
-			</figure>
+	<!-- season labels float just above their field columns (DOM, CSS px —
+	     always legible on mobile, no SVG to shrink; MF2 for this scene) -->
+	{#if labelsShown}
+		<div class="fw-labels" aria-hidden="true">
+			{#each colLabels as c (c.season)}
+				<div class="fw-label" style="left:{c.x.toFixed(1)}px; top:{c.y.toFixed(1)}px;">
+					{c.season}
+				</div>
+			{/each}
+			{#if showTwoTone}
+				<div class="fw-legend">Bright slice = a top-10 hitter's six</div>
+			{/if}
 		</div>
 	{/if}
 
@@ -134,7 +154,7 @@
 			<div class="scene-card">
 				<p>
 					<strong>Every IPL six ever hit, stacked by season.</strong> 2008: a six every
-					{BALLS_PER_SIX_2008} balls. 2026: <strong>every {BALLS_PER_SIX_2026}.</strong>
+					{bpsFirst ?? '—'} balls. 2026: <strong>every {bpsLast ?? '—'}.</strong>
 				</p>
 				<p class="note">
 					The WPL's sixes stay on its shelf — its scoring engine gets its own beat, next.
@@ -163,10 +183,10 @@
 					And the six stopped being a specialist's weapon.
 					<strong>
 						Players with ten-plus sixes in a season:
-						{p10First ? p10First.players_10plus_sixes : '—'} in 2008 →
-						{p10Last ? p10Last.players_10plus_sixes : '—'} in 2026.
+						{s2008 ? s2008.players_10plus_sixes : '—'} in 2008 →
+						{s2026 ? s2026.players_10plus_sixes : '—'} in 2026.
 					</strong>
-					Watch the specialists' slice of every column shrink.
+					{#if showTwoTone}Watch the specialists' slice of every column shrink.{/if}
 					<button
 						class="dagger"
 						onclick={() => footnotesOpen.set('sixes')}
@@ -190,83 +210,38 @@
 		visibility: visible;
 	}
 
-	/* instant show/hide — appear-states never ride a transition */
-	.chart-slot {
+	/* ---- DOM column labels (anchored to field columns; own class to avoid the
+	   shell season-label plane's .col-label) ---- */
+	.fw-labels {
 		position: absolute;
-		top: 8vh;
+		inset: 0;
+	}
+
+	.fw-label {
+		position: absolute;
+		/* anchor point is the column TOP; float the label just above it, centered */
+		transform: translate(-50%, calc(-100% - 5px));
+		font-size: 13px;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		color: var(--ink);
+		font-variant-numeric: tabular-nums;
+		text-shadow: 0 1px 6px rgba(0, 0, 0, 0.95);
+		white-space: nowrap;
+	}
+
+	.fw-legend {
+		position: absolute;
+		top: 3vh;
 		left: 50%;
 		transform: translateX(-50%);
-		width: min(680px, 94vw);
-		opacity: 0;
-	}
-
-	.chart-slot.shown {
-		opacity: 1;
-	}
-
-	.chart {
-		margin: 0;
-		padding: 0.6rem 0.6rem 0.2rem;
-		border: 1px solid rgba(232, 236, 245, 0.1);
-		border-radius: 12px;
-		background: rgba(11, 14, 20, 0.72);
-		backdrop-filter: blur(6px);
-		-webkit-backdrop-filter: blur(6px);
-	}
-
-	.chart-title {
-		font-size: 0.85rem;
-		font-weight: 700;
-		letter-spacing: 0.08em;
-		color: var(--ink);
-		padding: 0.1rem 0.4rem 0.4rem;
-	}
-
-	.chart-title .legend {
-		font-weight: 500;
-		font-size: 0.72rem;
-		letter-spacing: 0.03em;
+		font-size: 12px;
+		letter-spacing: 0.02em;
 		color: var(--ink-dim);
-		margin-left: 0.6rem;
-	}
-
-	svg {
-		display: block;
-		width: 100%;
-		height: auto;
-	}
-
-	.axis {
-		stroke: rgba(232, 236, 245, 0.25);
-		stroke-width: 1;
-	}
-
-	/* six-ember hue is the sixes' identity color; the two-tone split is a
-	   luminance difference within it, never a second hue */
-	.bar {
-		fill: #ff5d3a;
-	}
-
-	.bar.top10 {
-		fill: #ffd0c4;
-	}
-
-	.bar.rest {
-		fill: #99361f;
-	}
-
-	.xlab {
-		font-size: 11px;
-		fill: var(--ink-dim);
-		text-anchor: middle;
-		font-variant-numeric: tabular-nums;
-	}
-
-	.countlab {
-		font-size: 10px;
-		fill: var(--ink-dim);
-		text-anchor: middle;
-		font-variant-numeric: tabular-nums;
+		background: rgba(11, 14, 20, 0.6);
+		padding: 0.2rem 0.6rem;
+		border-radius: 999px;
+		white-space: nowrap;
 	}
 
 	.caption-slot {
@@ -297,27 +272,14 @@
 		outline-offset: 2px;
 	}
 
-	@media (prefers-reduced-motion: reduce) {
-		.chart-slot {
-			transition: none;
-		}
-	}
-
-	.pin.reduced .chart-slot {
-		transition: none;
-	}
-
 	@media (max-width: 640px) {
-		.chart-slot {
-			top: 6vh;
-		}
-
 		.caption-slot {
 			left: 50%;
 			transform: translateX(-50%);
 			width: 92vw;
 			max-width: 92vw;
-			bottom: max(9vh, calc(env(safe-area-inset-bottom) + 7vh));
+			/* clear the shell's fixed "how we computed this" affordance (bottom 14px) */
+			bottom: max(72px, calc(env(safe-area-inset-bottom) + 60px));
 		}
 	}
 </style>
