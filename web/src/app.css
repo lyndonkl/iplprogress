@@ -1,0 +1,38 @@
+:root {
+	--bg: #0b0e14;
+	--ink: #e8ecf5;
+	--ink-dim: #97a1b8;
+	--teal: #2ec4b6;
+	--ember: #ff5d3a;
+	--gold: #e8a33d;
+	color-scheme: dark;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	margin: 0;
+	padding: 0;
+	background: var(--bg);
+	color: var(--ink);
+	font-family:
+		ui-sans-serif,
+		system-ui,
+		-apple-system,
+		'Segoe UI',
+		Roboto,
+		'Helvetica Neue',
+		Arial,
+		sans-serif;
+	-webkit-font-smoothing: antialiased;
+	text-rendering: optimizeLegibility;
+}
+
+html {
+	/* the scroll IS the interaction; keep it native and smooth */
+	scroll-behavior: auto;
+	overflow-x: hidden;
+}

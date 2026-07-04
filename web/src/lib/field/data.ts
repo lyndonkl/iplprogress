@@ -1,0 +1,73 @@
+import type { FieldData, GroupMeta, MetaJson } from './types';
+
+/**
+ * Loads the R0 contract files. If any file is missing or inconsistent:
+ *  - dev builds fall back to a synthetic 316,388-point field (flagged loudly in
+ *    the console) so the spike can be developed while the pipeline runs in parallel;
+ *  - production builds throw, and the page shows an integration error overlay.
+ */
+export async function loadFieldData(baseUrl: string): Promise<FieldData> {
+	try {
+		const [meta, groups, gidBuf, attrBuf] = await Promise.all([
+			fetchJson<MetaJson>(`${baseUrl}/data/meta.json`),
+			fetchJson<GroupMeta[]>(`${baseUrl}/data/groups.json`),
+			fetchBuffer(`${baseUrl}/data/group_ids.u16`),
+			fetchBuffer(`${baseUrl}/data/attrs.u8`)
+		]);
+
+		const n = meta.n_points;
+		if (!Number.isInteger(n) || n <= 0) throw new Error(`meta.json n_points invalid: ${n}`);
+		if (gidBuf.byteLength !== n * 2)
+			throw new Error(`group_ids.u16 byteLength ${gidBuf.byteLength} ≠ 2 × n_points (${n})`);
+		if (attrBuf.byteLength !== n)
+			throw new Error(`attrs.u8 byteLength ${attrBuf.byteLength} ≠ n_points (${n})`);
+		if (!Array.isArray(groups) || groups.length === 0) throw new Error('groups.json empty');
+		const counted = groups.reduce((s, g) => s + g.count, 0);
+		if (counted !== n)
+			throw new Error(`groups.json counts sum ${counted} ≠ n_points (${n})`);
+
+		// group_ids.u16 is little-endian on the wire; every platform we target is
+		// little-endian, but decode defensively anyway.
+		const groupIds = decodeU16LE(gidBuf);
+
+		return { nPoints: n, groups, groupIds, attrs: new Uint8Array(attrBuf), synthetic: false };
+	} catch (err) {
+		if (import.meta.env.DEV) {
+			console.warn(
+				'%c[every-ball-ever] SYNTHETIC FALLBACK (dev only)',
+				'color:#ff5d3a;font-weight:bold',
+				'— real /data files missing or invalid; generating a fake 316,388-point field.',
+				err
+			);
+			// Dev-only dynamic import: in production this branch is statically dead
+			// (import.meta.env.DEV === false), so the synthetic module is never
+			// bundled and the fallback path cannot ship.
+			const { syntheticFieldData } = await import('./synthetic');
+			return syntheticFieldData();
+		}
+		throw err;
+	}
+}
+
+async function fetchJson<T>(url: string): Promise<T> {
+	const res = await fetch(url);
+	if (!res.ok) throw new Error(`${url} → HTTP ${res.status}`);
+	return (await res.json()) as T;
+}
+
+async function fetchBuffer(url: string): Promise<ArrayBuffer> {
+	const res = await fetch(url);
+	if (!res.ok) throw new Error(`${url} → HTTP ${res.status}`);
+	const type = res.headers.get('content-type') ?? '';
+	if (type.includes('text/html')) throw new Error(`${url} → served HTML, not binary`);
+	return res.arrayBuffer();
+}
+
+function decodeU16LE(buf: ArrayBuffer): Uint16Array {
+	const probe = new Uint8Array(new Uint16Array([0x0102]).buffer);
+	if (probe[0] === 0x02) return new Uint16Array(buf); // little-endian host: zero-copy
+	const dv = new DataView(buf);
+	const out = new Uint16Array(buf.byteLength / 2);
+	for (let i = 0; i < out.length; i++) out[i] = dv.getUint16(i * 2, true);
+	return out;
+}

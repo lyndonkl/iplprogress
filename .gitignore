@@ -1,5 +1,7 @@
-# raw match data (170MB, restorable from cricsheet.org)
-data/
+# raw match data (170MB, restorable from cricsheet.org) — anchored to the repo
+# root on purpose: web/static/data/ (the pipeline's emitted contract files)
+# MUST be committed for GitHub Pages deploys.
+/data/
 
 # python
 __pycache__/

@@ -1,0 +1,81 @@
+{
+ "budgets": {
+  "spike_set_gz": 3000000,
+  "per_chapter_gz": 2000000,
+  "full_read_gz": 25000000,
+  "mb_definition": "1 MB = 1,000,000 bytes"
+ },
+ "artifacts": {
+  "attrs.u8": {
+   "bytes_raw": 316199,
+   "bytes_gz": 112860
+  },
+  "columnar.json.gz": {
+   "bytes_raw": 9825862,
+   "bytes_gz": 625823
+  },
+  "group_ids.u16": {
+   "bytes_raw": 632398,
+   "bytes_gz": 701
+  },
+  "groups.json": {
+   "bytes_raw": 1206,
+   "bytes_gz": 263
+  },
+  "meta.json": {
+   "bytes_raw": 342,
+   "bytes_gz": 209
+  },
+  "payoff/ch1.json": {
+   "bytes_raw": 7256,
+   "bytes_gz": 1290
+  }
+ },
+ "checks": [
+  {
+   "name": "r0_spike_set (pre-cold-open assembly)",
+   "files": [
+    "meta.json",
+    "groups.json",
+    "group_ids.u16",
+    "attrs.u8"
+   ],
+   "budget_gz": 3000000,
+   "actual_gz": 114033,
+   "pass": true
+  },
+  {
+   "name": "chapter ch1 payoff",
+   "files": [
+    "payoff/ch1.json"
+   ],
+   "budget_gz": 2000000,
+   "actual_gz": 1290,
+   "pass": true
+  },
+  {
+   "name": "sandbox columnar dataset",
+   "files": [
+    "columnar.json.gz"
+   ],
+   "budget_gz": 2000000,
+   "actual_gz": 625823,
+   "pass": true
+  },
+  {
+   "name": "full read-through (all artifacts)",
+   "files": [
+    "attrs.u8",
+    "columnar.json.gz",
+    "group_ids.u16",
+    "groups.json",
+    "meta.json",
+    "payoff/ch1.json"
+   ],
+   "budget_gz": 25000000,
+   "actual_gz": 741146,
+   "pass": true
+  }
+ ],
+ "pass": true
+}

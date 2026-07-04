@@ -1,0 +1,1 @@
+{"n_points":316199,"built_at":"unknown","point_order":"chronological","files":{"groups.json":{"bytes_raw":1206,"bytes_gz":263},"group_ids.u16":{"bytes_raw":632398,"bytes_gz":701},"attrs.u8":{"bytes_raw":316199,"bytes_gz":112860},"columnar.json.gz":{"bytes_raw":9825862,"bytes_gz":625823},"payoff/ch1.json":{"bytes_raw":7256,"bytes_gz":1290}}}
