@@ -1,0 +1,16 @@
+# raw match data (170MB, restorable from cricsheet.org)
+data/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# node / sveltekit
+node_modules/
+web/.svelte-kit/
+web/build/
+
+# os / editor
+.DS_Store
+*.log
