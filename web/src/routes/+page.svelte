@@ -9,6 +9,7 @@
 	import { scenes as coldOpenScenes } from '$lib/scenes/coldopen';
 	import { scenes as pickerScenes } from '$lib/scenes/picker';
 	import { scenes as ch1Scenes } from '$lib/scenes/ch1';
+	import { scenes as ch2Scenes } from '$lib/scenes/ch2';
 	import { scenes as endCardScenes } from '$lib/scenes/endcard';
 	import { scenes as sandboxScenes } from '$lib/scenes/sandbox';
 
@@ -21,6 +22,7 @@
 		...coldOpenScenes,
 		...pickerScenes,
 		...ch1Scenes,
+		...ch2Scenes,
 		...endCardScenes,
 		...sandboxScenes
 	];

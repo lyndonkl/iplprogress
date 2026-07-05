@@ -1,11 +1,18 @@
 import {
+	CASCADE_CLASS,
 	FILTER_DIM,
 	HL_CLASS,
 	type FieldRenderState,
 	type ResortColumns
 } from '$lib/field/types';
 import { ASSEMBLY_RAIN_WINDOW } from '$lib/field/shaders';
-import type { SceneDef, SceneFieldState, SubsetHighlight, SubsetResort } from './types';
+import type {
+	RunoutCascade,
+	SceneDef,
+	SceneFieldState,
+	SubsetHighlight,
+	SubsetResort
+} from './types';
 
 /** The six filter uniform fields resolved from a scene's declarative facets. */
 interface ResolvedFilter {
@@ -53,6 +60,7 @@ interface ResolvedSceneState {
 	labels: number;
 	highlight: SubsetHighlight | null;
 	resort: SubsetResort | null;
+	cascade: RunoutCascade | null;
 	teamIgnite: boolean;
 	wallHeatMix: number;
 }
@@ -66,6 +74,7 @@ export function withDefaults(s: SceneFieldState): ResolvedSceneState {
 		labels: s.labels ?? 0,
 		highlight: s.highlight ?? null,
 		resort: s.resort ?? null,
+		cascade: s.cascade ?? null,
 		teamIgnite: s.teamIgnite ?? true,
 		wallHeatMix: s.wallHeatMix ?? 0
 	};
@@ -103,6 +112,17 @@ export function resolveRenderState(
 	const toRs = g.resort;
 	const rs = toRs ?? fromRs;
 	const rsClass = rs ? HL_CLASS[rs.class] : HL_CLASS.none;
+
+	// Run-out cascade resolves like the highlight/re-sort: the active descriptor
+	// (preferring `to`) fixes the discrete class + the beat's config constants
+	// (tint / fall / fade / mute), while only `sweep` LERPS — so the cascade
+	// engages as the scene declaring it advances the sweep, and settles back
+	// (sweep → 0) when the next scene declares none. An inactive side contributes
+	// sweep 0, so the run-outs return cleanly on the reverse leg.
+	const fromCas = f.cascade;
+	const toCas = g.cascade;
+	const cas = toCas ?? fromCas;
+	const casClass = cas ? CASCADE_CLASS[cas.class] : CASCADE_CLASS.none;
 
 	// Facet filter resolves like the highlight: the discrete facets come from
 	// whichever side declares an active filter (preferring `to`), while filterDim
@@ -145,7 +165,19 @@ export function resolveRenderState(
 		filterMatchIndex: facets.filterMatchIndex,
 		filterRangeLo: facets.filterRangeLo,
 		filterRangeHi: facets.filterRangeHi,
-		filterDim: lerp(fFilter.active ? fFilter.filterDim : 1, gFilter.active ? gFilter.filterDim : 1, clampedT)
+		filterDim: lerp(fFilter.active ? fFilter.filterDim : 1, gFilter.active ? gFilter.filterDim : 1, clampedT),
+		// cascade: sweep lerps (engage/settle-back); the beat constants come from
+		// the active descriptor (discrete, like the highlight class). When NO
+		// cascade is declared (cas null) every field takes its INERT default so a
+		// non-cascade scene is byte-identical to DEFAULT_RENDER_STATE — in
+		// particular cascadeMute MUST be 0 or it would desaturate a picked team's
+		// ignite glow in R1 (the team-ignite mute branch keys off uCascadeMute).
+		cascadeClass: casClass,
+		cascadeSweep: lerp(fromCas?.sweep ?? 0, toCas?.sweep ?? 0, clampedT),
+		cascadeTint: cas ? cas.tint ?? 1 : 0,
+		cascadeFall: cas ? cas.fall ?? 0.9 : 0,
+		cascadeFade: cas ? cas.fade ?? 0 : 1,
+		cascadeMute: cas ? cas.muteIdentity ?? 1 : 0
 	};
 }
 

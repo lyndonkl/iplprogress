@@ -15,12 +15,18 @@
  *                 y = season row centre (uCols[gi].y), storyboard C1-2
  *   3 assembly  — the free-field scatter, revealed chronologically by point
  *                 index as uReveal scrubs 0→1 (cold-open counter set piece)
+ *   4 worms     — Ch 2 worm-space (CONTRACT §13): x = balls-faced (aBallsFaced,
+ *                 clamped 1..60+), y = cumulative innings runs (aCumRuns),
+ *                 settled as a low-alpha density haze (WORM_HAZE_ALPHA); fixed
+ *                 data aspect ratio, letterboxed (never stretched).
  *
  * Cross-cutting uniform-driven states (compose with any layout):
  *   subset highlight — points matching uHlClass lift (uHlLift) and brighten
  *                      (uHlBoost); everything else dims (uOthersDim).
  *   subset re-sort   — points matching uResortClass fly into per-season columns
  *                      as uResortEngage scrubs 0→1 (§9); reversible.
+ *   run-out cascade  — points with aRunOut flash red + fall as uCascadeSweep
+ *                      sweeps seasons 0→1 (§14, Ch 2 C2-4); reversible.
  *   team ignite      — points whose aTeam == uPickedTeam render in uTeamColor
  *                      and resist the global dim (personalization survives)
  *   facet filter     — points that FAIL the active team/season/match facets are
@@ -48,6 +54,10 @@
  *                 computed on demand; 0 for non-subset points — no wire cost)
  *   aWallHeat   = era-relative "intent" byte, NORMALIZED to 0..1 (drives the
  *                 C1-2 thesis-beat recolor, gated by uWallHeatMix)
+ *   aCumRuns    = batter cumulative innings runs, NORMALIZED to 0..1 (worm-space
+ *                 y, §13; binds zeros until the pipeline ships cumruns.u8)
+ *   aRunOut     = run-out membership flag 0/1 (worm-space cascade, §14; seeded
+ *                 from attrs bit 6, overridable via field.setRunouts — no wire cost)
  *   aMatchIndex = per-delivery match index (u16, OPTIONAL — only present when
  *                 the pipeline ships match_index.u16; gates the uFilterMatch
  *                 facet + the exact-match tooltip. See CONTRACT §12.4.)
@@ -55,6 +65,23 @@
 
 /** Fraction of the reveal range a point spends "raining in" (assembly layout). */
 export const ASSEMBLY_RAIN_WINDOW = 0.045;
+
+/**
+ * Base alpha multiplier the field settles to in worm-space (Ch 2 `worms`, §13):
+ * every ball on screen exactly once, at low alpha, so coincident balls stack
+ * into a density HAZE (dense wedge bottom-left) rather than a solid fill. The
+ * par / anchor exemplar worms live on the annotation plane, so the GL field is
+ * pure ground. Team-ignited points resist this (personalization survives, C2-8).
+ */
+export const WORM_HAZE_ALPHA = 0.3;
+
+/**
+ * Sweep-distance (in `cascadeSweep` units) a single season's run-out cohort
+ * spends flashing + falling — sized near the season pitch (~1/18 over 2008-26)
+ * so each season reads as ONE discrete synchronized pulse (Gestalt common fate,
+ * C2-4), never asynchronous rain. Baked into the shader as CASCADE_FLASH_W.
+ */
+export const CASCADE_FLASH_WINDOW = 0.05;
 
 /**
  * The wallheat encoding's neutral byte (ch1.json `ignition.wallheat.neutral_byte`
@@ -118,6 +145,28 @@ uniform float uFilterRangeLo; // point-index range lo (inclusive); range facet
 uniform float uFilterRangeHi; //   active iff uFilterRangeHi > uFilterRangeLo
 uniform float uFilterMatch;   // match index to keep, or -1 (needs aMatchIndex)
 uniform float uFilterDim;     // luminance×alpha for FILTERED-OUT points (0 hide … 1 no-op)
+
+// ---- Worm-space layout (Ch 2, §13). Fixed-aspect, letterboxed box; x = balls
+//      faced (1..60+), y = cumulative innings runs (0..cap). Positions in-shader.
+uniform float uWormLeft;      // world x at balls-faced 1
+uniform float uWormWidth;     // world width across the balls-faced extent
+uniform float uWormBottom;    // world y at cumulative runs 0
+uniform float uWormHeight;    // world height across the cumulative-runs extent
+uniform float uWormXCap;      // balls-faced display clamp (60 — the 60+ bucket)
+uniform float uWormRunsCapNorm; // runs display cap as a NORMALIZED value (cap/255)
+uniform float uWormCellHalfW; // in-cell x jitter half-width (haze texture)
+uniform float uWormCellHalfH; // in-cell y jitter half-height (haze texture)
+
+// ---- Run-out cascade (Ch 2, §14). Season-swept flash+fall of the aRunOut
+//      subset; composes with worm-space, spends NO extra controlling morph.
+uniform float uCascadeClass;    // -1 = inactive · >= 0 = cascade engaged (runOut)
+uniform float uCascadeSweep;    // 0→1 season pointer (cohorts up to here have fallen)
+uniform float uCascadeTint;     // red flash strength 0..1 (beat-gated hue exception)
+uniform float uCascadeFall;     // world-units downward eject depth for fallen points
+uniform float uCascadeFade;     // residual alpha × for a fully fallen point
+uniform float uCascadeMute;     // team-glow desaturation 0..1 through the cascade
+uniform float uCascadeMinSeason;// earliest season year (sweep origin)
+uniform float uCascadeInvSpan;  // 1 / (latest - earliest season) — sweep normalizer
 `;
 
 /** Core per-point attributes (both shaders read these). */
@@ -127,6 +176,8 @@ in float aAttrs;
 in float aBallsFaced;
 in float aTeam;
 in float aSubOrd;
+in float aCumRuns;  // batter cumulative innings runs, NORMALIZED 0..1 (worm-space y)
+in float aRunOut;   // run-out membership flag 0/1 (worm-space cascade)
 ${hasMatch ? 'in float aMatchIndex; // per-delivery match index (u16)' : ''}
 `;
 }
@@ -142,9 +193,10 @@ uint pcg(uint v) {
 }
 const float INV32 = 1.0 / 4294967296.0;
 
-vec3 pickLayout(int id, vec3 pFree, vec3 pCols, vec3 pWall) {
+vec3 pickLayout(int id, vec3 pFree, vec3 pCols, vec3 pWall, vec3 pWorms) {
 	if (id == 1) return pCols;
 	if (id == 2) return pWall;
+	if (id == 4) return pWorms;
 	return pFree; // 0 free · 3 assembly share the free-field scatter
 }
 
@@ -175,6 +227,10 @@ struct Core {
 	bool matchResort;    // matches uResortClass (color recolor)
 	float reAmt;         // resort engage weight for the recolor
 	float baseSizeMul;   // outcome-driven base point-size multiplier
+	float wormWeight;    // 0..1 amount of worm-space in the current A/B mix (haze alpha)
+	bool runOut;         // run-out membership flag (aRunOut) — cascade subset
+	float cascadeFall;   // 0..1 fall progress for this point's season cohort
+	float cascadeFlash;  // 0..1 red-flash intensity as the season wave crosses
 };
 
 Core computeCore() {
@@ -198,6 +254,9 @@ Core computeCore() {
 	o.wicket = (a & 8) != 0;
 	o.wpl = (a & 16) != 0;
 	o.top10 = (a & 32) != 0;
+	// run-out membership is a dedicated flag (seeded from attrs bit 6 or a CPU
+	// index set) so it is decoupled from the immutable attr byte — see §14.
+	o.runOut = aRunOut > 0.5;
 
 	// subset re-sort membership (drives position + color)
 	bool resortOn = uResortClass >= 0.0;
@@ -241,15 +300,31 @@ Core computeCore() {
 		(h3 - 0.5) * 0.25
 	);
 
+	// worm-space (Ch 2): x = balls faced (1..60+), y = cumulative innings runs.
+	// The par / anchor exemplar worms are the SCENE's job on the annotation plane
+	// (registered via projectToCss); the GL field here is the density haze only.
+	float wbf = clamp(aBallsFaced, 1.0, uWormXCap);
+	float wx = (wbf - 1.0) / (uWormXCap - 1.0);
+	float wy = clamp(aCumRuns / uWormRunsCapNorm, 0.0, 1.0);
+	vec3 posWorms = vec3(
+		uWormLeft + wx * uWormWidth + (h4 * 2.0 - 1.0) * uWormCellHalfW,
+		uWormBottom + wy * uWormHeight + (h2 * 2.0 - 1.0) * uWormCellHalfH,
+		(h3 - 0.5) * 0.25
+	);
+
 	// morph with per-point stagger so the field streams, not teleports
 	float delay = h3 * 0.55;
 	float t = clamp(uProgress * 1.55 - delay, 0.0, 1.0);
 	t = t * t * (3.0 - 2.0 * t);
 	vec3 pos = mix(
-		pickLayout(uLayoutA, posFree, posCols, posWall),
-		pickLayout(uLayoutB, posFree, posCols, posWall),
+		pickLayout(uLayoutA, posFree, posCols, posWall, posWorms),
+		pickLayout(uLayoutB, posFree, posCols, posWall, posWorms),
 		t
 	);
+
+	// how much worm-space is in the current mix — drives the density-haze alpha
+	// (no-op for R1 layouts, which are never code 4)
+	o.wormWeight = (uLayoutA == 4 ? (1.0 - t) : 0.0) + (uLayoutB == 4 ? t : 0.0);
 
 	// subset re-sort flight — matching points arc into their season's column
 	if (o.matchResort) {
@@ -296,6 +371,27 @@ Core computeCore() {
 		if (m) pos.y += uHlLift;
 	}
 
+	// run-out cascade fall (§14) — the POSITION change lives here so the pick
+	// pass tracks the fallen point; the red flash / fade is per-shader (visual).
+	// Each season's cohort shares one phase (per-gi season pointer) → the whole
+	// cohort falls TOGETHER as one synchronized wave (Gestalt common fate).
+	o.cascadeFall = 0.0;
+	o.cascadeFlash = 0.0;
+	if (uCascadeClass >= 0.0 && o.runOut) {
+		float seasonPos = clamp((float(uGroupSeason[gi]) - uCascadeMinSeason) * uCascadeInvSpan, 0.0, 1.0);
+		// carry the sweep just past 1 so the final season fully falls at sweep 1
+		float effSweep = uCascadeSweep * (1.0 + CASCADE_FLASH_W);
+		float local = (effSweep - seasonPos) / CASCADE_FLASH_W;
+		if (local > 0.0) {
+			float f = clamp(local, 0.0, 1.0);
+			float fallT = f * f * (3.0 - 2.0 * f);
+			o.cascadeFall = fallT;
+			pos.y -= fallT * uCascadeFall;
+			// flash brightest right as the wave hits (local ~0), fading as it falls
+			o.cascadeFlash = 1.0 - smoothstep(0.0, 0.6, local);
+		}
+	}
+
 	o.reAmt = resortOn ? clamp(uResortEngage, 0.0, 1.0) : 0.0;
 	o.filterPass = passesFilter(gi);
 	o.pos = pos;
@@ -309,6 +405,8 @@ export function makeVertexShader(groupCount: number, hasMatch = false): string {
 #define GROUP_COUNT ${groupCount}
 #define RAIN_W ${ASSEMBLY_RAIN_WINDOW}
 #define WALLHEAT_NEUTRAL ${(WALLHEAT_NEUTRAL_BYTE / 255).toFixed(6)}
+#define CASCADE_FLASH_W ${CASCADE_FLASH_WINDOW.toFixed(6)}
+#define WORM_HAZE_ALPHA ${WORM_HAZE_ALPHA.toFixed(6)}
 ${hasMatch ? '#define HAS_MATCH' : ''}
 
 ${UNIFORMS_GLSL}
@@ -327,6 +425,10 @@ const vec3 C_SIX   = vec3(1.000, 0.365, 0.227); // #ff5d3a
 const vec3 C_WKT   = vec3(0.851, 0.310, 0.420); // #d94f6b
 const vec3 C_XTRA  = vec3(0.333, 0.392, 0.498); // #55647f
 const vec3 C_TEAL  = vec3(0.180, 0.769, 0.714); // #2ec4b6
+// run-out cascade flash (C2-4): brighter + more saturated than ANY team red so
+// a red-team reader never mistakes "my team" for "a run-out"; luminance-distinct
+// from the dark haze so the signal reads on luminance, not hue alone (§0.1).
+const vec3 C_CASCADE_RED = vec3(1.0, 0.145, 0.115); // #ff251d
 
 ${coreBodyGlsl()}
 
@@ -417,6 +519,24 @@ void main() {
 	c *= uDim;
 	if (wpl) c *= uWplDim;
 
+	// ---- Worm-space density haze (§13): the field settles to low alpha so
+	//      overlapping balls read as texture/density, not a solid fill. No-op
+	//      outside worm-space (wormWeight is 0 for every R1 layout).
+	alphaMul *= mix(1.0, WORM_HAZE_ALPHA, core.wormWeight);
+
+	// ---- Run-out cascade (§14): fade the fallen cohort, then the beat-gated red
+	//      flash overrides the haze so the danger/loss signal reads on luminance.
+	if (uCascadeClass >= 0.0 && core.runOut) {
+		alphaMul *= mix(1.0, uCascadeFade, core.cascadeFall);
+		float flash = core.cascadeFlash * uCascadeTint;
+		if (flash > 0.0) {
+			c = mix(c, C_CASCADE_RED, flash);
+			glow = max(glow, flash * 0.85);
+			alphaMul = max(alphaMul, flash * 0.9);
+			sizeMul *= 1.0 + 0.35 * flash;
+		}
+	}
+
 	// ---- Facet filter: points failing an active facet are hidden/ghosted.
 	//      (uFilterDim is 0 to hide, small to ghost, 1 no-op — and is a no-op
 	//      whenever no facet is active because filterPass is then always true.)
@@ -426,11 +546,26 @@ void main() {
 	}
 
 	// ---- Team ignite: the reader's franchise renders in team color and resists
-	//      the dims — personalization survives every scene state.
+	//      the dims AND the worm-space haze — personalization survives (C2-8).
 	if (uPickedTeam >= 0.0 && abs(aTeam - uPickedTeam) < 0.5) {
-		c = mix(c, uTeamColor, 0.82);
+		vec3 tcol = uTeamColor;
+		float igniteK = 0.82;
+		float glowK = 0.35;
+		// through the run-out cascade the team glow desaturates one stop so a
+		// red-team reader (RCB/PBKS/SRH) never confuses identity with a run-out.
+		// Gated on the cascade being ACTIVE so a picked team in R1 is untouched.
+		if (uCascadeClass >= 0.0 && uCascadeMute > 0.0) {
+			float m = clamp(uCascadeMute, 0.0, 1.0);
+			float lum = dot(tcol, vec3(0.299, 0.587, 0.114));
+			tcol = mix(tcol, vec3(lum), 0.5 * m);
+			igniteK = mix(0.82, 0.55, m);
+			glowK = mix(0.35, 0.18, m);
+		}
+		c = mix(c, tcol, igniteK);
 		sizeMul *= 1.25;
-		glow = max(glow, 0.35);
+		glow = max(glow, glowK);
+		// resist the haze so the reader's team reads at full brightness in worm-space
+		alphaMul = max(alphaMul, mix(alphaMul, 0.82, core.wormWeight));
 	}
 
 	vColor = c;
@@ -486,6 +621,7 @@ export function makePickVertexShader(groupCount: number, hasMatch = false): stri
 	return /* glsl */ `
 #define GROUP_COUNT ${groupCount}
 #define RAIN_W ${ASSEMBLY_RAIN_WINDOW}
+#define CASCADE_FLASH_W ${CASCADE_FLASH_WINDOW.toFixed(6)}
 ${hasMatch ? '#define HAS_MATCH' : ''}
 
 ${UNIFORMS_GLSL}

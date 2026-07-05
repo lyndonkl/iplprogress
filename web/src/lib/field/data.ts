@@ -47,6 +47,11 @@ export async function loadFieldData(baseUrl: string): Promise<FieldData> {
 		// non-fatally so R1a and the range-based match preset keep working.
 		const matchIndex = await fetchOptionalU16(`${baseUrl}/data/match_index.u16`, n);
 
+		// OPTIONAL per-point cumulative innings runs (Ch 2 §13 worm-space y). Absent
+		// until the pipeline ships cumruns.u8 — fetch non-fatally so R1 keeps
+		// rendering; worm-space y collapses to the floor until it arrives.
+		const cumRuns = await fetchOptionalU8(`${baseUrl}/data/cumruns.u8`, n);
+
 		return {
 			nPoints: n,
 			meta,
@@ -58,6 +63,7 @@ export async function loadFieldData(baseUrl: string): Promise<FieldData> {
 			team: new Uint8Array(teamBuf),
 			wallHeat: new Uint8Array(heatBuf),
 			matchIndex,
+			cumRuns,
 			synthetic: false
 		};
 	} catch (err) {
@@ -111,6 +117,30 @@ async function fetchOptionalU16(url: string, n: number): Promise<Uint16Array | u
 			return undefined;
 		}
 		return decodeU16LE(buf);
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Fetch an OPTIONAL Uint8 buffer of exactly `n` bytes. Returns undefined (never
+ * throws) when the file is missing or the wrong size — the caller treats absence
+ * as "attribute unavailable", so a not-yet-shipped pipeline artifact degrades
+ * gracefully rather than breaking the whole field.
+ */
+async function fetchOptionalU8(url: string, n: number): Promise<Uint8Array | undefined> {
+	try {
+		const res = await fetch(url);
+		if (!res.ok) return undefined;
+		const type = res.headers.get('content-type') ?? '';
+		if (type.includes('text/html')) return undefined; // dev server 404 → index.html
+		const buf = await res.arrayBuffer();
+		if (buf.byteLength !== n) {
+			if (import.meta.env.DEV)
+				console.warn(`[every-ball-ever] ${url}: byteLength ${buf.byteLength} ≠ ${n} — ignoring`);
+			return undefined;
+		}
+		return new Uint8Array(buf);
 	} catch {
 		return undefined;
 	}

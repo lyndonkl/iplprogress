@@ -51,6 +51,8 @@ export function syntheticFieldData(): FieldData {
 	const ballsFaced = new Uint8Array(SYNTH_N);
 	const team = new Uint8Array(SYNTH_N);
 	const wallHeat = new Uint8Array(SYNTH_N);
+	// Ch 2 worm-space y (§13): batter cumulative innings runs, reset each innings.
+	const cumRuns = new Uint8Array(SYNTH_N);
 	// neutral byte = the pooled 2008-2010 batter (matches the pipeline encoding);
 	// synthetic heat rises for recent seasons at low ball-index so the dev wall
 	// visibly ignites bottom→top when the C1-2 heat beat is exercised.
@@ -61,19 +63,35 @@ export function syntheticFieldData(): FieldData {
 		// aggression drifts up with season, so even fake data "reads"
 		const eraLift = g.league === 'ipl' ? (g.season - 2008) / 18 : 0.55;
 		let bf = 1;
+		let runsSoFar = 0;
 		let battingTeam = pickTeam(rng, isWpl);
 		for (let i = 0; i < g.count; i++) {
 			groupIds[p] = g.gi;
 			attrs[p] = syntheticAttrByte(rng, eraLift, isWpl);
 			// rough balls-faced ramp: most balls are early-innings balls
 			ballsFaced[p] = Math.min(255, bf);
+			// cumulative innings runs from the outcome class (worm-space y)
+			const cls = attrs[p] & 0b111;
+			const ballRuns = cls === 0 ? 0 : cls === 1 ? 1 : cls === 2 ? 2 : cls === 3 ? 4 : cls === 4 ? 6 : 1;
+			runsSoFar = Math.min(255, runsSoFar + ballRuns);
+			cumRuns[p] = runsSoFar;
+			// synthetic run-out flag (attrs bit 6, §14): a share of wickets, higher
+			// in the early eras so the dev cascade visibly shrinks 2008 → 2026.
+			if ((attrs[p] & 0b1000) !== 0) {
+				const roShare = isWpl ? 0.07 : 0.12 - 0.07 * eraLift;
+				if (rng() < roShare) attrs[p] |= 0b0100_0000;
+			}
 			// era-relative intent: early balls (low bf) in recent seasons run hot
 			// above the neutral 2008-2010 pivot; 2008 rows sit near neutral.
 			const earlyWeight = 1 - Math.min(1, (bf - 1) / 29);
 			const heat01 = NEUTRAL01 + eraLift * earlyWeight * 0.62 + (rng() - 0.5) * 0.08;
 			wallHeat[p] = Math.max(0, Math.min(255, Math.round(heat01 * 255)));
-			if (rng() < 0.12) bf = 1; // "new batter"
-			else bf = Math.min(255, bf + 1);
+			if (rng() < 0.12) {
+				bf = 1; // "new batter" — the innings worm restarts at (1, 0)
+				runsSoFar = 0;
+			} else {
+				bf = Math.min(255, bf + 1);
+			}
 			if (rng() < 0.008) battingTeam = pickTeam(rng, isWpl); // "new innings"
 			team[p] = battingTeam;
 			p++;
@@ -90,6 +108,7 @@ export function syntheticFieldData(): FieldData {
 		ballsFaced,
 		team,
 		wallHeat,
+		cumRuns,
 		synthetic: true
 	};
 }

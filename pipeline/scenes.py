@@ -1395,7 +1395,7 @@ ANCHOR_EMPTY_HEADLINE = (
 )
 
 
-def _anchor_card(acc, best_key, best, matches, team, league, neutral=False):
+def _anchor_card(acc, best_key, best, matches, team, league, neutral=False, counts=None):
     r = best.get(best_key)
     if r is None:
         return {
@@ -1413,6 +1413,7 @@ def _anchor_card(acc, best_key, best, matches, team, league, neutral=False):
             "boundary_pct": None,
             "par_sr": None,
             "cum_runs": None,
+            "season_anchor_innings": None,
             "headline": ANCHOR_EMPTY_HEADLINE.format(team=team),
         }
     m = matches[r["match_index"]]
@@ -1453,6 +1454,12 @@ def _anchor_card(acc, best_key, best, matches, team, league, neutral=False):
         "boundary_pct": boundary_pct,
         "par_sr": par,
         "cum_runs": cum,
+        # rarity signal (storyboard C2-8 audit fix): how many TOP-ORDER qualifying
+        # anchor innings the SAME LEAGUE produced in this innings' season. It
+        # reframes "last anchor" as "increasingly rare" (one of only N that whole
+        # season) rather than "literally last year" — the datum is often the
+        # current season, so absolute-extinction wording would misread.
+        "season_anchor_innings": (counts or {}).get((r["league"], r["season"]), 0),
         "headline": headline,
     }
 
@@ -1464,11 +1471,15 @@ def payoff_section(acc) -> dict:
     matches = acc["matches"]
     best = {}  # (league, team) -> the most recent qualifying anchor innings
     ipl_best = None  # the most recent IPL anchor overall (the neutral card)
+    # league-season count of TOP-ORDER qualifying anchor innings — the payoff's
+    # rarity signal (how few the archetype produced each season).
+    counts = defaultdict(int)
     for r in acc["innings_recs"]:
         # "Your last anchor" is the archetype who HELD THE INNINGS TOGETHER —
         # a top-order (position 1-4) qualifying anchor, not a tail-end block.
         if not r["is_anchor"] or r["position"] > 4:
             continue
+        counts[(r["league"], r["season"])] += 1
         key = (r["league"], r["team"])
         cur = best.get(key)
         stamp = (r["season"], r["match_index"])
@@ -1481,11 +1492,11 @@ def payoff_section(acc) -> dict:
             ipl_best = r
     variants = []
     for t in canon.CURRENT_IPL_FRANCHISES:
-        variants.append(_anchor_card(acc, ("ipl", t), best, matches, t, "ipl"))
+        variants.append(_anchor_card(acc, ("ipl", t), best, matches, t, "ipl", counts=counts))
     for t in canon.WPL_FRANCHISES:
-        variants.append(_anchor_card(acc, ("wpl", t), best, matches, t, "wpl"))
+        variants.append(_anchor_card(acc, ("wpl", t), best, matches, t, "wpl", counts=counts))
     neutral = _anchor_card(
-        acc, "__neutral__", {"__neutral__": ipl_best}, matches, "Neutral", "ipl", neutral=True
+        acc, "__neutral__", {"__neutral__": ipl_best}, matches, "Neutral", "ipl", neutral=True, counts=counts
     )
     variants.append(neutral)
     return {
@@ -1499,8 +1510,10 @@ def payoff_section(acc) -> dict:
             "strike rate, boundary %, and what par was that day. Franchises born "
             "post-anchor with no qualifying top-order anchor get the designed "
             "empty state (authored copy, never a blank card). Neutral = the most "
-            "recent top-order IPL anchor overall. Strictly template + per-team "
-            "numbers — nothing hand-authored per team."
+            "recent top-order IPL anchor overall. season_anchor_innings = how many "
+            "top-order qualifying anchor innings the SAME league produced in that "
+            "innings' season (the rarity signal — one of only N that season). "
+            "Strictly template + per-team numbers — nothing hand-authored per team."
         ),
     }
 

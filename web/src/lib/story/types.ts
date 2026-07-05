@@ -1,6 +1,12 @@
 import type { Component } from 'svelte';
 import type { FieldHandle } from '$lib/field/field';
-import type { FilterMode, HighlightClass, LayoutId, ResortColumns } from '$lib/field/types';
+import type {
+	CascadeClass,
+	FilterMode,
+	HighlightClass,
+	LayoutId,
+	ResortColumns
+} from '$lib/field/types';
 import type { FootnoteId } from './footnotes';
 
 /**
@@ -9,7 +15,7 @@ import type { FootnoteId } from './footnotes';
  * See CONTRACT.md in this directory for the full contract and ownership map.
  */
 
-export type ChapterId = 'coldopen' | 'picker' | 'ch1' | 'endcard' | 'bowl';
+export type ChapterId = 'coldopen' | 'picker' | 'ch1' | 'ch2' | 'endcard' | 'bowl';
 
 /** Uniform-driven subset highlight: lift/tint points matching a class mask. */
 export interface SubsetHighlight {
@@ -57,6 +63,38 @@ export interface SubsetResort {
 }
 
 /**
+ * The run-out cascade (§14 capability — the C2-4 hero subset-highlight). A
+ * cross-cutting SEASON-SWEPT flash+fall of the run-out subset, declared on a
+ * scene's `fieldState` over the held `worms` layout. It composes with the base
+ * layout and does NOT spend a second controlling morph (like `highlight` and
+ * `resort`). As `sweep` advances 0→1 each season's run-out cohort flashes red
+ * and ejects downward TOGETHER (Gestalt common fate — one discrete pulse per
+ * season), then fades. Drive `sweep` across the hold from a caption step via
+ * `SceneDef.dynamicState` (it is a post-morph field change, like the C1-5 tint
+ * and the C1-2 heat beat). The NEXT scene declaring no cascade lerps `sweep`
+ * back to 0 — the run-outs return (reversible, the reverse leg is free).
+ *
+ * MEMBERSHIP: the shell reads a per-point `aRunOut` GL flag, seeded from
+ * attrs.u8 bit 6. Until the pipeline re-encodes that bit, the scene supplies
+ * membership at runtime with `field.setRunouts(indices)` (a CPU index set
+ * derived from the columnar `wicket_kind == 'run out'`). See CONTRACT §14.
+ */
+export interface RunoutCascade {
+	/** which subset cascades — only 'runOut' today (aRunOut flag) */
+	class: CascadeClass;
+	/** 0→1 season pointer: cohorts up to this season have flashed red + fallen (default 0) */
+	sweep: number;
+	/** red flash strength 0..1 — the beat-gated hue exception (default 1) */
+	tint?: number;
+	/** world-units downward eject depth for a fully fallen point (default 0.9) */
+	fall?: number;
+	/** residual alpha × for a fully fallen point (default 0 — fully gone) */
+	fade?: number;
+	/** team-glow desaturation 0..1 through the cascade (red-team guard; default 1) */
+	muteIdentity?: number;
+}
+
+/**
  * A scene's declarative field state — the layout the field ARRIVES at while
  * the scene scrubs in, plus the cross-cutting uniform states. Omitted fields
  * take the defaults in fieldstate.ts (reveal 1 · dim 1 · wplDim 1 · labels 0 ·
@@ -76,6 +114,8 @@ export interface SceneFieldState {
 	highlight?: SubsetHighlight | null;
 	/** subset re-sort into firework columns, or null/omitted for none (§7) */
 	resort?: SubsetResort | null;
+	/** season-swept run-out flash+fall over worm-space, or null/omitted for none (§14) */
+	cascade?: RunoutCascade | null;
 	/** whether the picked team's balls stay ignited (default true — §2 standing rule) */
 	teamIgnite?: boolean;
 	/**

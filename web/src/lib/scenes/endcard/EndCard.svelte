@@ -24,7 +24,7 @@
 
 <div class="pin">
 	<div class="scene-card interactive card">
-		<p class="overline">Chapter 1 of 10 — The Death of the Sighter · done</p>
+		<p class="overline">Chapter 2 of 10 — The Last of the Anchors · done</p>
 
 		<h2>Every ball is still here.</h2>
 		<p class="promise">
@@ -34,8 +34,8 @@
 		</p>
 
 		<p class="next">
-			<strong>Next — Chapter 2: The Last of the Anchors.</strong>
-			<em>A whole species of batter is about to go extinct.</em>
+			<strong>Next — Chapter 3: The Counterrevolution.</strong>
+			<em>When batting changes this much, the men with the ball have to answer.</em>
 			<span class="tag">in build — the story grows chapter by chapter</span>
 		</p>
 

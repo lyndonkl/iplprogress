@@ -66,6 +66,14 @@ export interface FieldData {
 	 * (deliveries of a match ARE contiguous in point order), which needs no buffer.
 	 */
 	matchIndex?: Uint16Array;
+	/**
+	 * per-delivery batter cumulative-innings-runs byte (cap 255), same point
+	 * order as ballsFaced — OPTIONAL, drives the Ch 2 `worms` layout's y axis
+	 * (CONTRACT §13). Present only when the pipeline ships `cumruns.u8`; absent
+	 * until then, so worm-space y collapses to the floor (graceful — R1 scenes
+	 * never use `worms`). Uploaded NORMALIZED (u8 → 0..1) like wallHeat.
+	 */
+	cumRuns?: Uint8Array;
 	/** true when this is the dev-only synthetic fallback, not pipeline output */
 	synthetic: boolean;
 }
@@ -84,14 +92,18 @@ export const OUTCOME_OTHER = 5;
  * position buffers ever cross the wire (blueprint §2).
  * ------------------------------------------------------------------------- */
 
-export type LayoutId = 'free' | 'columns' | 'wall' | 'assembly';
+export type LayoutId = 'free' | 'columns' | 'wall' | 'assembly' | 'worms';
 
 /** Shader-side layout codes (uLayoutA / uLayoutB). */
 export const LAYOUT_CODE: Record<LayoutId, number> = {
 	free: 0,
 	columns: 1,
 	wall: 2,
-	assembly: 3
+	assembly: 3,
+	// Ch 2 controlling morph (free→worms): x = balls-faced (aBallsFaced, display
+	// extent 60+), y = cumulative innings runs (aCumRuns), settled as a low-alpha
+	// density haze. In-shader from existing attributes + cumruns.u8 (CONTRACT §13).
+	worms: 4
 };
 
 /**
@@ -121,6 +133,26 @@ export type HighlightClass = Exclude<keyof typeof HL_CLASS, 'none'>;
  * re-sort degrades to a single-tone column (graceful).
  */
 export const ATTR_TOP10_BIT = 32;
+
+/**
+ * attrs.u8 bit 6 (mask 0x40) — the run-out dismissal flag, packed by the
+ * pipeline into the spare bit above outcome (0-2) / wicket (3) / WPL (4) /
+ * top-10 (5). Seeds the `aRunOut` GL membership flag for the C2-4 cascade
+ * (CONTRACT §14). Until the pipeline re-encodes it the bit reads 0 everywhere,
+ * so the field seeds an empty flag — the scene supplies membership at runtime
+ * via `field.setRunouts(indices)` (a CPU index set derived from the columnar
+ * `wicket_kind == 'run out'`), which works with zero pipeline dependency.
+ */
+export const ATTR_RUNOUT_BIT = 64;
+
+/**
+ * Run-out cascade subset class codes (uCascadeClass). Only 'runOut' today; the
+ * shader tests the per-point `aRunOut` flag rather than decoding a class, so
+ * the code just gates the capability on/off. -1 = no cascade active.
+ */
+export const CASCADE_CLASS = { none: -1, runOut: 0 } as const;
+
+export type CascadeClass = Exclude<keyof typeof CASCADE_CLASS, 'none'>;
 
 /**
  * Which season groups form re-sort columns. 'ipl' = IPL seasons only (the C1-5
@@ -264,6 +296,28 @@ export interface FieldRenderState {
 	filterRangeHi: number;
 	/** luminance×alpha for FILTERED-OUT points (0 hide … 1 no-op) */
 	filterDim: number;
+
+	/* ---- run-out cascade (§14 capability — the C2-4 hero subset) -------------
+	 * A cross-cutting SEASON-SWEPT flash+fall of the run-out subset (per-point
+	 * `aRunOut`, seeded from attrs.u8 bit 6 or a CPU index set). Composes with
+	 * the `worms` layout; it does NOT spend a second controlling morph (like the
+	 * highlight and the re-sort). As `cascadeSweep` advances 0→1 each season's
+	 * run-out cohort flashes red and ejects downward TOGETHER (Gestalt common
+	 * fate — one discrete pulse per season), then fades. Fully reversible: the
+	 * next scene declaring no cascade lerps `cascadeSweep` back to 0. All fields
+	 * default inactive (uCascadeClass -1), so R1a/R1b scenes render identically. */
+	/** cascade subset class code (-1 = inactive, 0 = runOut) */
+	cascadeClass: number;
+	/** 0→1 season pointer — cohorts up to this season have flashed + fallen */
+	cascadeSweep: number;
+	/** red flash strength 0..1 as a season's wave crosses (beat-gated hue exception) */
+	cascadeTint: number;
+	/** world-units downward eject depth for a fully fallen point */
+	cascadeFall: number;
+	/** residual alpha × for a fully fallen point (0 = gone, 1 = stays lit) */
+	cascadeFade: number;
+	/** team-identity glow desaturation 0..1 through the cascade (red-team guard) */
+	cascadeMute: number;
 }
 
 export const DEFAULT_RENDER_STATE: FieldRenderState = {
@@ -293,5 +347,11 @@ export const DEFAULT_RENDER_STATE: FieldRenderState = {
 	filterMatchIndex: -1,
 	filterRangeLo: 0,
 	filterRangeHi: 0,
-	filterDim: 1
+	filterDim: 1,
+	cascadeClass: CASCADE_CLASS.none,
+	cascadeSweep: 0,
+	cascadeTint: 0,
+	cascadeFall: 0,
+	cascadeFade: 1,
+	cascadeMute: 0
 };

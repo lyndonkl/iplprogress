@@ -25,10 +25,22 @@ actual point buffer, so the order in these buffers IS the assembly order).
                                 batter 5s)
                       bit 3     wicket fell on this ball
                       bit 4     WPL
+                      bit 6     (0x40) the wicket that fell on this ball was a
+                                RUN OUT — the Ch 2 run-out cascade flag (0 on
+                                every non-run-out delivery). A pure re-encode of
+                                a spare bit: R1 masks bits 0-4 only, so its
+                                rendering is byte-identical (ledger delta 0).
   ballsfaced.u8     per delivery: the striker's 1-based ball-faced index
                     within their innings AT this delivery (wides = 0 — the
                     batter doesn't face them; no-balls count; capped at 255).
                     Powers the Ch 1 ignition-wall layout.
+  cumruns.u8        per delivery: the striker's CUMULATIVE off-the-bat runs in
+                    this innings so far, inclusive of this ball (capped at 255 —
+                    an innings rarely exceeds ~175, so almost never clamped;
+                    wides carry the unchanged running total since a wide scores
+                    the batter nothing). Same point order as ballsfaced.u8.
+                    Powers the Ch 2 worm-space y axis (runs climbing with balls
+                    faced); a no-op for R1 layouts.
   team.u8           per delivery: canonical batting-franchise id (league-
                     scoped; renames collapse — Delhi Daredevils deliveries
                     carry the Delhi Capitals id). Ids defined in teams.json.
@@ -86,6 +98,9 @@ OUT_OTHER_SCORING = 5
 
 ATTR_WICKET_BIT = 1 << 3
 ATTR_WPL_BIT = 1 << 4
+# bit 5 stays reserved/zero; bit 6 (0x40) flags a run-out dismissal on this ball
+# (Ch 2 run-out cascade). A spare-bit re-encode — R1 reads bits 0-4 only.
+ATTR_RUNOUT_BIT = 1 << 6
 
 
 def outcome_class(delivery: dict) -> int:
@@ -112,8 +127,11 @@ def outcome_class(delivery: dict) -> int:
 
 def pack_attr(delivery: dict, wpl: bool) -> int:
     byte = outcome_class(delivery)
-    if delivery.get("wickets"):
+    wkts = delivery.get("wickets")
+    if wkts:
         byte |= ATTR_WICKET_BIT
+        if any(w.get("kind") == "run out" for w in wkts):
+            byte |= ATTR_RUNOUT_BIT  # Ch 2 run-out cascade flag (bit 6)
     if wpl:
         byte |= ATTR_WPL_BIT
     return byte
@@ -271,6 +289,7 @@ def build_stream(data_root: Path = canon.DATA_ROOT):
     group_ids = array("H")
     attrs = bytearray()
     ballsfaced = bytearray()
+    cumruns = bytearray()
     team_u8 = bytearray()
 
     batters, bowlers, teams = DictEncoder(), DictEncoder(), DictEncoder()
@@ -308,6 +327,7 @@ def build_stream(data_root: Path = canon.DATA_ROOT):
             team_code = teams.code(canonical_team)
             franchise_id = canon.team_id(league, canonical_team)
             faced: dict[str, int] = {}
+            batruns: dict[str, int] = {}  # striker -> cumulative off-the-bat runs
             for over in innings["overs"]:
                 over_no = over["over"]
                 for ball_index, dl in enumerate(over["deliveries"]):
@@ -321,6 +341,12 @@ def build_stream(data_root: Path = canon.DATA_ROOT):
                         n = faced.get(dl["batter"], 0) + 1
                         faced[dl["batter"]] = n
                         ballsfaced.append(min(n, 255))
+                    # Cumulative off-the-bat runs for the striker, inclusive of
+                    # this ball (wides add 0 — the batter scores nothing off
+                    # them, so the running total carries unchanged); cap 255.
+                    r = batruns.get(dl["batter"], 0) + dl["runs"]["batter"]
+                    batruns[dl["batter"]] = r
+                    cumruns.append(min(r, 255))
                     col["season"].append(season)
                     col["league"].append(1 if wpl else 0)
                     col["innings"].append(innings_no)
@@ -345,7 +371,7 @@ def build_stream(data_root: Path = canon.DATA_ROOT):
         "batting_team": teams.names,
         "wicket_kind": wicket_kinds.names,
     }
-    return groups, group_ids, attrs, col, dicts, ballsfaced, team_u8, matches
+    return groups, group_ids, attrs, col, dicts, ballsfaced, cumruns, team_u8, matches
 
 
 # ---------------------------------------------------------------------------
@@ -365,12 +391,15 @@ def compact_json(obj, *, sort_keys: bool = False) -> bytes:
 
 
 def main(out_root: Path = canon.OUT_ROOT) -> dict:
-    groups, group_ids, attrs, col, dicts, ballsfaced, team_u8, matches = build_stream()
+    groups, group_ids, attrs, col, dicts, ballsfaced, cumruns, team_u8, matches = (
+        build_stream()
+    )
     n_points = len(attrs)
     assert len(group_ids) == n_points
     assert all(len(v) == n_points for v in col.values())
     assert sum(g["count"] for g in groups) == n_points
     assert len(ballsfaced) == n_points
+    assert len(cumruns) == n_points
     assert len(team_u8) == n_points
     # Every match_index indexes a real match (0 <= mi < |matches|); the table
     # spans the whole corpus. The stronger "inline table == build_matches()"
@@ -409,6 +438,7 @@ def main(out_root: Path = canon.OUT_ROOT) -> dict:
     emit("group_ids.u16", group_ids.tobytes())
     emit("attrs.u8", bytes(attrs))
     emit("ballsfaced.u8", bytes(ballsfaced))
+    emit("cumruns.u8", bytes(cumruns))
     emit("team.u8", bytes(team_u8))
     emit("wallheat.u8", bytes(wallheat_bytes))
     emit("teams.json", compact_json(list(canon.TEAMS), sort_keys=True))

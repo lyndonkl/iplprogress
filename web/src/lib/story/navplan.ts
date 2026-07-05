@@ -16,7 +16,8 @@ export interface NavItem {
 
 /** Unbuilt chapters, in reading order, titles only (storyboard §6). */
 export const FUTURE_CHAPTERS: string[] = [
-	'Chapter 2 — The Last of the Anchors',
+	// 'Chapter 2 — The Last of the Anchors' is now LIVE — its scenes declare it
+	// as a navLabel (see src/lib/scenes/ch2), so it appears as a live nav item.
 	'Chapter 3 — The Counterrevolution',
 	'Chapter 4 — The Rising Tide',
 	'Interlude — The Net Session',

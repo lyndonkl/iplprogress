@@ -8,7 +8,7 @@
  "artifacts": {
   "attrs.u8": {
    "bytes_raw": 316199,
-   "bytes_gz": 112505
+   "bytes_gz": 113189
   },
   "ballsfaced.u8": {
    "bytes_raw": 316199,
@@ -17,6 +17,10 @@
   "columnar.json.gz": {
    "bytes_raw": 11775799,
    "bytes_gz": 655235
+  },
+  "cumruns.u8": {
+   "bytes_raw": 316199,
+   "bytes_gz": 200375
   },
   "engines/entry.json": {
    "bytes_raw": 754590,
@@ -55,8 +59,8 @@
    "bytes_gz": 20686
   },
   "meta.json": {
-   "bytes_raw": 885,
-   "bytes_gz": 359
+   "bytes_raw": 937,
+   "bytes_gz": 372
   },
   "payoff/ch1.json": {
    "bytes_raw": 20655,
@@ -67,8 +71,8 @@
    "bytes_gz": 9005
   },
   "scenes/ch2.json": {
-   "bytes_raw": 33461,
-   "bytes_gz": 8890
+   "bytes_raw": 34057,
+   "bytes_gz": 8978
   },
   "scenes/coldopen.json": {
    "bytes_raw": 3720,
@@ -106,7 +110,7 @@
     "scenes/coldopen.json"
    ],
    "budget_gz": 3000000,
-   "actual_gz": 405211,
+   "actual_gz": 405908,
    "pass": true
   },
   {
@@ -133,10 +137,11 @@
   {
    "name": "chapter ch2 (scene + payoff)",
    "files": [
-    "scenes/ch2.json"
+    "scenes/ch2.json",
+    "cumruns.u8"
    ],
    "budget_gz": 2000000,
-   "actual_gz": 8890,
+   "actual_gz": 209353,
    "pass": true
   },
   {
@@ -159,6 +164,7 @@
     "attrs.u8",
     "ballsfaced.u8",
     "columnar.json.gz",
+    "cumruns.u8",
     "engines/entry.json",
     "engines/par.json",
     "engines/phasepar.json",
@@ -179,7 +185,7 @@
     "wallheat.u8"
    ],
    "budget_gz": 25000000,
-   "actual_gz": 1298124,
+   "actual_gz": 1499284,
    "pass": true
   }
  ],

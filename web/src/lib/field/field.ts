@@ -13,9 +13,13 @@ import {
 	computeColumns,
 	computeWall,
 	computeResortColumns,
+	computeWorms,
 	basePointPx,
+	WORM_X_CAP,
+	WORM_RUNS_CAP,
 	type ColumnLayout,
-	type WallLayout
+	type WallLayout,
+	type WormLayout
 } from './layout';
 import { makeVertexShader, fragmentShader, makePickVertexShader, pickFragmentShader } from './shaders';
 
@@ -112,6 +116,23 @@ export interface FieldHandle {
 	 * null until a re-sort has been applied at least once.
 	 */
 	getResortLayout(): ResortColumnInfo | null;
+	/**
+	 * current worm-space geometry (§13 — Ch 2's controlling morph): the
+	 * fixed-aspect, letterboxed plot box + display caps. Scenes register the par
+	 * / anchor exemplar worms and the axes to the GL haze by mapping data points
+	 * through `wormPoint(layout, ballsFaced, runs)` then `projectToCss`. null
+	 * before the first resize. Rebuilt on resize.
+	 */
+	getWormLayout(): WormLayout | null;
+	/**
+	 * Set run-out membership for the C2-4 cascade (§14). Pass the point indices
+	 * whose delivery is a run-out (the scene derives them from the columnar
+	 * `wicket_kind == 'run out'`); the field bakes them into the per-point
+	 * `aRunOut` GL flag ONCE (no per-frame cost — demand mode preserved) and
+	 * renders. Pass `null` to revert to the pipeline seed (attrs.u8 bit 6). This
+	 * is the working-today path until the pipeline re-encodes the run-out bit.
+	 */
+	setRunouts(indices: Iterable<number> | null): void;
 	readonly data: FieldData;
 	readonly stats: Readonly<FieldStats>;
 }
@@ -153,6 +174,12 @@ export function createField(opts: FieldOptions): FieldHandle {
 	// gi → season year, for the season facet (a season may span both leagues).
 	const groupSeason = new Array<number>(groupCount).fill(0);
 	for (const g of data.groups) groupSeason[g.gi] = g.season;
+
+	// season range → the run-out cascade's sweep normalizer (§14). The sweep maps
+	// 0→1 across [minSeason, maxSeason], so each season's cohort has one phase.
+	const minSeason = data.groups.reduce((m, g) => Math.min(m, g.season), Infinity);
+	const maxSeason = data.groups.reduce((m, g) => Math.max(m, g.season), -Infinity);
+	const seasonSpan = Math.max(1, maxSeason - minSeason);
 
 	/* ---- per-point attributes: ordinal-in-group in one pass ------------- */
 	// position vec3 = (index, gi, ordinal) — all exact integers in Float32.
@@ -232,7 +259,25 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uFilterRangeLo: { value: 0 },
 		uFilterRangeHi: { value: 0 },
 		uFilterMatch: { value: -1 },
-		uFilterDim: { value: 1 }
+		uFilterDim: { value: 1 },
+		// worm-space layout (§13) — geometry set on every resize (letterboxed box)
+		uWormLeft: { value: 0 },
+		uWormWidth: { value: 1 },
+		uWormBottom: { value: 0 },
+		uWormHeight: { value: 1 },
+		uWormXCap: { value: WORM_X_CAP },
+		uWormRunsCapNorm: { value: WORM_RUNS_CAP / 255 },
+		uWormCellHalfW: { value: 0.01 },
+		uWormCellHalfH: { value: 0.01 },
+		// run-out cascade (§14) — all inactive by default (R1 scenes unaffected)
+		uCascadeClass: { value: -1 },
+		uCascadeSweep: { value: 0 },
+		uCascadeTint: { value: 0 },
+		uCascadeFall: { value: 0 },
+		uCascadeFade: { value: 1 },
+		uCascadeMute: { value: 0 },
+		uCascadeMinSeason: { value: Number.isFinite(minSeason) ? minSeason : 0 },
+		uCascadeInvSpan: { value: 1 / seasonSpan }
 	};
 
 	const geometry = new THREE.BufferGeometry();
@@ -243,6 +288,20 @@ export function createField(opts: FieldOptions): FieldHandle {
 	// wallheat is uploaded NORMALIZED (u8 → 0..1) so the shader reads aWallHeat
 	// directly against WALLHEAT_NEUTRAL (73/255); every other attr is raw bytes.
 	geometry.setAttribute('aWallHeat', new THREE.BufferAttribute(data.wallHeat, 1, true));
+	// worm-space y (§13): cumulative innings runs, NORMALIZED (u8 → 0..1) like
+	// wallheat. OPTIONAL buffer — until the pipeline ships cumruns.u8 it binds
+	// zeros, so worm-space y collapses to the floor (graceful; R1 never uses worms).
+	const cumRunsBuf =
+		data.cumRuns && data.cumRuns.length === n ? data.cumRuns : new Uint8Array(n);
+	geometry.setAttribute('aCumRuns', new THREE.BufferAttribute(cumRunsBuf, 1, true));
+	// run-out cascade membership (§14): a 0/1 flag, seeded from attrs.u8 bit 6
+	// (0x40). Client-baked, zero wire cost. Overridable at runtime via
+	// setRunouts(indices) with a CPU set (columnar wicket_kind == 'run out'), so
+	// the cascade works BEFORE the pipeline re-encodes the bit.
+	const runOutFlag = new Uint8Array(n);
+	for (let i = 0; i < n; i++) if ((data.attrs[i] & 64) !== 0) runOutFlag[i] = 1;
+	geometry.setAttribute('aRunOut', new THREE.BufferAttribute(runOutFlag, 1, false));
+	const runOutAttr = geometry.getAttribute('aRunOut') as THREE.BufferAttribute;
 	geometry.setAttribute('aSubOrd', new THREE.BufferAttribute(subOrd, 1, false));
 	const subOrdAttr = geometry.getAttribute('aSubOrd') as THREE.BufferAttribute;
 	// OPTIONAL match index (u16 → non-normalized float attr); gates the match facet
@@ -298,8 +357,25 @@ export function createField(opts: FieldOptions): FieldHandle {
 	const labels: LabelEntry[] = buildLabels(labelLayer, data.groups);
 	let columnLayout: ColumnLayout | null = null;
 	let wallLayout: WallLayout | null = null;
+	let wormLayout: WormLayout | null = null;
 	let cssW = 1;
 	let cssH = 1;
+
+	/* ---- run-out cascade membership (§14) ---------------------------------- */
+	// Bake a CPU-supplied index set (or the pipeline seed) into the aRunOut flag
+	// ONCE; there is no per-frame cost, so demand mode is preserved.
+	function setRunouts(indices: Iterable<number> | null): void {
+		if (disposed) return;
+		const arr = runOutAttr.array as Uint8Array;
+		arr.fill(0);
+		if (indices === null) {
+			for (let i = 0; i < n; i++) if ((data.attrs[i] & 64) !== 0) arr[i] = 1; // pipeline seed
+		} else {
+			for (const i of indices) if (i >= 0 && i < n) arr[i] = 1;
+		}
+		runOutAttr.needsUpdate = true;
+		invalidate();
+	}
 
 	/* ---- subset re-sort state (§7 — the C1-5 fireworks) --------------------- */
 	// per-point ordinals are derived on-device the first time a given
@@ -452,7 +528,13 @@ export function createField(opts: FieldOptions): FieldHandle {
 			a.filterMatchIndex === b.filterMatchIndex &&
 			a.filterRangeLo === b.filterRangeLo &&
 			a.filterRangeHi === b.filterRangeHi &&
-			a.filterDim === b.filterDim
+			a.filterDim === b.filterDim &&
+			a.cascadeClass === b.cascadeClass &&
+			a.cascadeSweep === b.cascadeSweep &&
+			a.cascadeTint === b.cascadeTint &&
+			a.cascadeFall === b.cascadeFall &&
+			a.cascadeFade === b.cascadeFade &&
+			a.cascadeMute === b.cascadeMute
 		);
 	}
 
@@ -507,6 +589,21 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uniforms.uFilterRangeHi.value = s.filterRangeHi;
 		uniforms.uFilterMatch.value = hasMatchAttr ? s.filterMatchIndex : -1;
 		uniforms.uFilterDim.value = s.filterDim;
+
+		// run-out cascade (§14): season-swept flash+fall of the aRunOut subset.
+		// A cross-cutting position modifier like the re-sort — the two must be
+		// staged apart (both move points), so warn if they engage together.
+		uniforms.uCascadeClass.value = s.cascadeClass;
+		uniforms.uCascadeSweep.value = s.cascadeSweep;
+		uniforms.uCascadeTint.value = s.cascadeTint;
+		uniforms.uCascadeFall.value = s.cascadeFall;
+		uniforms.uCascadeFade.value = s.cascadeFade;
+		uniforms.uCascadeMute.value = s.cascadeMute;
+		if (import.meta.env.DEV && s.cascadeClass >= 0 && s.resortClass >= 0)
+			console.warn(
+				'[every-ball-ever] invariant: the run-out cascade (C2-4) and a re-sort are',
+				'both engaged — cross-cutting position modifiers must be staged apart.'
+			);
 
 		// label plane opacity is scene-state-driven, never animated on its own
 		const o = Math.min(1, Math.max(0, s.labels));
@@ -659,8 +756,15 @@ export function createField(opts: FieldOptions): FieldHandle {
 
 		columnLayout = computeColumns(data.groups, halfW, halfH);
 		wallLayout = computeWall(data.groups, halfW, halfH);
+		wormLayout = computeWorms(halfW, halfH);
 		uniforms.uHalfW.value = halfW;
 		uniforms.uHalfH.value = halfH;
+		uniforms.uWormLeft.value = wormLayout.left;
+		uniforms.uWormWidth.value = wormLayout.width;
+		uniforms.uWormBottom.value = wormLayout.bottom;
+		uniforms.uWormHeight.value = wormLayout.height;
+		uniforms.uWormCellHalfW.value = wormLayout.cellHalfW;
+		uniforms.uWormCellHalfH.value = wormLayout.cellHalfH;
 		uniforms.uPointScale.value = basePointPx(w, h, n) * dpr;
 		uniforms.uColHalfWidth.value = columnLayout.colHalfWidth;
 		uniforms.uColBottom.value = columnLayout.bottom;
@@ -718,6 +822,8 @@ export function createField(opts: FieldOptions): FieldHandle {
 		getColumnLayout: () => columnLayout,
 		getWallLayout: () => wallLayout,
 		getResortLayout: () => resortInfo,
+		getWormLayout: () => wormLayout,
+		setRunouts,
 		dispose(): void {
 			disposed = true;
 			if (rafId !== null) cancelAnimationFrame(rafId);

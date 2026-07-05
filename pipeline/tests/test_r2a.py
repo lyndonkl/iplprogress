@@ -461,6 +461,7 @@ class TestPayoff(unittest.TestCase):
                 # A designed empty state is non-degenerate ONLY with authored copy.
                 self.assertIsNone(v["batter"], tag)
                 self.assertIsNone(v["cum_runs"], tag)
+                self.assertIsNone(v["season_anchor_innings"], tag)
                 self.assertIn("born post-anchor", v["headline"], tag)
             else:
                 self.assertTrue(v["batter"], tag)
@@ -471,6 +472,9 @@ class TestPayoff(unittest.TestCase):
                 self.assertLess(v["boundary_pct"], 12.0, tag)
                 self.assertEqual(len(v["cum_runs"]), min(v["balls"], scenes.WORM_MAX_BALLS), tag)
                 self.assertEqual(v["cum_runs"], sorted(v["cum_runs"]), tag)
+                # rarity signal: the variant's own innings is one of the season's
+                # top-order anchors, so the league-season count is at least 1.
+                self.assertGreaterEqual(v["season_anchor_innings"], 1, tag)
 
     def test_at_least_one_wpl_card_ships(self):
         wpl = [v for v in self.variants() if v["league"] == "wpl"]

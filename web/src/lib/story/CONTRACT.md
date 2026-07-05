@@ -1,4 +1,4 @@
-# Story Shell Contract — R1a (+ R1b field capabilities: §11 picking · §12 filtering)
+# Story Shell Contract — R1a (+ R1b field capabilities: §11 picking · §12 filtering; + R2a Ch 2: §13 worm-space · §14 run-out cascade)
 
 The scene system every scene builder codes against. The shell (this directory +
 `lib/field/` + `lib/state/`) is owned by the story-shell architect; **scene
@@ -52,7 +52,7 @@ scrubs the field from the previous scene's `fieldState` to this scene's
 
 ```ts
 {
-  layout: 'free' | 'columns' | 'wall' | 'assembly';
+  layout: 'free' | 'columns' | 'wall' | 'assembly' | 'worms';
   reveal?: number;    // assembly stream-in 0..1 (chronological by point index)
   dim?: number;       // global luminance ×, 1 = full (default 1)
   wplDim?: number;    // WPL-points luminance × (C1-2 shelf staging; default 1)
@@ -80,8 +80,11 @@ authored) · `columns` = season columns (centroid table + ordinal) · `wall` =
 ignition wall (x = balls-faced 1..30+ from `ballsfaced.u8`, y = season row,
 WPL rows on a separate shelf above 2026) · `assembly` = the free scatter
 revealed chronologically as `reveal` scrubs 0→1 (the counter set piece; at
-`reveal:1` it is position-identical to `free`, so assembly→free is seamless). All scalar fields lerp during the morph; highlight lift/boost/dim
-lerp so subsets glide in and out.
+`reveal:1` it is position-identical to `free`, so assembly→free is seamless) ·
+`worms` = Ch 2 worm-space (x = balls-faced 1..60+ from `ballsfaced.u8`, y =
+cumulative innings runs from `cumruns.u8`, settled as a low-alpha density haze;
+fixed data aspect ratio + letterbox — §13). All scalar fields lerp during the
+morph; highlight lift/boost/dim lerp so subsets glide in and out.
 
 **Every scalar here is luminance/position, never hue.** Hue is identity only
 (team color, WPL family) — standing rule.
@@ -506,3 +509,187 @@ returning the index; only the *match name* is blocked on the pipeline note above
   byte-identically** (the filter block is a shader no-op when no facet is active).
 - The visual and pick vertex shaders share one `computeCore()` (position +
   visibility), so the pick pass can never drift from what the reader sees.
+
+---
+
+## 13. Worm-space — Ch 2's controlling morph (R2a `worms` layout)
+
+Chapter 2's single controlling morph (free→worms, analogous to Ch 1's free→wall).
+Every ball settles into a **low-alpha density haze**: **x = the batter's
+balls-faced index** (1..60+, reusing `ballsfaced.u8` — the wall display-clamped
+it at 30, worm-space clamps at **60**, the capped `60+` bucket at the right edge)
+and **y = cumulative innings runs** (new `cumruns.u8`). A rising staircase of one
+batter-innings is a **worm**; slope = strike rate — par sprints up-and-right, an
+anchor crawls along the floor. Positions are **in-shader**; no positions cross the
+wire. Add nothing yourself — the shell owns the layout.
+
+### 13.1 Declaring it
+
+```ts
+fieldState: { layout: 'worms' }   // that's it — free→worms is the morph
+```
+
+The field lands as the haze automatically (base alpha drops to a haze level as
+the field morphs into worm-space, restored on the way out — no-op for every R1
+layout). The reader's **team stays ignited at full brightness** through the haze
+(personalization survives — C2-8 payoff). The morph is the chapter's ONE layout
+morph; the run-out cascade (§14), the thinning, the gearbox and the WPL brighten
+are all subset / 2D / colour-state beats that **compose** with `worms` and spend
+no second morph.
+
+### 13.2 Honesty lock (do not fight it)
+
+The plot's **data aspect ratio is FIXED (banked ~45° for a modern-par slope) and
+independent of the viewport** — the frame **letterboxes** (adds margin) rather
+than stretching x or banking worms toward vertical, so the "sprints vs crawls"
+angular contrast reads identically on desktop and portrait phone (the primary
+target). The banking + display caps (`WORM_X_CAP` 60, `WORM_RUNS_CAP` 130,
+`WORM_REF_RPB` 1.5) live in `lib/field/layout.ts` and are the **owner-tunable**
+constants flagged for build sign-off (storyboard §5.11); changing them keeps the
+fixed-aspect + letterbox invariant.
+
+### 13.3 Drawing the par / anchor exemplar worms — `field.getWormLayout()`
+
+The par worm, the K anchor exemplar worms and the axes are the **scene's job on
+the annotation plane** (SVG registered to field coordinates) — **never** thousands
+of GL polylines (the cardinality rule). The GL field is the haze; the worms are
+crisp SVG on top. Register them with:
+
+```ts
+import { wormPoint } from '$lib/field/layout';
+const w = field.getWormLayout();            // null before first resize — guard
+if (w) {
+  // map a data point (balls-faced, runs) → world, then → CSS px
+  const world = wormPoint(w, ballsFaced, cumulativeRuns);
+  const css = field.projectToCss(world.x, world.y);   // place the SVG vertex here
+}
+```
+
+`getWormLayout()` returns `{ left, width, bottom, height, xCap, runsCap,
+cellHalfW, cellHalfH }` (the fixed-aspect box + display caps), rebuilt on resize.
+`wormPoint(layout, ballsFaced, runs)` is the **exact** mapping the shader uses
+(balls clamped to the 60+ bucket, runs clamped to the cap), so the SVG worms and
+the GL haze can never drift. The **anchor-worm figure channel** (dark casing/halo
++ brighter stroke + a locally-attenuated haze corridor beneath the line, storyboard
+§0.1) is a compositing concern the scene owns on the annotation plane: the dark
+SVG casing drawn over the canvas IS the corridor attenuation — no GL geometry
+needed. The haze is deliberately dim so the SVG figure separates cleanly.
+
+### 13.4 Reduced motion & pipeline dependency
+
+Reduced motion jump-cuts free→worms live (the settled haze end state, team glow
+intact) — declare `reducedMotionEndState: { layout: 'worms' }` (or let it default
+to `fieldState`). **Pipeline dependency:** the y axis needs `cumruns.u8`
+(per-point cumulative innings runs, cap 255, same point order as `ballsfaced.u8`,
+uploaded normalized). The loader auto-detects it (`FieldData.cumRuns`); **until it
+ships, worm-space y collapses to the floor** (graceful — R1 never uses `worms`).
+No new x buffer (reuses `ballsfaced.u8`).
+
+---
+
+## 14. The run-out cascade — Ch 2's hero subset-highlight (R2a `cascade`)
+
+A **reversible, season-swept flash+fall** of the run-out subset over the held
+worm-space haze (C2-4). It is a cross-cutting modifier (like the highlight and the
+§9 re-sort) — it composes with `worms` and does **NOT** spend a second controlling
+morph. As a season pointer sweeps 2008→2026, each season's run-out cohort **flashes
+red and ejects downward** out of the field, then fades; scrubbing back returns them.
+
+### 14.1 Declaring it — `SceneFieldState.cascade`
+
+```ts
+cascade?: {
+  class: 'runOut';       // the only cascade class today (the aRunOut flag)
+  sweep: number;         // 0→1 season pointer — cohorts up to here have fallen
+  tint?: number;         // red flash strength 0..1 (default 1) — the hue exception
+  fall?: number;         // world-units downward eject depth (default 0.9)
+  fade?: number;         // residual alpha × for a fully fallen point (default 0 = gone)
+  muteIdentity?: number; // team-glow desaturation 0..1 through the cascade (default 1)
+} | null;
+```
+
+**How it animates.** `sweep` lerps like any scalar. Each season's run-out cohort
+shares ONE phase (a per-season pointer derived from the group's season year), so
+the whole cohort flashes-and-falls **together as one synchronized wave (Gestalt
+common fate — a discrete pulse per season, not asynchronous rain)**. Early seasons
+dump a visible flood of red, late seasons a trickle — the shrinking flood **is** the
+extinction curve. The flash **red** (`C_CASCADE_RED`, brighter + more saturated than
+any team red, luminance-distinct from the haze) is the ONE gated hue exception in
+Ch 2. `muteIdentity` desaturates the reader's team glow one stop **through the
+cascade** so a red-team reader (RCB/PBKS/SRH) never confuses "my team" with "a
+run-out" (the fall disambiguates on motion). Carry `sweep` at 1 to hold everything
+fallen; declare **no** `cascade` in the next scene to lerp `sweep` back to 0 (the
+run-outs return — the reverse leg is free).
+
+### 14.2 The sweep is a caption STEP → drive it from `dynamicState`
+
+`sweep` advances across the scene's HOLD (after the free→worms bit settles), so it
+can't ride the morph — drive it from `SceneDef.dynamicState(progress, held)`,
+exactly like the C1-5 re-sort tint and the C1-2 heat beat:
+
+```ts
+{
+  id: 'ch2-runout',
+  scrollLength: 200, morphLength: 40,
+  fieldState: {
+    layout: 'worms',
+    cascade: { class: 'runOut', sweep: 0, tint: 1, fall: 0.9, muteIdentity: 1 }
+  },
+  // reduced motion jump-cuts straight to the final fallen layout:
+  reducedMotionEndState: {
+    layout: 'worms',
+    cascade: { class: 'runOut', sweep: 1, tint: 0, fall: 0.9, muteIdentity: 1 }
+  },
+  // sweep the season pointer 2008→2026 as the caption scrolls:
+  dynamicState: (progress, held) => ({
+    ...held,
+    cascade: { ...held.cascade!, sweep: Math.min(1, progress / 0.9) }
+  }),
+  annotations: RunOutCascade,
+  footnote: 'runout'
+}
+```
+
+The cascade is a POSITION modifier — the shell warns (dev) if it engages while a
+`resort` is also engaged (both move points; stage them apart).
+
+### 14.3 Feeding run-out membership — `field.setRunouts(indices)` (READ THIS)
+
+Membership is a per-point GL flag (`aRunOut`), **seeded from `attrs.u8` bit 6**
+(mask `0x40`). Because the pipeline has **not yet re-encoded that bit** (it reads 0
+everywhere today), the scene supplies membership at runtime with a CPU index set —
+the working-today path with **zero pipeline dependency**:
+
+```ts
+// once, when the scene mounts (before the cascade engages):
+const runouts: number[] = [];
+for (let i = 0; i < arrays.wicketKind.length; i++)
+  if (arrays.wicketKind[i] === 'run out') runouts.push(i);   // from the columnar dataset
+field.setRunouts(runouts);          // baked into aRunOut ONCE — no per-frame cost
+// field.setRunouts(null) reverts to the pipeline seed (attrs.u8 bit 6)
+```
+
+The point order of the columnar `wicket_kind` array **is** the field's point order
+(same as every per-point buffer), so `arrays.wicketKind[i] === 'run out'` gives
+exactly the field index `i` to flag. Call `setRunouts` once; it O(n)-bakes the flag
+and renders (demand mode preserved — no per-frame work). When the pipeline
+re-encodes `attrs.u8` bit 6, the seed covers it and `setRunouts` becomes optional.
+
+### 14.4 What the platform added (for the pipeline/other agents)
+
+- **New `LayoutId` `worms`** (code 4) + **new `FieldRenderState` fields**:
+  `cascadeClass`, `cascadeSweep`, `cascadeTint`, `cascadeFall`, `cascadeFade`,
+  `cascadeMute` (set by `resolveRenderState`). All default inactive
+  (`cascadeClass` -1), and `worms` is never a layout in R1 — so **R1a/R1b scenes
+  render byte-identically** (verified: ignition wall + Bowl unchanged).
+- **New optional buffers, zero wire cost until they ship:** `cumruns.u8`
+  (`FieldData.cumRuns`, worm-space y — binds zeros until present) and the
+  client-baked `aRunOut` flag (seeded from `attrs.u8` bit 6, overridable via
+  `setRunouts`). No new **required** buffer; `worms` positions are in-shader from
+  `ballsfaced.u8` + `cumruns.u8`.
+- **Pipeline asks (integration):** emit `cumruns.u8` (per-point cumulative innings
+  runs, cap 255, `ballsfaced.u8` point order); re-encode `attrs.u8` **bit 6** =
+  run-out dismissal flag (a re-encode exactly like Ch 1's bit-5 top-10 flag,
+  ledger delta 0). Both are no-ops for R1 until consumed by a Ch 2 scene.
+- The worm haze + cascade fall live in the shared `computeCore()`, so the pick
+  pass tracks fallen points and never drifts from the visual field.

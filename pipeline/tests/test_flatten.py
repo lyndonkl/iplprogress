@@ -64,9 +64,11 @@ def independent_recount():
 
     gis = array("H")
     attrs = bytearray()
+    cumruns = bytearray()
     counts = [0] * len(order)
     match_slices = {}  # filename -> (start, end) in the point stream
     match_attrs = {}  # sampled filename -> expected attr bytes
+    match_cumruns = {}  # sampled filename -> expected cumruns bytes
     super_over_deliveries = 0
     tie_regular_innings = None
 
@@ -85,18 +87,26 @@ def independent_recount():
                 )
                 continue
             regular_innings += 1
+            batruns = {}  # striker -> cumulative off-the-bat runs (independent)
             for over in innings["overs"]:
                 for dl in over["deliveries"]:
                     byte = independent_outcome_class(dl)
-                    if dl.get("wickets"):
+                    wkts = dl.get("wickets")
+                    if wkts:
                         byte |= 1 << 3
+                        if any(w.get("kind") == "run out" for w in wkts):
+                            byte |= 1 << 6  # Ch 2 run-out cascade flag (bit 6)
                     if league == "wpl":
                         byte |= 1 << 4
+                    cr = min(batruns.get(dl["batter"], 0) + dl["runs"]["batter"], 255)
+                    batruns[dl["batter"]] = cr
                     gis.append(gi)
                     attrs.append(byte)
+                    cumruns.append(cr)
                     counts[gi] += 1
                     if sampled:
                         match_attrs.setdefault(path.name, bytearray()).append(byte)
+                        match_cumruns.setdefault(path.name, bytearray()).append(cr)
         match_slices[path.name] = (start, len(attrs))
         if path.name == TIE_MATCH:
             tie_regular_innings = regular_innings
@@ -104,10 +114,12 @@ def independent_recount():
     return {
         "gis": gis,
         "attrs": attrs,
+        "cumruns": cumruns,
         "counts": counts,
         "order": order,
         "match_slices": match_slices,
         "match_attrs": match_attrs,
+        "match_cumruns": match_cumruns,
         "super_over_deliveries": super_over_deliveries,
         "tie_regular_innings": tie_regular_innings,
     }
@@ -123,6 +135,7 @@ def setUpModule():
         "groups": json.loads((out / "groups.json").read_text()),
         "group_ids": (out / "group_ids.u16").read_bytes(),
         "attrs": (out / "attrs.u8").read_bytes(),
+        "cumruns": (out / "cumruns.u8").read_bytes(),
         "columnar": json.loads(gzip.decompress((out / "columnar.json.gz").read_bytes())),
     }
     REF = independent_recount()
@@ -182,7 +195,12 @@ class TestAttrs(unittest.TestCase):
             for byte in emitted:
                 self.assertLessEqual(byte & 0b111, 5, "outcome class range")
                 self.assertEqual(bool(byte & (1 << 4)), expect_wpl, name)
-                self.assertEqual(byte >> 5, 0, "bits 5-7 must stay zero")
+                # bit 5 and bit 7 stay reserved/zero; bit 6 is the run-out flag.
+                self.assertEqual(byte & (1 << 5), 0, "bit 5 must stay zero")
+                self.assertEqual(byte & (1 << 7), 0, "bit 7 must stay zero")
+                # A run-out flag (bit 6) can only ride a wicket ball (bit 3).
+                if byte & (1 << 6):
+                    self.assertTrue(byte & (1 << 3), "run-out bit implies wicket bit")
 
     def test_wicket_bit_plausible(self):
         wickets = sum(1 for b in ART["attrs"] if b & (1 << 3))
@@ -190,6 +208,53 @@ class TestAttrs(unittest.TestCase):
         self.assertEqual(wickets, sum(1 for b in REF["attrs"] if b & (1 << 3)))
         self.assertGreater(wickets, 10_000)
         self.assertLess(wickets, 20_000)
+
+    def test_runout_bit_agrees_with_columnar_wicket_kind(self):
+        """attrs.u8 bit 6 (0x40) is set exactly on run-out deliveries — the Ch 2
+        run-out cascade flag — cross-checked against columnar wicket_kind."""
+        attrs = ART["attrs"]
+        a = ART["columnar"]["arrays"]
+        kinds = ART["columnar"]["dicts"]["wicket_kind"]
+        run_out_code = kinds.index("run out")
+        flagged = 0
+        for i in range(EXPECTED_N_POINTS):
+            is_run_out = a["wicket_kind"][i] == run_out_code
+            self.assertEqual(bool(attrs[i] & (1 << 6)), is_run_out, i)
+            if is_run_out:
+                flagged += 1
+        # The corpus carries ~1,300 run-outs (IPL ~1,194 + WPL); the flag must be
+        # a small, non-empty subset of all deliveries.
+        self.assertGreater(flagged, 1_000)
+        self.assertLess(flagged, 2_000)
+        self.assertEqual(flagged, sum(1 for b in REF["attrs"] if b & (1 << 6)))
+
+    def test_full_cumruns_stream_matches_independent_packing(self):
+        self.assertEqual(len(ART["cumruns"]), EXPECTED_N_POINTS)
+        self.assertEqual(bytes(ART["cumruns"]), bytes(REF["cumruns"]))
+
+    def test_cumruns_roundtrip_on_sampled_matches(self):
+        for name in (SAMPLED_IPL_MATCH, SAMPLED_WPL_MATCH):
+            start, end = REF["match_slices"][name]
+            emitted = ART["cumruns"][start:end]
+            expected = bytes(REF["match_cumruns"][name])
+            self.assertGreater(len(emitted), 100, name)
+            self.assertEqual(emitted, expected, name)
+            for byte in emitted:
+                self.assertLessEqual(byte, 255, "cumruns byte range")
+
+    def test_cumruns_nondecreasing_within_each_innings(self):
+        """A striker's cumulative innings runs only ever climbs — the worm never
+        dips. Verified per (batter, batting_team, innings, match) run on a
+        strided sample against columnar keys."""
+        a = ART["columnar"]["arrays"]
+        cum = ART["cumruns"]
+        last = {}
+        for i in range(0, EXPECTED_N_POINTS, 89):  # strided sample
+            key = (a["match_index"][i], a["innings"][i], a["batter"][i])
+            prev = last.get(key)
+            if prev is not None:
+                self.assertGreaterEqual(cum[i], prev, (i, key))
+            last[key] = cum[i]
 
 
 class TestSeasonBlockedOrder(unittest.TestCase):
