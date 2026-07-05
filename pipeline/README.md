@@ -1,9 +1,10 @@
-# Pipeline — "Every Ball Ever" R0 + R1a
+# Pipeline — "Every Ball Ever" R0 + R1a + R2a
 
 Python 3, **stdlib only** (json, gzip, struct/array, pathlib, unittest). Flattens the
 Cricsheet ball-by-ball corpus (`data/ipl_json/*.json`, `data/wpl_json/*.json`) into the
-R0 data-contract artifacts plus the R1a addendum (cold open + Chapter 1) under
-`web/static/data/`.
+R0 data-contract artifacts, the R1a addendum (cold open + Chapter 1), and the R2a
+engine tables (engine #1 par/SR+ + engine #5 entry states, first needed by Chapter 2)
+under `web/static/data/`.
 
 ## Run everything
 
@@ -12,6 +13,10 @@ From the repo root:
 ```sh
 python3 pipeline/flatten.py \
   && python3 pipeline/scenes.py \
+  && python3 pipeline/par.py \
+  && python3 pipeline/entry.py \
+  && python3 pipeline/re288.py \
+  && python3 pipeline/wp.py \
   && python3 pipeline/payoff_harness.py \
   && python3 pipeline/ledger.py \
   && python3 -m unittest discover -s pipeline/tests -q
@@ -19,12 +24,16 @@ python3 pipeline/flatten.py \
 
 Order matters: `flatten.py` emits the point stream + per-point attributes + columnar
 dataset + `matches.json` and writes `meta.json`; `scenes.py` emits `scenes/coldopen.json`
-+ `scenes/ch1.json` + `scenes/sandbox.json` (the R1b preset); `payoff_harness.py` emits
-`payoff/ch1.json` (each records its sizes
-in `meta.json`); `ledger.py` audits everything on disk against the blueprint §2
-budgets. The harness and the ledger exit non-zero on failure. The whole build runs in
-seconds and is **byte-for-byte deterministic** (gzip level 9, `mtime=0`; JSON compact,
-new artifacts key-sorted) — verified by rebuilding and diffing checksums.
++ `scenes/ch1.json` + `scenes/sandbox.json` (the R1b preset); `par.py` and `entry.py`
+emit the R2a engine tables under `engines/` (they read only the corpus + `canon`, never
+an R1 artifact); `re288.py` and `wp.py` are the **parallel-track engines #2/#3** (RE288
+run-expectancy surfaces + the win-probability grids / Leverage Index) — they also read
+only the corpus + `canon`, emit `engines/re288.json` + `engines/wp_grid.json`, and are
+consumed by **R3b** (not by any R2a scene); `payoff_harness.py` emits `payoff/ch1.json`;
+`ledger.py` audits everything on disk against the blueprint §2 budgets. The harness and
+the ledger exit non-zero on failure. The whole build runs in seconds and is **byte-for-byte
+deterministic** (gzip level 9, `mtime=0`; JSON compact, new artifacts key-sorted) —
+verified by rebuilding and diffing checksums.
 
 ## Modules
 
@@ -33,6 +42,10 @@ new artifacts key-sorted) — verified by rebuilding and diffing checksums.
 | `canon.py` | Engine #4 canonicalization: 62 raw venue strings → 37 canonical grounds, franchise renames (DD→DC, KXIP→PBKS, RCB Bangalore→Bengaluru in both leagues, Rising Pune unified; Gujarat **Lions ≠ Titans ≠ Giants**), season normalization (`'2007/08'`→2008 … — always the year the cricket was played, verified equal to `dates[0]` year for all 1331 matches), D/L flag, super-over innings detection, **and the R1a 20-franchise id table** (`TEAMS`/`team_id`): league-scoped ids 0–19 (IPL's 15 sorted by name, then the WPL's 5 — the WPL DC/MI/RCB are distinct franchises with their own ids), approximate-brand kit colors, `active` flags (Deccan Chargers, Gujarat Lions, Kochi, Pune Warriors, Rising Pune Supergiant are `false`). Every lookup raises `KeyError` on unmapped input. |
 | `flatten.py` | One chronological pass emitting all per-point contract artifacts (see below). |
 | `scenes.py` | R1a/R1b scene aggregates: `scenes/coldopen.json` (You-Draw-It truth series + corpus facts), `scenes/ch1.json` (ignition, out-rate, defiers, sixes, aerial ledger, WPL beat), and `scenes/sandbox.json` (R1b minimal-bowl preset + team/season facets + tap-a-ball tooltip roster). |
+| `par.py` | **Engine #1** (R2a) — par baselines / SR+ family. Emits `engines/phasepar.json` (season × over-phase par, the Ch 2 anchor baseline + par worm), `engines/par.json` (the shrunk + calibrated venue × innings conditional model + the anchor-extinction / sub-120-occupancy validation roll-ups), and `engines/srplus.json` (per-batter-season SR+). See the model + thresholds section below. |
+| `entry.py` | **Engine #5 full** (R2a) — entry states / derived batting positions. Emits `engines/entry.json`: one row per batter-innings with entry ball-index, wickets fallen, innings#, derived batting position, chase RRR at entry, and the innings outcome. |
+| `re288.py` | **Engine #2** (parallel track, consumed R3b) — RE288 run-expectancy surfaces. Emits `engines/re288.json`: expected first-innings runs-to-come on the (overs-bowled × wickets-lost) grid, per era band + evidence-masked pooled WPL, weighted-isotonic-smoothed so runs-to-come is monotone in both axes. Gate-tested by `tests/test_engines.py`. |
+| `wp.py` | **Engine #3** (parallel track, consumed R3b) — win-probability lookup grids + Leverage Index. Emits `engines/wp_grid.json`: P(chase win) on the (era × overs-left × wickets-in-hand × required-rate) grid (monotone in rate & wickets), the LI byproduct on the pooled grid, and the first-innings defend curve. Gate-tested by `tests/test_engines.py` (the binding calibration check). |
 | `payoff_harness.py` | Payoff-card snapshot harness: emits + asserts the 16 Chapter-1 variants (R1a full spec). |
 | `ledger.py` | Payload ledger vs the §2 budgets; prints the table; writes `ledger.json`. |
 | `tests/` | `unittest` snapshot tests (see below). |
@@ -78,6 +91,12 @@ index, over, delivery index):
 | `matches.json` **(R1b)** | array indexed by `match_index` (== point-stream order), each `{teams:[a,b] (canonical), season, date, stage ("Final"/"Qualifier 1"/"Eliminator"/"Match N"), venue, city, result_text ("Mumbai Indians won by 1 run"), league}`. 1,331 rows. The tooltip's **opponent** is the team in `teams` that is not the tapped ball's `batting_team`. |
 | `scenes/sandbox.json` **(R1b)** | the minimal-bowl descriptor: `preset` `{match_index, label, blurb}` (the 2019 IPL Final — MI beat CSK by 1 run — resolved by league+season+stage+teams+margin, never a hard-coded index), `facets` (**team + season only**, pointing at `teams.json`/`groups.json`), and `tooltip.fields` (the tap-a-ball field roster). Everything beyond team/season facets + one preset + tooltip is deferred to R6/R7. |
 | `payoff/ch1.json` | 16 Chapter-1 payoff variants, R1a full spec (below) |
+| `engines/phasepar.json` **(R2a)** | Engine #1 season × over-phase par: per (league, season, phase ∈ pp/middle/death) the **exact** mean batter-runs per ball faced + `par_sr`. The Chapter-2 anchor baseline and the par worm; no shrinkage (kept raw so the anchor share reproduces the catalog). |
+| `engines/par.json` **(R2a)** | Engine #1 full model: the venue × innings **shrunk + per-league-season-calibrated** conditional cells (`E[runs.batter | league, season, phase, venue, innings]`, parallel arrays), the anchor definition + `anchor_extinction` roll-up (per season + era band), the `sub120_occupancy` roll-up, and the `srplus_calibration` check (pooled SR+ = 100 per league-season). |
+| `engines/srplus.json` **(R2a)** | Engine #1 SR+ leaderboard: per batter-season (≥ 100 balls) `{league, season, batter, balls, runs, sr, expected_runs, srplus}`. `srplus = 100 × runs / expected_runs`; 100 = an average batter of the same league/era/phases/venues. |
+| `engines/entry.json` **(R2a)** | Engine #5 entry states: columnar arrays over 20,488 batter-innings — `{league (0/1), season, match_index, innings, batter (dict-coded), position, entry_ball (legal-ball index), wickets, rrr (chases only, else null), balls_faced, runs, dismissed}` + a `batter` names dict. |
+| `engines/re288.json` **(engine #2, R3b)** | RE288 run-expectancy surfaces. Per surface (5 IPL era bands + pooled evidence-masked WPL) a 20×10 grid `re[o][w]` = expected first-innings runs-to-come from `o` overs bowled, `w` down (runs.total, extras included), first innings only, non-D/L. Weighted-isotonic-smoothed → monotone non-increasing in both wickets and overs; each cell carries its raw `n`; WPL cells with `n < 15` carry `masked=1`. Each surface ships a `calibration` block (pooled predicted == actual). |
+| `engines/wp_grid.json` **(engine #3, R3b)** | Win-probability lookup grids + Leverage Index. `second_innings.surfaces` — per surface (5 era bands + `ipl pooled` + evidence-masked WPL) a 20×10×10 grid `wp[overs_left][wickets_in_hand][rrr_bucket]` = P(chase win), monotone non-increasing in required rate & non-decreasing in wickets; the pooled surface also carries `leverage_index`. `first_innings_defend` — P(bat-first win \| final-total bucket) per era, monotone in total. `calibration` — the binding reliability table + the raw era anchor. Built empirically (a lookup, never a live model), target.overs==20, non-D/L. |
 | `ledger.json` | the payload audit (build report, excluded from its own budget math) |
 
 ## R1a recipe pins (metric definitions that reconcile with the catalog teasers)
@@ -162,6 +181,64 @@ GT, LSG and SRH (born after 2010) keep the **designed empty state**. All cards a
 template + numbers; nothing is hand-authored per team. The harness asserts all 16
 exist, are non-degenerate under the extended spec, and exits non-zero otherwise.
 
+## Engine #1 — par baselines / SR+ family (R2a, `par.py`)
+
+The piece's era-honest currency and the baseline Chapter 2's anchor definition is
+measured against. Every number below is asserted by `tests/test_par.py` against an
+independent recount.
+
+- **Over-phases** (0-based over index): `pp` = overs 1–6 (0–5), `middle` = overs 7–15
+  (6–14), `death` = overs 16–20 (15–19).
+- **Balls faced:** wides excluded, no-balls counted (the SR convention, identical to
+  `ballsfaced.u8` / `scenes.py`). Runs = `runs.batter`.
+- **Phase-par (the marginal, `phasepar.json`) — EXACT, no shrinkage:** per (league,
+  season, phase) the raw mean batter-runs per ball faced; `par_sr = 100 × that`. Kept
+  raw on purpose — it is the anchor definition's "season-phase par SR" and the Ch 2 par
+  worm, and rawness is what makes the anchor share reproduce the catalog.
+- **Conditional model (`par.json`) — shrunk + calibrated:** `E[runs.batter | league,
+  season, phase, venue, innings]`. Each raw cell mean is empirical-Bayes shrunk toward
+  its season-phase parent with **pseudo-count `SHRINK_K = 50` balls faced**
+  (`E = (Σruns + K·parent) / (n + K)`), then every league-season's cells are **rescaled
+  so pooled expected = pooled actual** — i.e. pooled SR+ over a whole league-season is
+  **exactly 100** ("100 = league-average-of-own-time"; `srplus_calibration.max_abs_dev_from_100 = 0`).
+- **SR+ (`srplus.json`):** `SR+ = 100 × Σ(actual runs.batter) / Σ(E[runs.batter])` over
+  the exact balls a batter faced (each ball priced by its conditional cell). Emitted per
+  batter-season, min **100 balls faced** (1,117 batter-seasons).
+- **Anchor innings** (catalog Anchor Extinction Index — `ANCHOR_MIN_BALLS = 15`,
+  `ANCHOR_SR_RATIO = 0.85`, `ANCHOR_MAX_BOUNDARY_SHARE = 0.12`): balls faced ≥ 15 **AND**
+  innings runs < 0.85 × phase-weighted par runs (SR < 0.85 × contemporaneous
+  phase-weighted par SR, using the exact `phasepar` marginal) **AND** boundary balls
+  (`runs.batter ≥ 4`) < 12% of balls faced. **Anchor-ball share** = balls in anchor
+  innings / all balls faced: **IPL 2008-10 14.75% → 2023-26 8.35%** (a 43% collapse, the
+  catalog's 14.8 → 8.5); WPL **9.41%** (catalog ~9–10% — born post-anchor).
+- **Sub-120-SR occupancy** (catalog Ball-by-Ball DNA): share of qualifying batter-seasons
+  (≥ 100 balls) striking under 120. **Qualifier counts are exact** vs the catalog's
+  "150 early / 249 recent / 81 WPL" — **150 / 250 / 81** — and the share runs **40.67%
+  (2008-10) → 2.40% (2023-26)** (recent exact; the early band is a knife-edge — a handful
+  of batter-seasons sit right at SR 120, hence ~2 pts above the catalog's 38.7%, within
+  the "≈" tolerance).
+
+## Engine #5 (full) — entry states / derived batting positions (R2a, `entry.py`)
+
+One row per **batter-innings** (20,488 rows; 867 distinct batters), asserted by
+`tests/test_entry.py` against an independent per-match recompute + a delivery-for-delivery
+spot check of the 2019 IPL Final.
+
+- **Entry event:** the batter's first delivery as striker **or** non_striker.
+- **`entry_ball`:** legal-ball index of the innings at entry (legal = not a wide and not
+  a no-ball, matching over structure and `target.overs × 6`); openers enter at 0.
+- **`wickets`:** wickets fallen before entry (retired hurt/out are not wickets); 0 for
+  openers.
+- **`position`:** derived batting position = order of entry (openers are 1 and 2,
+  striker-first, then 3, 4, …); contiguous 1..k per innings.
+- **`rrr`:** required run rate at entry, **chases only** (innings 2 with a `target`):
+  `(target.runs − score) × 6 / (target.overs × 6 − entry_ball)`; `null` for first innings
+  and the one D/L chase whose recorded target predates the rain revision. 9,961 chase
+  entries carry an RRR.
+- **Outcome (self-sufficient for "performance conditional on entry"):** `balls_faced`
+  (SR convention), `runs` (`runs.batter`), `dismissed` (a real dismissal of this batter
+  fell — retired hurt/out excluded).
+
 ## Budgets (ledger) — actuals
 
 - **Cold-open critical set** (`meta.json` + `groups.json` + `group_ids.u16` +
@@ -179,7 +256,13 @@ exist, are non-degenerate under the extended spec, and exits non-zero otherwise.
   compress well: match_index runs constant within a match, wicket_kind is ~98 % zeros),
   matches.json 20,686 B gz, sandbox.json 1,236 B gz. Still under the blueprint's
   ~0.8 MB target.
-- Full read-through ≤ 25 MB gz → actual 1,094,470 B gz (~1.09 MB).
+- **Chapter 2 + parallel-track engines** (all `engines/`, lazy-loaded per chapter): the
+  ledger sums the whole `engines/` prefix against the ≤ 2 MB gz per-chapter bar → actual
+  **194,753 B gz**. Ch 2 (engine #1/#5): entry.json 119,583, srplus.json 24,489, par.json
+  9,694, phasepar.json 1,305. Parallel track (engine #2/#3, consumed R3b): wp_grid.json
+  33,050, re288.json 6,632 — the two new engines add only ~40 KB gz, leaving ~1.8 MB of
+  headroom in the bucket.
+- Full read-through ≤ 25 MB gz → actual ~1.30 MB gz (R2a engines + the parallel track).
 - The `ledger.py` rows enumerate exactly the shipped filenames (no phantom
   `draw/truth.json` / `ch1/outrate.json` rows — those never shipped; the R1a scene
   data lives in `scenes/coldopen.json` + `scenes/ch1.json`).
@@ -187,7 +270,7 @@ exist, are non-degenerate under the extended spec, and exits non-zero otherwise.
 ## Tests
 
 ```sh
-python3 -m unittest discover -s pipeline/tests -q     # 93 tests
+python3 -m unittest discover -s pipeline/tests -q     # 160 tests
 ```
 
 - `test_canon.py` — canonicalization tables exhaustive over the corpus in **both**
@@ -234,6 +317,34 @@ python3 -m unittest discover -s pipeline/tests -q     # 93 tests
   (Malinga to SN Thakur, lbw, opponent MI, "Mumbai Indians won by 1 run"); and the
   `scenes/sandbox.json` preset resolving **by identity** (league+season+stage+teams+
   margin) to that same match, with team+season-only facets and the tooltip field roster.
+- `test_par.py` **(R2a, engine #1)** — the par tables against a fully independent
+  recount (own phase splitter, own anchor classifier, own batter-season tallies):
+  `phasepar` marginal matches per (league, season, phase); anchor-ball share per era band
+  matches and reproduces the catalog (**14.75% → 8.35%**, 43% collapse, WPL 9.41%);
+  sub-120 qualifier counts **exact** (150 / 250 / 81) and recent share **exact** (2.4%);
+  SR+ calibration **exactly 100** per league-season; the SR+ leaderboard is qualifier-
+  gated, self-consistent (`srplus == 100 × runs / expected_runs`) and deterministically
+  sorted; conditional cells well-formed (canonical venues, valid phases, positive E);
+  and the on-disk files equal a fresh `build_docs()` byte-for-byte.
+- `test_entry.py` **(R2a, engine #5)** — entry states against an independent per-match
+  recompute: positions contiguous from 1, openers enter at ball 0 with 0 wickets,
+  `entry_ball`/`wickets` monotone in position, RRR only on chases (≥ 98% of 2nd-innings
+  entries), value ranges; the **full-corpus batter-innings count + opener count** match
+  the independent recount; and the 2019 IPL Final's entry states match the raw file
+  delivery-for-delivery (incl. both chase openers' target-rate RRR). On-disk ==
+  `entry_doc(build())` byte-for-byte.
+- `test_engines.py` **(engines #2/#3, the binding §5 validation gate — consumed R3b)** —
+  RE288: runs-to-come monotone non-increasing in **both** wickets and overs on every
+  surface, pooled prediction == actual, `RE(0,0)` == era average total, the era-drift
+  anchor `RE(10 overs, 3 down)` 88 → 97 (catalog 90.6 → 98.3) cross-checked against an
+  independent raw cell recount, and the WPL evidence mask. WP grid: monotone non-increasing
+  in required rate & non-decreasing in wickets on every surface; the **calibration check**
+  independently re-scores every second-innings state from the emitted era grids and bins by
+  predicted WP — weighted mean \|pred − actual\| **0.015 < 0.03**, each ≥500-ball bin within
+  0.06; the era anchor (9+ RPO, ~60 balls left: **0.23 → 0.31**, blueprint 0.243 → 0.318)
+  reproduced from raw; the defend curve monotone in total and 170-189 repriced **~0.70 →
+  ~0.40** (catalog 74% → 38%); the Leverage Index present, non-negative, endgame cells > 3.
+  Both engine files on-disk == a fresh `build_doc()` byte-for-byte.
 
 Snapshot constants live at the top of each test file; a new Cricsheet drop that changes
 the corpus must update them consciously.

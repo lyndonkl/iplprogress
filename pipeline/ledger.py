@@ -51,6 +51,18 @@ CH1_SET_FILES = ("scenes/ch1.json",)  # ... plus the chapter scene JSON
 # tapped ball resolves through + the sandbox descriptor. Held to the per-
 # chapter budget (it is not in the cold-open critical set).
 SANDBOX_SET = ("columnar.json.gz", "matches.json", "scenes/sandbox.json")
+# R2a Chapter 2 "The Last of the Anchors": the whole chapter — anchor /
+# run-out / archetype / gear-shift / new-batter-tax series, worm exemplars,
+# WPL two-clocks beat, and the 16 team-payoff "Your last anchor" variants —
+# ships in one scene doc, so the chapter's authored payload is scenes/ch2.json
+# alone. Lazy-loaded at Ch 2 entry; held to the per-chapter budget.
+CH2_SET_FILES = ("scenes/ch2.json",)
+# Engine tables under engines/: R2a's engine #1 (par/SR+) + engine #5 (entry
+# states) consumed by Chapter 2, plus the parallel-track engine #2 (re288) +
+# engine #3 (wp_grid) built during R2/R3a and consumed in R3b. All lazy-loaded
+# and held to the per-chapter budget. By prefix so new engine files are counted
+# automatically.
+ENGINES_PREFIXES = ("engines/",)
 
 
 def measure(path: Path) -> dict:
@@ -87,6 +99,8 @@ def build_ledger(out_root: Path = canon.OUT_ROOT) -> dict:
         + [n for n in CH1_SET_FILES if n in artifacts]
     )
     sandbox_files = [n for n in SANDBOX_SET if n in artifacts]
+    ch2_files = [n for n in CH2_SET_FILES if n in artifacts]
+    engine_files = sorted(n for n in artifacts if n.startswith(ENGINES_PREFIXES))
 
     checks = [
         {
@@ -110,6 +124,20 @@ def build_ledger(out_root: Path = canon.OUT_ROOT) -> dict:
             "budget_gz": BUDGET_CHAPTER_GZ,
             "actual_gz": gz_sum(sandbox_files),
             "pass": bool(sandbox_files) and gz_sum(sandbox_files) <= BUDGET_CHAPTER_GZ,
+        },
+        {
+            "name": "chapter ch2 (scene + payoff)",
+            "files": ch2_files,
+            "budget_gz": BUDGET_CHAPTER_GZ,
+            "actual_gz": gz_sum(ch2_files),
+            "pass": bool(ch2_files) and gz_sum(ch2_files) <= BUDGET_CHAPTER_GZ,
+        },
+        {
+            "name": "engines (ch2 par/entry + R3b parallel-track re288/wp_grid)",
+            "files": engine_files,
+            "budget_gz": BUDGET_CHAPTER_GZ,
+            "actual_gz": gz_sum(engine_files),
+            "pass": bool(engine_files) and gz_sum(engine_files) <= BUDGET_CHAPTER_GZ,
         },
         {
             "name": "full read-through (all artifacts)",
