@@ -1,7 +1,9 @@
 import {
 	CASCADE_CLASS,
+	DEFAULT_RIVERS_KINDS,
 	FILTER_DIM,
 	HL_CLASS,
+	RIVERS_CLASS,
 	type FieldRenderState,
 	type ResortColumns
 } from '$lib/field/types';
@@ -11,7 +13,8 @@ import type {
 	SceneDef,
 	SceneFieldState,
 	SubsetHighlight,
-	SubsetResort
+	SubsetResort,
+	SubsetRivers
 } from './types';
 
 /** The six filter uniform fields resolved from a scene's declarative facets. */
@@ -61,6 +64,7 @@ interface ResolvedSceneState {
 	highlight: SubsetHighlight | null;
 	resort: SubsetResort | null;
 	cascade: RunoutCascade | null;
+	rivers: SubsetRivers | null;
 	teamIgnite: boolean;
 	wallHeatMix: number;
 }
@@ -75,6 +79,7 @@ export function withDefaults(s: SceneFieldState): ResolvedSceneState {
 		highlight: s.highlight ?? null,
 		resort: s.resort ?? null,
 		cascade: s.cascade ?? null,
+		rivers: s.rivers ?? null,
 		teamIgnite: s.teamIgnite ?? true,
 		wallHeatMix: s.wallHeatMix ?? 0
 	};
@@ -123,6 +128,17 @@ export function resolveRenderState(
 	const toCas = g.cascade;
 	const cas = toCas ?? fromCas;
 	const casClass = cas ? CASCADE_CLASS[cas.class] : CASCADE_CLASS.none;
+
+	// Dismissal rivers resolve like the cascade: the active descriptor (preferring
+	// `to`) fixes the discrete class + the beat's config (kinds / tint / othersDim
+	// / mute), while only `engage` LERPS — so the rivers engage as the scene
+	// declaring them advances engage, and settle back (engage → 0) when the next
+	// scene declares none. An inactive side contributes engage 0, so the wickets
+	// return cleanly to their clouds on the reverse leg.
+	const fromRiv = f.rivers;
+	const toRiv = g.rivers;
+	const riv = toRiv ?? fromRiv;
+	const rivClass = riv ? RIVERS_CLASS[riv.class] : RIVERS_CLASS.none;
 
 	// Facet filter resolves like the highlight: the discrete facets come from
 	// whichever side declares an active filter (preferring `to`), while filterDim
@@ -177,7 +193,19 @@ export function resolveRenderState(
 		cascadeTint: cas ? cas.tint ?? 1 : 0,
 		cascadeFall: cas ? cas.fall ?? 0.9 : 0,
 		cascadeFade: cas ? cas.fade ?? 0 : 1,
-		cascadeMute: cas ? cas.muteIdentity ?? 1 : 0
+		cascadeMute: cas ? cas.muteIdentity ?? 1 : 0,
+		// rivers: engage lerps (engage/settle-back); the beat config comes from the
+		// active descriptor (discrete, like the cascade). When NO rivers are
+		// declared (riv null) every field takes its INERT default so a non-rivers
+		// scene is byte-identical to DEFAULT_RENDER_STATE — in particular riversMute
+		// MUST be 0 or it would desaturate a picked team's ignite glow (the
+		// team-ignite mute branch keys off uRiversClass being active).
+		riversClass: rivClass,
+		riversEngage: lerp(fromRiv?.engage ?? 0, toRiv?.engage ?? 0, clampedT),
+		riversTint: riv ? riv.tint ?? 1 : 0,
+		riversOthersDim: riv ? riv.othersDim ?? 0.12 : 1,
+		riversMute: riv ? riv.muteIdentity ?? 1 : 0,
+		riversKinds: (toRiv ?? fromRiv)?.kinds ?? DEFAULT_RIVERS_KINDS
 	};
 }
 

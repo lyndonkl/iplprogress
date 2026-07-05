@@ -24,7 +24,7 @@
 
 <div class="pin">
 	<div class="scene-card interactive card">
-		<p class="overline">Chapter 2 of 10: The Last of the Anchors · done</p>
+		<p class="overline">Chapter 3 of 10: The Counterrevolution · done</p>
 
 		<h2>Every ball is still here.</h2>
 		<p class="promise">
@@ -34,8 +34,8 @@
 		</p>
 
 		<p class="next">
-			<strong>Up next: Chapter 3, The Counterrevolution.</strong>
-			<em>When batting changes this much, the bowlers have to answer.</em>
+			<strong>Up next: Chapter 4, The Rising Tide.</strong>
+			<em>While batters and bowlers fought, the water level rose.</em>
 			<span class="tag">in build · the story grows chapter by chapter</span>
 		</p>
 

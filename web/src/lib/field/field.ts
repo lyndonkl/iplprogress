@@ -1,9 +1,11 @@
 import * as THREE from 'three';
 import {
 	DEFAULT_RENDER_STATE,
+	DISMISSAL_CODE,
 	FILTER_DIM,
 	LAYOUT_CODE,
 	NO_FILTER,
+	type DismissalKind,
 	type FieldData,
 	type FieldFilter,
 	type FieldRenderState,
@@ -14,12 +16,16 @@ import {
 	computeWall,
 	computeResortColumns,
 	computeWorms,
+	computeFrontier,
+	computeRivers,
 	basePointPx,
 	WORM_X_CAP,
 	WORM_RUNS_CAP,
 	type ColumnLayout,
 	type WallLayout,
-	type WormLayout
+	type WormLayout,
+	type FrontierLayout,
+	type RiversLayout
 } from './layout';
 import { makeVertexShader, fragmentShader, makePickVertexShader, pickFragmentShader } from './shaders';
 
@@ -125,6 +131,25 @@ export interface FieldHandle {
 	 */
 	getWormLayout(): WormLayout | null;
 	/**
+	 * current frontier-plane geometry (§15 — Ch 3's controlling morph): the
+	 * fixed-aspect, letterboxed box + economy/strike-rate display ranges + the
+	 * seven-an-over line's world x + the axis end-anchor world coords + the
+	 * bottom-left "cheap and deadly" home-zone box. Scenes register the SVG
+	 * Pareto edge / ghost trail / reference lines by mapping data points through
+	 * `frontierPoint(layout, economy, strikeRate)` then `projectToCss`. null
+	 * before the first resize. Rebuilt on resize.
+	 */
+	getFrontierLayout(): FrontierLayout | null;
+	/**
+	 * current dismissal-rivers geometry (§16): the flat-baseline 100%-stacked band
+	 * box, per-season strip x's, baseline/top world y, and the pooled-share band
+	 * label anchors (bottom→top). Scenes draw the 0-to-100 share axis, the season
+	 * axis and the band boundaries in SVG from `ch3.json`, registered to these
+	 * world coords via `projectToCss`. null before the first resize. The band
+	 * anchors reflect the last stack order seen by `applyState`/`setDismissals`.
+	 */
+	getRiversLayout(): RiversLayoutInfo | null;
+	/**
 	 * Set run-out membership for the C2-4 cascade (§14). Pass the point indices
 	 * whose delivery is a run-out (the scene derives them from the columnar
 	 * `wicket_kind == 'run out'`); the field bakes them into the per-point
@@ -133,8 +158,36 @@ export interface FieldHandle {
 	 * is the working-today path until the pipeline re-encodes the run-out bit.
 	 */
 	setRunouts(indices: Iterable<number> | null): void;
+	/**
+	 * Set dismissal-kind membership for the C3-4 rivers (§16). Pass a per-point
+	 * array (length nPoints) of dismissal codes — -1 = not a bowler-credited
+	 * wicket (run-outs / retired excluded), 0 bowled, 1 lbw, 2 caught, 3 stumped
+	 * — which the scene derives from the columnar `wicket_kind` (see CONTRACT §16).
+	 * The field bakes it into the per-point `aDismissal` GL flag ONCE and
+	 * recomputes the stacked band positions (no per-frame cost — demand mode
+	 * preserved). Pass `null` to clear membership (all -1). The working-today path
+	 * until the pipeline re-encodes dismissal-kind bits into attrs.u8.
+	 */
+	setDismissals(kindByIndex: ArrayLike<number> | null): void;
 	readonly data: FieldData;
 	readonly stats: Readonly<FieldStats>;
+}
+
+/** A pooled-share dismissal band, for anchoring the band's SVG label (§16). */
+export interface RiversBand {
+	kind: DismissalKind;
+	/** cumulative-share lower bound 0..1 (pooled across all seasons) */
+	loFrac: number;
+	/** cumulative-share upper bound 0..1 (pooled) */
+	hiFrac: number;
+	/** world y of the band's pooled-share centre (label anchor) */
+	centerY: number;
+}
+
+/** Dismissal-rivers geometry exposed to scenes (§16 — the C3-4 rivers). */
+export interface RiversLayoutInfo extends RiversLayout {
+	/** the four bands bottom→top, with pooled-share label anchors */
+	bands: RiversBand[];
 }
 
 /** Subset re-sort column geometry exposed to scenes (§7 — the C1-5 fireworks). */
@@ -215,6 +268,8 @@ export function createField(opts: FieldOptions): FieldHandle {
 	// per-point re-sort ordinal (filled on demand, §7) and per-group column x
 	const subOrd = new Float32Array(n);
 	const resortX = new Float32Array(groupCount);
+	// per-group dismissal-rivers strip centre x (filled on resize, §16)
+	const riverX = new Float32Array(groupCount);
 
 	const uniforms: Record<string, THREE.IUniform> = {
 		uProgress: { value: 0 },
@@ -277,7 +332,24 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uCascadeFade: { value: 1 },
 		uCascadeMute: { value: 0 },
 		uCascadeMinSeason: { value: Number.isFinite(minSeason) ? minSeason : 0 },
-		uCascadeInvSpan: { value: 1 / seasonSpan }
+		uCascadeInvSpan: { value: 1 / seasonSpan },
+		// frontier plane (§15) — geometry set on every resize (letterboxed box)
+		uFrontierLeft: { value: 0 },
+		uFrontierWidth: { value: 1 },
+		uFrontierBottom: { value: 0 },
+		uFrontierHeight: { value: 1 },
+		uFrontierCellHalfW: { value: 0.01 },
+		uFrontierCellHalfH: { value: 0.01 },
+		// dismissal rivers (§16) — all inactive by default (R1/R2a scenes unaffected)
+		uRiversClass: { value: -1 },
+		uRiversEngage: { value: 0 },
+		uRiversTint: { value: 0 },
+		uRiversOthersDim: { value: 1 },
+		uRiversMute: { value: 0 },
+		uRiverBottom: { value: 0 },
+		uRiverHeight: { value: 1 },
+		uRiverHalfW: { value: 0.01 },
+		uRiverX: { value: riverX }
 	};
 
 	const geometry = new THREE.BufferGeometry();
@@ -304,6 +376,29 @@ export function createField(opts: FieldOptions): FieldHandle {
 	const runOutAttr = geometry.getAttribute('aRunOut') as THREE.BufferAttribute;
 	geometry.setAttribute('aSubOrd', new THREE.BufferAttribute(subOrd, 1, false));
 	const subOrdAttr = geometry.getAttribute('aSubOrd') as THREE.BufferAttribute;
+	// frontier plane (§15): the interleaved bowler-season coordinate. Two
+	// non-normalized u8 attributes off ONE interleaved buffer (byte 0 economy,
+	// byte 1 strike rate) — zero copy, raw byte values 0..255 in-shader. OPTIONAL
+	// buffer: until the pipeline ships bowlerplane.u8 it binds zeros, so the
+	// frontier plane collapses to the bottom-left corner (graceful; R1/R2a never
+	// use `frontier`).
+	const bowlerPlaneBuf =
+		data.bowlerPlane && data.bowlerPlane.length === n * 2 ? data.bowlerPlane : new Uint8Array(n * 2);
+	const planeIB = new THREE.InterleavedBuffer(bowlerPlaneBuf, 2);
+	geometry.setAttribute('aBowlEcon', new THREE.InterleavedBufferAttribute(planeIB, 1, 0, false));
+	geometry.setAttribute('aBowlSr', new THREE.InterleavedBufferAttribute(planeIB, 1, 1, false));
+	// dismissal-rivers membership (§16): a per-point kind flag (-1 none / 0 bowled
+	// / 1 lbw / 2 caught / 3 stumped), client-baked via setDismissals from the
+	// columnar wicket_kind. Default -1 (no membership) until the scene supplies it.
+	const dismissalFlag = new Int8Array(n).fill(-1);
+	geometry.setAttribute('aDismissal', new THREE.BufferAttribute(dismissalFlag, 1, false));
+	const dismissalAttr = geometry.getAttribute('aDismissal') as THREE.BufferAttribute;
+	// dismissal-rivers stacked y (§16): the baked 0..1 share-position within a
+	// season strip; recomputed on-device whenever setDismissals or the stack order
+	// changes (cached — no per-frame cost). Zero until the rivers first engage.
+	const riverPos = new Float32Array(n);
+	geometry.setAttribute('aRiverPos', new THREE.BufferAttribute(riverPos, 1, false));
+	const riverPosAttr = geometry.getAttribute('aRiverPos') as THREE.BufferAttribute;
 	// OPTIONAL match index (u16 → non-normalized float attr); gates the match facet
 	if (hasMatchAttr)
 		geometry.setAttribute('aMatchIndex', new THREE.BufferAttribute(data.matchIndex!, 1, false));
@@ -358,6 +453,8 @@ export function createField(opts: FieldOptions): FieldHandle {
 	let columnLayout: ColumnLayout | null = null;
 	let wallLayout: WallLayout | null = null;
 	let wormLayout: WormLayout | null = null;
+	let frontierLayout: FrontierLayout | null = null;
+	let riversLayout: RiversLayout | null = null;
 	let cssW = 1;
 	let cssH = 1;
 
@@ -375,6 +472,112 @@ export function createField(opts: FieldOptions): FieldHandle {
 		}
 		runOutAttr.needsUpdate = true;
 		invalidate();
+	}
+
+	/* ---- dismissal rivers state (§16 — the C3-4 rivers) --------------------- */
+	// setDismissals bakes per-point kind membership; ensureRiversData derives the
+	// stacked band y-positions on-device the first time a given (order, membership)
+	// engages, then caches — keyed by the stack order + a membership version, so a
+	// scroll scrub never recomputes. Pooled kind totals feed the band label anchors.
+	let dismissalVersion = 0;
+	let riversKey = ''; // `${order.join(',')}@${dismissalVersion}` currently in aRiverPos
+	let riversPooled: number[] = [0, 0, 0, 0]; // pooled counts by dismissal CODE
+	let riversOrder: readonly DismissalKind[] = ['bowled', 'lbw', 'stumped', 'caught'];
+	let riversActive = false; // whether the last applied state engaged the rivers
+
+	function setDismissals(kindByIndex: ArrayLike<number> | null): void {
+		if (disposed) return;
+		const arr = dismissalAttr.array as Int8Array;
+		if (kindByIndex === null) {
+			arr.fill(-1);
+		} else {
+			for (let i = 0; i < n; i++) {
+				const k = kindByIndex[i];
+				arr[i] = k >= 0 && k <= 3 ? k : -1;
+			}
+		}
+		dismissalAttr.needsUpdate = true;
+		dismissalVersion++; // invalidate the rivers ordinal cache
+		riversKey = '';
+		// if the rivers are already engaged, recompute the stacked positions now so
+		// the change is visible without waiting for the next applyState.
+		if (riversActive) ensureRiversData(riversOrder);
+		invalidate();
+	}
+
+	// Derive the per-point stacked band position (aRiverPos, 0 baseline → 1 top)
+	// for the given stack order. One O(n) pass to count per (season × kind), then
+	// one to bake each member's cumulative-share slot. Cached by (order, version).
+	function ensureRiversData(order: readonly DismissalKind[]): void {
+		const key = `${order.join(',')}@${dismissalVersion}`;
+		if (riversKey === key) return;
+		riversKey = key;
+		riversOrder = order;
+
+		// stack index (0 = bottom) by dismissal code
+		const stackIdx = [0, 0, 0, 0];
+		order.forEach((name, j) => (stackIdx[DISMISSAL_CODE[name]] = j));
+
+		const dis = dismissalAttr.array as Int8Array;
+		const counts = new Float64Array(groupCount * 4); // per (gi, code)
+		const pooled = [0, 0, 0, 0];
+		for (let i = 0; i < n; i++) {
+			const k = dis[i];
+			if (k < 0) continue;
+			counts[data.groupIds[i] * 4 + k]++;
+			pooled[k]++;
+		}
+
+		const share = new Float64Array(groupCount * 4);
+		const cumBelow = new Float64Array(groupCount * 4);
+		for (let g = 0; g < groupCount; g++) {
+			let total = 0;
+			for (let k = 0; k < 4; k++) total += counts[g * 4 + k];
+			if (total <= 0) continue;
+			for (let k = 0; k < 4; k++) share[g * 4 + k] = counts[g * 4 + k] / total;
+			for (let k = 0; k < 4; k++) {
+				let below = 0;
+				for (let k2 = 0; k2 < 4; k2++)
+					if (stackIdx[k2] < stackIdx[k]) below += share[g * 4 + k2];
+				cumBelow[g * 4 + k] = below;
+			}
+		}
+
+		const pos = riverPosAttr.array as Float32Array;
+		pos.fill(0);
+		const running = new Float64Array(groupCount * 4);
+		for (let i = 0; i < n; i++) {
+			const k = dis[i];
+			if (k < 0) continue;
+			const base = data.groupIds[i] * 4 + k;
+			const cnt = counts[base];
+			const ord = running[base]++;
+			pos[i] = cumBelow[base] + ((ord + 0.5) / cnt) * share[base];
+		}
+		riverPosAttr.needsUpdate = true;
+		riversPooled = pooled;
+	}
+
+	function getRiversLayout(): RiversLayoutInfo | null {
+		if (!riversLayout) return null;
+		const totals = riversPooled;
+		const grand = totals[0] + totals[1] + totals[2] + totals[3];
+		const bands: RiversBand[] = [];
+		let cum = 0;
+		for (const kind of riversOrder) {
+			const code = DISMISSAL_CODE[kind];
+			const s = grand > 0 ? totals[code] / grand : 1 / Math.max(1, riversOrder.length);
+			const lo = cum;
+			const hi = cum + s;
+			bands.push({
+				kind,
+				loFrac: lo,
+				hiFrac: hi,
+				centerY: riversLayout.bottom + ((lo + hi) / 2) * riversLayout.height
+			});
+			cum = hi;
+		}
+		return { ...riversLayout, bands };
 	}
 
 	/* ---- subset re-sort state (§7 — the C1-5 fireworks) --------------------- */
@@ -500,6 +703,15 @@ export function createField(opts: FieldOptions): FieldHandle {
 		data.teams.map((t) => [t.id, new THREE.Color(t.color)])
 	);
 
+	// compare band stack orders by value (scenes may pass a fresh array each tick,
+	// so reference equality would defeat the idle-noise no-op guard — demand mode).
+	function sameKinds(a: readonly DismissalKind[], b: readonly DismissalKind[]): boolean {
+		if (a === b) return true;
+		if (a.length !== b.length) return false;
+		for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+		return true;
+	}
+
 	function sameState(a: FieldRenderState, b: FieldRenderState): boolean {
 		return (
 			a.layoutA === b.layoutA &&
@@ -534,7 +746,13 @@ export function createField(opts: FieldOptions): FieldHandle {
 			a.cascadeTint === b.cascadeTint &&
 			a.cascadeFall === b.cascadeFall &&
 			a.cascadeFade === b.cascadeFade &&
-			a.cascadeMute === b.cascadeMute
+			a.cascadeMute === b.cascadeMute &&
+			a.riversClass === b.riversClass &&
+			a.riversEngage === b.riversEngage &&
+			a.riversTint === b.riversTint &&
+			a.riversOthersDim === b.riversOthersDim &&
+			a.riversMute === b.riversMute &&
+			sameKinds(a.riversKinds, b.riversKinds)
 		);
 	}
 
@@ -603,6 +821,30 @@ export function createField(opts: FieldOptions): FieldHandle {
 			console.warn(
 				'[every-ball-ever] invariant: the run-out cascade (C2-4) and a re-sort are',
 				'both engaged — cross-cutting position modifiers must be staged apart.'
+			);
+
+		// dismissal rivers (§16): the wicket subset streams into the flat-baseline
+		// 100%-stacked band. A cross-cutting position modifier like the re-sort and
+		// cascade — the per-point stacked y is derived on-device the first time a
+		// given stack order engages (cached), and every scalar is set each apply so
+		// engage/tint/othersDim lerp exactly like the re-sort. Warn if it engages
+		// with another position modifier (all move points; stage them apart).
+		uniforms.uRiversEngage.value = s.riversEngage;
+		uniforms.uRiversTint.value = s.riversTint;
+		uniforms.uRiversOthersDim.value = s.riversOthersDim;
+		uniforms.uRiversMute.value = s.riversMute;
+		if (s.riversClass >= 0) {
+			ensureRiversData(s.riversKinds);
+			uniforms.uRiversClass.value = s.riversClass;
+			riversActive = true;
+		} else {
+			uniforms.uRiversClass.value = -1;
+			riversActive = false;
+		}
+		if (import.meta.env.DEV && s.riversClass >= 0 && (s.resortClass >= 0 || s.cascadeClass >= 0))
+			console.warn(
+				'[every-ball-ever] invariant: the dismissal rivers (C3-4) and a re-sort/cascade',
+				'are both engaged — cross-cutting position modifiers must be staged apart.'
 			);
 
 		// label plane opacity is scene-state-driven, never animated on its own
@@ -757,6 +999,8 @@ export function createField(opts: FieldOptions): FieldHandle {
 		columnLayout = computeColumns(data.groups, halfW, halfH);
 		wallLayout = computeWall(data.groups, halfW, halfH);
 		wormLayout = computeWorms(halfW, halfH);
+		frontierLayout = computeFrontier(halfW, halfH);
+		riversLayout = computeRivers(data.groups, halfW, halfH);
 		uniforms.uHalfW.value = halfW;
 		uniforms.uHalfH.value = halfH;
 		uniforms.uWormLeft.value = wormLayout.left;
@@ -765,6 +1009,22 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uniforms.uWormHeight.value = wormLayout.height;
 		uniforms.uWormCellHalfW.value = wormLayout.cellHalfW;
 		uniforms.uWormCellHalfH.value = wormLayout.cellHalfH;
+		// frontier plane (§15): the fixed-aspect letterboxed box
+		uniforms.uFrontierLeft.value = frontierLayout.left;
+		uniforms.uFrontierWidth.value = frontierLayout.width;
+		uniforms.uFrontierBottom.value = frontierLayout.bottom;
+		uniforms.uFrontierHeight.value = frontierLayout.height;
+		uniforms.uFrontierCellHalfW.value = frontierLayout.cellHalfW;
+		uniforms.uFrontierCellHalfH.value = frontierLayout.cellHalfH;
+		// dismissal rivers (§16): the flat-baseline band box + per-season strip x's
+		uniforms.uRiverBottom.value = riversLayout.bottom;
+		uniforms.uRiverHeight.value = riversLayout.height;
+		uniforms.uRiverHalfW.value = riversLayout.stripHalfW;
+		for (let gi = 0; gi < groupCount; gi++) {
+			const rx = riversLayout.xs[gi];
+			riverX[gi] = Number.isNaN(rx) ? 0 : rx;
+		}
+		uniforms.uRiverX.value = riverX;
 		uniforms.uPointScale.value = basePointPx(w, h, n) * dpr;
 		uniforms.uColHalfWidth.value = columnLayout.colHalfWidth;
 		uniforms.uColBottom.value = columnLayout.bottom;
@@ -823,7 +1083,10 @@ export function createField(opts: FieldOptions): FieldHandle {
 		getWallLayout: () => wallLayout,
 		getResortLayout: () => resortInfo,
 		getWormLayout: () => wormLayout,
+		getFrontierLayout: () => frontierLayout,
+		getRiversLayout,
 		setRunouts,
+		setDismissals,
 		dispose(): void {
 			disposed = true;
 			if (rafId !== null) cancelAnimationFrame(rafId);

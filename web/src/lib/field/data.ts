@@ -52,6 +52,12 @@ export async function loadFieldData(baseUrl: string): Promise<FieldData> {
 		// rendering; worm-space y collapses to the floor until it arrives.
 		const cumRuns = await fetchOptionalU8(`${baseUrl}/data/cumruns.u8`, n);
 
+		// OPTIONAL interleaved bowler-season plane coordinate (Ch 3 §15 frontier).
+		// 2 bytes per point (byte 0 economy, byte 1 strike rate). Absent until the
+		// pipeline ships bowlerplane.u8 — fetch non-fatally so R1/R2a keep
+		// rendering; the frontier plane collapses to the corner until it arrives.
+		const bowlerPlane = await fetchOptionalU8(`${baseUrl}/data/bowlerplane.u8`, n * 2);
+
 		return {
 			nPoints: n,
 			meta,
@@ -64,6 +70,7 @@ export async function loadFieldData(baseUrl: string): Promise<FieldData> {
 			wallHeat: new Uint8Array(heatBuf),
 			matchIndex,
 			cumRuns,
+			bowlerPlane,
 			synthetic: false
 		};
 	} catch (err) {

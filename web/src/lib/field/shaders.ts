@@ -167,6 +167,29 @@ uniform float uCascadeFade;     // residual alpha × for a fully fallen point
 uniform float uCascadeMute;     // team-glow desaturation 0..1 through the cascade
 uniform float uCascadeMinSeason;// earliest season year (sweep origin)
 uniform float uCascadeInvSpan;  // 1 / (latest - earliest season) — sweep normalizer
+
+// ---- Frontier plane (Ch 3, §15). Fixed-aspect, letterboxed box; x = bowler-
+//      season economy (aBowlEcon byte 0), y = bowling strike rate (aBowlSr byte
+//      1, 255 = no-wicket sentinel → top 60+ bucket). Positions in-shader.
+uniform float uFrontierLeft;    // world x at economy lo (left = cheap)
+uniform float uFrontierWidth;   // world width across the economy extent
+uniform float uFrontierBottom;  // world y at strike-rate lo (bottom = strikes fast)
+uniform float uFrontierHeight;  // world height across the strike-rate extent
+uniform float uFrontierCellHalfW; // per-bowler-season cloud x jitter (density haze)
+uniform float uFrontierCellHalfH; // per-bowler-season cloud y jitter (density haze)
+
+// ---- Dismissal rivers (Ch 3, §16). The bowler-credited wicket subset (aDismissal
+//      >= 0) streams out of the frontier clouds into a flat-baseline 100%-stacked
+//      band; composes with the frontier layout, spends NO extra controlling morph.
+uniform float uRiversClass;     // -1 = inactive · >= 0 = rivers engaged (wicket)
+uniform float uRiversEngage;    // 0 = points in clouds · 1 = fully stacked in bands
+uniform float uRiversTint;      // categorical dismissal recolor strength (hue exception)
+uniform float uRiversOthersDim; // luminance × for non-wicket points while engaged
+uniform float uRiversMute;      // team-glow desaturation 0..1 through the rivers beat
+uniform float uRiverBottom;     // world y at 0% share (the flat baseline)
+uniform float uRiverHeight;     // world height spanning 0 → 100% share
+uniform float uRiverHalfW;      // in-strip x jitter half-width (fills the strip)
+uniform float uRiverX[GROUP_COUNT]; // per-group season strip centre x (world)
 `;
 
 /** Core per-point attributes (both shaders read these). */
@@ -178,6 +201,10 @@ in float aTeam;
 in float aSubOrd;
 in float aCumRuns;  // batter cumulative innings runs, NORMALIZED 0..1 (worm-space y)
 in float aRunOut;   // run-out membership flag 0/1 (worm-space cascade)
+in float aBowlEcon; // bowler-season economy byte 0..254 (frontier x); raw, non-normalized
+in float aBowlSr;   // bowler-season strike-rate byte 0..254, 255 = no-wicket sentinel (frontier y)
+in float aDismissal;// dismissal-kind flag -1 none / 0 bowled / 1 lbw / 2 caught / 3 stumped (rivers)
+in float aRiverPos; // stacked 0..1 share-position within the season strip (rivers y); baked on-device
 ${hasMatch ? 'in float aMatchIndex; // per-delivery match index (u16)' : ''}
 `;
 }
@@ -193,12 +220,18 @@ uint pcg(uint v) {
 }
 const float INV32 = 1.0 / 4294967296.0;
 
-vec3 pickLayout(int id, vec3 pFree, vec3 pCols, vec3 pWall, vec3 pWorms) {
+vec3 pickLayout(int id, vec3 pFree, vec3 pCols, vec3 pWall, vec3 pWorms, vec3 pFrontier) {
 	if (id == 1) return pCols;
 	if (id == 2) return pWall;
 	if (id == 4) return pWorms;
+	if (id == 5) return pFrontier;
 	return pFree; // 0 free · 3 assembly share the free-field scatter
 }
+
+// Density-haze layouts (worm-space code 4, frontier code 5): the field settles
+// to low alpha so overlapping balls read as texture, and the reader's team
+// resists the haze. Shared test so both use the same wormWeight path.
+bool isHazeLayout(int id) { return id == 4 || id == 5; }
 
 // Facet filter (R1b §12): true iff the point passes every ACTIVE facet.
 bool passesFilter(int gi) {
@@ -227,10 +260,12 @@ struct Core {
 	bool matchResort;    // matches uResortClass (color recolor)
 	float reAmt;         // resort engage weight for the recolor
 	float baseSizeMul;   // outcome-driven base point-size multiplier
-	float wormWeight;    // 0..1 amount of worm-space in the current A/B mix (haze alpha)
+	float wormWeight;    // 0..1 amount of density-haze layout in the A/B mix (haze alpha)
 	bool runOut;         // run-out membership flag (aRunOut) — cascade subset
 	float cascadeFall;   // 0..1 fall progress for this point's season cohort
 	float cascadeFlash;  // 0..1 red-flash intensity as the season wave crosses
+	bool riverMember;    // bowler-credited wicket (aDismissal >= 0) — rivers subset
+	float riverEngage;   // 0..1 rivers engage weight (recolor / others-dim strength)
 };
 
 Core computeCore() {
@@ -312,19 +347,32 @@ Core computeCore() {
 		(h3 - 0.5) * 0.25
 	);
 
+	// frontier plane (Ch 3, §15): x = bowler-season economy (byte 0, [4,16]),
+	// y = bowler-season strike rate (byte 1, [8,60]; 255 = no-wicket sentinel →
+	// top 60+ bucket). byte/254 IS the normalized axis position (the buffer is
+	// encoded over the same lo/hi the box spans), so this matches frontierPoint()
+	// exactly and the SVG edge/ghost/anchors can never drift from the GL haze.
+	float fex = clamp(aBowlEcon, 0.0, 254.0) / 254.0;
+	float fsy = (aBowlSr >= 254.5) ? 1.0 : clamp(aBowlSr / 254.0, 0.0, 1.0);
+	vec3 posFrontier = vec3(
+		uFrontierLeft + fex * uFrontierWidth + (h4 * 2.0 - 1.0) * uFrontierCellHalfW,
+		uFrontierBottom + fsy * uFrontierHeight + (h2 * 2.0 - 1.0) * uFrontierCellHalfH,
+		(h3 - 0.5) * 0.25
+	);
+
 	// morph with per-point stagger so the field streams, not teleports
 	float delay = h3 * 0.55;
 	float t = clamp(uProgress * 1.55 - delay, 0.0, 1.0);
 	t = t * t * (3.0 - 2.0 * t);
 	vec3 pos = mix(
-		pickLayout(uLayoutA, posFree, posCols, posWall, posWorms),
-		pickLayout(uLayoutB, posFree, posCols, posWall, posWorms),
+		pickLayout(uLayoutA, posFree, posCols, posWall, posWorms, posFrontier),
+		pickLayout(uLayoutB, posFree, posCols, posWall, posWorms, posFrontier),
 		t
 	);
 
-	// how much worm-space is in the current mix — drives the density-haze alpha
-	// (no-op for R1 layouts, which are never code 4)
-	o.wormWeight = (uLayoutA == 4 ? (1.0 - t) : 0.0) + (uLayoutB == 4 ? t : 0.0);
+	// how much of a density-haze layout (worm-space 4 or frontier 5) is in the
+	// current mix — drives the low-alpha haze (no-op for R1 layouts, never 4/5).
+	o.wormWeight = (isHazeLayout(uLayoutA) ? (1.0 - t) : 0.0) + (isHazeLayout(uLayoutB) ? t : 0.0);
 
 	// subset re-sort flight — matching points arc into their season's column
 	if (o.matchResort) {
@@ -337,6 +385,26 @@ Core computeCore() {
 		);
 		pos = mix(pos, posCol, re);
 		pos.y += 4.0 * re * (1.0 - re) * uResortLift;
+	}
+
+	// dismissal rivers flight (§16): bowler-credited wickets (aDismissal >= 0)
+	// stream out of their frontier cloud into the flat-baseline 100%-stacked band.
+	// aRiverPos is the baked stacked share-position (0 baseline → 1 top); the
+	// season strip x is a per-group uniform. Reversible: uRiversEngage 1→0 returns
+	// each wicket to its cloud. A cross-cutting POSITION modifier like the re-sort.
+	o.riverMember = false;
+	o.riverEngage = 0.0;
+	if (uRiversClass >= 0.0 && aDismissal >= -0.5) {
+		o.riverMember = true;
+		o.riverEngage = clamp(uRiversEngage, 0.0, 1.0);
+		float rv = clamp(uRiversEngage * 1.55 - delay, 0.0, 1.0);
+		rv = rv * rv * (3.0 - 2.0 * rv);
+		vec3 posBand = vec3(
+			uRiverX[gi] + (h4 * 2.0 - 1.0) * uRiverHalfW,
+			uRiverBottom + aRiverPos * uRiverHeight,
+			(h3 - 0.5) * 0.25
+		);
+		pos = mix(pos, posBand, rv);
 	}
 
 	// assembly stream-in: chronological reveal by point index
@@ -429,6 +497,15 @@ const vec3 C_TEAL  = vec3(0.180, 0.769, 0.714); // #2ec4b6
 // a red-team reader never mistakes "my team" for "a run-out"; luminance-distinct
 // from the dark haze so the signal reads on luminance, not hue alone (§0.1).
 const vec3 C_CASCADE_RED = vec3(1.0, 0.145, 0.115); // #ff251d
+
+// dismissal-rivers categorical palette (C3-4, the ONE gated hue exception in Ch
+// 3): luminance-distinct, brighter than any team red, and none is the WPL teal.
+// bowled + lbw SHARE the "stumps" amber (the woodwork group); caught (the big
+// band) a calm blue; stumped (the thin sliver) a vivid magenta so it still reads.
+// Owner-tunable (storyboard §7c) — the exact hues are the remaining sign-off.
+const vec3 C_RIVER_STUMPS  = vec3(1.000, 0.690, 0.180); // #ffb02e — bowled + lbw
+const vec3 C_RIVER_CAUGHT  = vec3(0.357, 0.549, 1.000); // #5b8cff — caught
+const vec3 C_RIVER_STUMPED = vec3(0.878, 0.373, 0.847); // #e05fd8 — stumped
 
 ${coreBodyGlsl()}
 
@@ -537,6 +614,26 @@ void main() {
 		}
 	}
 
+	// ---- Dismissal rivers recolor (§16): the bowler-credited wicket subset
+	//      recolours categorically by dismissal kind (the ONE gated hue exception
+	//      in Ch 3), everything else dims. The pos fly-out already happened in
+	//      core; this is the colour half (visual only). No-op when uRiversClass < 0.
+	if (uRiversClass >= 0.0) {
+		if (core.riverMember) {
+			int dk = int(aDismissal + 0.5);
+			vec3 rc = C_RIVER_STUMPS;               // bowled (0) + lbw (1) share the stumps hue
+			if (dk == 2) rc = C_RIVER_CAUGHT;       // caught
+			else if (dk == 3) rc = C_RIVER_STUMPED; // stumped
+			c = mix(c, rc, uRiversTint * core.riverEngage);
+			glow = max(glow, 0.4 * core.riverEngage);
+			sizeMul *= 1.0 + 0.1 * core.riverEngage;
+		} else {
+			float od = mix(1.0, uRiversOthersDim, core.riverEngage);
+			alphaMul *= od;
+			c *= mix(0.75, 1.0, od);
+		}
+	}
+
 	// ---- Facet filter: points failing an active facet are hidden/ghosted.
 	//      (uFilterDim is 0 to hide, small to ghost, 1 no-op — and is a no-op
 	//      whenever no facet is active because filterPass is then always true.)
@@ -551,11 +648,15 @@ void main() {
 		vec3 tcol = uTeamColor;
 		float igniteK = 0.82;
 		float glowK = 0.35;
-		// through the run-out cascade the team glow desaturates one stop so a
-		// red-team reader (RCB/PBKS/SRH) never confuses identity with a run-out.
-		// Gated on the cascade being ACTIVE so a picked team in R1 is untouched.
-		if (uCascadeClass >= 0.0 && uCascadeMute > 0.0) {
-			float m = clamp(uCascadeMute, 0.0, 1.0);
+		// through the run-out cascade (C2-4) OR the dismissal rivers (C3-4) the team
+		// glow desaturates one stop so a red-team reader (RCB/PBKS/SRH) never
+		// confuses identity with a run-out or a caught/stumped tint. Gated on the
+		// beat being ACTIVE so a picked team in R1/R2a-hold is untouched.
+		float muteAmt = 0.0;
+		if (uCascadeClass >= 0.0) muteAmt = max(muteAmt, uCascadeMute);
+		if (uRiversClass >= 0.0) muteAmt = max(muteAmt, uRiversMute);
+		if (muteAmt > 0.0) {
+			float m = clamp(muteAmt, 0.0, 1.0);
 			float lum = dot(tcol, vec3(0.299, 0.587, 0.114));
 			tcol = mix(tcol, vec3(lum), 0.5 * m);
 			igniteK = mix(0.82, 0.55, m);

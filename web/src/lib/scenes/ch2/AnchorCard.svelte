@@ -152,10 +152,13 @@
 				<p class="headline">
 					The league’s last anchors. Slow innings fell from
 					<strong>{anchorEarly !== null ? fmt1(anchorEarly) : '-'}%</strong> of every ball to
-					<strong>{anchorModern !== null ? fmt1(anchorModern) : '-'}%</strong>. And the risky single,
-					the run-out, fell from <strong>{runoutEarly !== null ? fmt1(runoutEarly) : '-'}%</strong> of
-					wickets to <strong>{runoutModern !== null ? fmt1(runoutModern) : '-'}%</strong>. A whole way
+					<strong>{anchorModern !== null ? fmt1(anchorModern) : '-'}%</strong>. A whole way
 					of batting, gone in a generation.
+				</p>
+				<p class="subpoint">
+					The risky single went with it. The run-out fell from
+					<strong>{runoutEarly !== null ? fmt1(runoutEarly) : '-'}%</strong> of wickets to
+					<strong>{runoutModern !== null ? fmt1(runoutModern) : '-'}%</strong>.
 				</p>
 				<p class="elegy">The most recent to play it: {v.batter}. {v.runs} off {v.balls}, scoring {fmt1(v.sr)} runs per 100 balls against a going rate of {fmt1(v.par_sr)}{#if rarity !== null}. One of just {rarity} the league produced all {v.season}{/if}.</p>
 			{:else}
@@ -366,6 +369,13 @@
 		font-size: clamp(1rem, 2.4vw, 1.16rem);
 		line-height: 1.5;
 		color: var(--ink);
+	}
+
+	.subpoint {
+		margin: 0.5rem 0 0;
+		font-size: 0.95rem;
+		line-height: 1.5;
+		color: var(--ink-dim);
 	}
 
 	.elegy {

@@ -206,6 +206,71 @@ export const FOOTNOTES = {
 			'Franchises born after the archetype was already gone, with no qualifying top-order anchor, get the designed empty state (authored copy, never a blank card) because the empty state is itself the finding (“born post-anchor”). The neutral card names the most recent qualifying top-order anchor in IPL history and the league-wide decline.',
 			'The replayable worm is that exact innings, drawn ball by ball against the day’s going-rate line. It is a real trajectory from the pipeline, not a reconstruction. Numbers on the card are per-franchise values from the payoff artifact; nothing is hand-authored per team.'
 		]
+	},
+
+	/* ---- Chapter 3: The Counterrevolution ---------------------------------- */
+	'economy-convention': {
+		title: 'How the plane is counted',
+		paragraphs: [
+			'Left to right is economy, the runs a bowler leaks per over. It is bowler-charged: the batter’s runs plus wides plus no-balls, per six legal balls. Byes and leg-byes are left out everywhere in this piece, because they are not the bowler’s fault (this shifts league runs-per-over about 0.15 versus an all-extras economy).',
+			'Top to bottom is bowling strike rate, the number of legal balls a bowler needs to take a wicket. Only wickets credited to the bowler count. A run-out is a fielding event, so it is not on this axis (Chapter 2 told that story).',
+			'A bowler-season needs at least 90 legal balls to draw a crisp cloud and to count toward the edge of the possible. Shorter spells fade into the all-time haze. A bowler-season that took no wicket has no balls-per-wicket at all, so it clamps to the top “60+” bucket, labelled as such.',
+			'The economy and strike-rate numbers are a direct roll-up of every delivery, built on the same season baselines the piece uses for the going rate. Both axes are better when lower, so the good corner is the bottom-left: cheap and deadly at once.'
+		]
+	},
+	'frontier-retreat': {
+		title: 'The edge, and why it retreats',
+		paragraphs: [
+			'The hero share in fan form: bowler-seasons that kept their economy under seven an over. In the league’s first three years that was 49 of 169 qualifying bowler-seasons (29.0%). In the last four it was 4 of 267 (1.5%). The edge of the possible is the lower-left staircase of the best-anyone-managed bowler-seasons each year, a precomputed lookup, never fitted on your device.',
+			'Why we tell it through the edge and not a correlation: you might think taking more wickets now buys you a cheaper economy across bowlers. We checked, and it does not. That link is weakly POSITIVE in both eras, +0.12 in the early years and +0.03 now (and +0.34 in the WPL), so the honest way to tell the counterrevolution is the edge marching right, not a link that was never there.',
+			'The tide, not the men. The league’s bowler-charged economy rose from 7.79 to 9.38 runs an over. So a 7.5 economy went from roughly league-par in 2009 to nearly two runs an over BETTER than par by 2025. The raw numbers got uglier while the bowling got better. That is True Economy, and it is why the close says the bowler improved even as the scoreboard turned against him.',
+			'A demoted exhibit, the death specialist: the share of death overs bowled by genuine death specialists rose from nothing in 2008 to a mid-era peak and is already eroding, maybe as the Impact Player rule lets teams stay flexible. This recompute is definition-sensitive and lands lower than the catalog’s headline figure, but the shape (a rise, then a 2026 slump) is the same.',
+			'One honest confound on the most recent seasons: the 2023 Impact Player rule freed batters up, so part of the frontier’s latest rightward jump is a rule change tangled up with bowler skill, not bowler skill alone. Chapter 7 pulls that thread out.'
+		]
+	},
+	'dismissal-dna': {
+		title: 'How wickets changed shape',
+		paragraphs: [
+			'The bands are shares of the wickets the bowler actually earned. Run-outs and retirements are left out of the count (they are a fielding event, told in Chapter 2), so every share sits on one honest denominator. “Caught” here is a catch in the field or to the keeper; caught-and-bowled is kept separate. Bowled and leg before share one colour because they are the same idea: the ball beat the bat and hit the woodwork.',
+			'The caught band did not swell on bowler intent alone. Chapter 2’s aerial revolution matters here too: batters skied the ball far more over the era, which manufactures catches no matter where the bowler aimed. So caught rose because bowlers aimed wider AND batters went up more.',
+			'A caveat on the keeper: we infer keeper credit from stumping records, which covers about 84% of team-seasons, so a clean split of caught-behind from caught-in-the-deep is not fully available. The residual is documented.',
+			'The deep cut, field-independent bowling: across ALL dismissals (run-outs included) caught rose from 60.0% to 72.6% while run-outs collapsed from 12.1% to 5.2%. So more of a bowler’s fate now sits in a fielder’s hands, which makes raw bowler numbers LESS skill-reflective in 2026 than in 2008. This all-dismissal figure is a different denominator from the bowler-credited shares in the main flow, which is why the two never sit on screen together.',
+			'The WPL keeps a much fatter stumping band, 5.2% to 7.9% of its wickets every season, a genuinely different way of getting batters out. That is teased here and paid off in Chapter 6.'
+		]
+	},
+	'dot-plus': {
+		title: 'The dot, and what it is worth',
+		paragraphs: [
+			'A dot is a legal ball the batter scores nothing off. The league dot rate fell from 37.6% in the early years to 33.0% now. Because a dot got rarer, the same dot rate is a harder achievement today than it was in 2009.',
+			'The technical version is Dot+: a bowler’s dots measured against the dots an average bowler would make with the same season and over-number mix, so 100 is the league average of its own time. On that scale Narine in 2012 tops the board at 142.6, with Bumrah’s recent seasons and Rashid Khan close behind. It lets a 2010 dot artist and a 2024 one share one leaderboard.',
+			'The two grids are real single innings, not the field’s own points, each chosen at or very near its era’s mean dot rate. A single innings swings anywhere from a quarter to half its balls as dots, so one innings on its own could easily over- or under-state the honest 4.6-point league shift. That is why the caption trusts the league number, not the eye.'
+		]
+	},
+	'death-wides': {
+		title: 'The wide-yorker tax',
+		paragraphs: [
+			'This counts wides given away per 100 legal balls in the death overs, the last five (overs 16 to 20). It doubled, from 3.13 in the early seasons to 6.45 now (a factor of 2.06). Across all phases the wide rate rose more gently, from a low of 2.71 in 2013 to 4.78 in 2026, so the death overs are the real story.',
+			'The doubling is not one clean cause. Three things push it up together and the data cannot cleanly separate them: bowlers chase the un-hittable ball on purpose, batters shuffle across their stumps to make good balls look wide, and umpires call the wide line tighter than they once did. It is an arms race made of runs, not bowlers getting worse.',
+			'We cannot measure the wide-review sub-metric in this data: the review-type field only ever reads “wicket” or is missing. And the WPL’s death-wide rate is just 2.69, the seed of the next scene’s point that the arms race is a men’s-league thing, not a stage every league passes through.'
+		]
+	},
+	'crack-ratio': {
+		title: 'Does the squeeze still crack them?',
+		paragraphs: [
+			'The squeeze number is the chance of a wicket on the ball right after a run of three or more dots, divided by the chance off a fresh scoring ball, in the middle overs. Above 1, dot pressure still buys wickets. Below 1, batters have defused it. The raw release ratios are always below 1 because pressure moments coincide with the better bowlers, so this ratio is the honest read of whether the squeeze itself still bites.',
+			'What it does NOT prove. This is a single cross-league snapshot, so read the 1.18-versus-0.81 gap as a plain difference between two leagues today, not the IPL “learning to survive” dots over time (we do not draw an IPL crack-ratio time series). And it does not by itself explain why IPL economies inflated. As above, taking wickets does not buy a cheaper economy across bowlers: that link is weak in both leagues, +0.12 then and +0.03 now in the IPL, +0.34 in the WPL.',
+			'The spinner’s-league tease is a proxy, said plainly: the WPL keeps stumpings at 5.2% to 7.9% of its wickets every season, against the IPL’s 1.4% in 2026 (1.9% pooled across 2023-26). A stumping usually means spin, but the data carries no bowler-type field at all, so stumping share is only a proxy for spin. That is why “a spinner’s league” stays out of the main flow, and the full treatment is Chapter 6, Two Dialects.',
+			'Sample honesty: the WPL is 88 matches across four seasons, so these numbers will move as it plays. A league can keep an old strength and refuse an old path at the same time, which is why “behind” is the wrong word for it.'
+		]
+	},
+	'true-economy': {
+		title: 'Beating the tide',
+		paragraphs: [
+			'Beating the tide means leaking fewer runs than an average bowler would have in the exact overs, phases, and grounds this bowler actually bowled. A death specialist is priced against death par, not against the whole game, so a modest raw economy in a high-scoring year can be a huge gap. This is the going-rate family from the rest of the piece, flipped from batting to bowling.',
+			'The gap printed on the card is that True-Economy differential, and the card shows its own arithmetic: the going rate for the overs he bowled, minus the runs he actually leaked, equals the gap. That gap is exactly the number that ranks his season the biggest at the franchise, so what you can add up on the card is the metric itself.',
+			'A bowler-season needs at least 90 legal balls to qualify. The WPL five carry a designed short-sample state by choice: four seasons is not a long enough tide to crown a gravity-defier against yet, so the card names who is closest so far and says to ask again in a few years. That honest short sample is itself the point. A couple of IPL cards rest on a thin spell too and say so.',
+			'The wicket-taking mirror of this idea is True Wickets per 24: actual minus expected wickets per 24 balls, expected from the same league-season baseline. It answers who really took more wickets than their era should have, and it lives here in the deep layer.'
+		]
 	}
 } as const satisfies Record<string, FootnoteEntry>;
 

@@ -74,6 +74,19 @@ export interface FieldData {
 	 * never use `worms`). Uploaded NORMALIZED (u8 → 0..1) like wallHeat.
 	 */
 	cumRuns?: Uint8Array;
+	/**
+	 * per-delivery INTERLEAVED bowler-season plane coordinate (bowlerplane.u8),
+	 * length 2×nPoints — OPTIONAL, drives the Ch 3 `frontier` layout (CONTRACT
+	 * §15). Two bytes per point in field point order: byte 0 = bowler-season
+	 * economy (linear over [4,16] RPO → 0..254), byte 1 = bowler-season bowling
+	 * strike rate (linear over [8,60] balls/wicket → 0..254, with 255 = sentinel
+	 * "no bowler-credited wicket" → clamps to the top 60+ bucket). Present only
+	 * when the pipeline ships bowlerplane.u8; absent until then, so the frontier
+	 * plane collapses to the bottom-left corner (graceful — R1/R2a never use it).
+	 * Bound as two non-normalized attributes (aBowlEcon, aBowlSr) off one
+	 * interleaved buffer — no copy, no positions on the wire.
+	 */
+	bowlerPlane?: Uint8Array;
 	/** true when this is the dev-only synthetic fallback, not pipeline output */
 	synthetic: boolean;
 }
@@ -92,7 +105,7 @@ export const OUTCOME_OTHER = 5;
  * position buffers ever cross the wire (blueprint §2).
  * ------------------------------------------------------------------------- */
 
-export type LayoutId = 'free' | 'columns' | 'wall' | 'assembly' | 'worms';
+export type LayoutId = 'free' | 'columns' | 'wall' | 'assembly' | 'worms' | 'frontier';
 
 /** Shader-side layout codes (uLayoutA / uLayoutB). */
 export const LAYOUT_CODE: Record<LayoutId, number> = {
@@ -103,7 +116,13 @@ export const LAYOUT_CODE: Record<LayoutId, number> = {
 	// Ch 2 controlling morph (free→worms): x = balls-faced (aBallsFaced, display
 	// extent 60+), y = cumulative innings runs (aCumRuns), settled as a low-alpha
 	// density haze. In-shader from existing attributes + cumruns.u8 (CONTRACT §13).
-	worms: 4
+	worms: 4,
+	// Ch 3 controlling morph (free→frontier): x = bowler-season economy, y =
+	// bowler-season bowling strike rate, settled as a low-alpha density haze of
+	// dense bowler-season clouds. In-shader from the interleaved bowlerplane.u8
+	// (byte 0 economy, byte 1 strike rate). Fixed data aspect, letterboxed
+	// (never stretched), like `worms`. See CONTRACT §15.
+	frontier: 5
 };
 
 /**
@@ -153,6 +172,31 @@ export const ATTR_RUNOUT_BIT = 64;
 export const CASCADE_CLASS = { none: -1, runOut: 0 } as const;
 
 export type CascadeClass = Exclude<keyof typeof CASCADE_CLASS, 'none'>;
+
+/**
+ * Dismissal-kind codes for the Ch 3 rivers subset (CONTRACT §16), baked into the
+ * per-point `aDismissal` GL flag via `field.setDismissals`. -1 = not a
+ * bowler-credited wicket (run-outs / retired are excluded — a fielding event).
+ * The codes are FIXED; the band STACK order (bottom→top) is chosen per-scene via
+ * the rivers descriptor's `kinds` array, defaulting to bowled, lbw, stumped,
+ * caught so the two woodwork dismissals (bowled + lbw) sit adjacent + baseline-
+ * anchored as one "stumps" group.
+ */
+export const DISMISSAL_CODE = { bowled: 0, lbw: 1, caught: 2, stumped: 3 } as const;
+
+export type DismissalKind = keyof typeof DISMISSAL_CODE;
+
+/** Default band stack order, bottom→top (the "stumps" group anchored to baseline). */
+export const DEFAULT_RIVERS_KINDS: readonly DismissalKind[] = ['bowled', 'lbw', 'stumped', 'caught'];
+
+/**
+ * Rivers subset class codes (uRiversClass). Only 'wicket' today; the shader
+ * tests the per-point `aDismissal` flag (>= 0) for membership rather than
+ * decoding a class, so the code just gates the capability on/off. -1 = inactive.
+ */
+export const RIVERS_CLASS = { none: -1, wicket: 0 } as const;
+
+export type RiversClass = Exclude<keyof typeof RIVERS_CLASS, 'none'>;
 
 /**
  * Which season groups form re-sort columns. 'ipl' = IPL seasons only (the C1-5
@@ -318,6 +362,30 @@ export interface FieldRenderState {
 	cascadeFade: number;
 	/** team-identity glow desaturation 0..1 through the cascade (red-team guard) */
 	cascadeMute: number;
+
+	/* ---- dismissal rivers (§16 capability — the Ch 3 hero subset) ------------
+	 * A cross-cutting subset that streams the bowler-credited wicket points
+	 * (per-point `aDismissal` >= 0, fed via field.setDismissals) OUT of the
+	 * frontier clouds into a FLAT-BASELINE 100%-stacked band as `riversEngage`
+	 * scrubs 0→1 (staggered per point → object constancy), and settles back as it
+	 * scrubs 1→0. Composes with the `frontier` layout; it does NOT spend a second
+	 * controlling morph (like the highlight / re-sort / cascade). Wicket points
+	 * recolour categorically by dismissal kind (the gated hue exception, weighted
+	 * by `riversTint`); everything else dims by `riversOthersDim`; the reader's
+	 * team glow desaturates by `riversMute` through the beat (red-team guard). All
+	 * fields default inactive (uRiversClass -1), so R1/R2a scenes are unaffected. */
+	/** rivers subset class code (-1 = inactive, 0 = wicket) */
+	riversClass: number;
+	/** 0 = points in their clouds · 1 = fully stacked into the flat-baseline bands */
+	riversEngage: number;
+	/** categorical dismissal-kind recolor strength 0..1 (beat-gated hue exception) */
+	riversTint: number;
+	/** luminance × for non-wicket points while the rivers are engaged */
+	riversOthersDim: number;
+	/** team-identity glow desaturation 0..1 through the rivers beat (red-team guard) */
+	riversMute: number;
+	/** band stack order bottom→top (drives the per-point stacked y — discrete config) */
+	riversKinds: readonly DismissalKind[];
 }
 
 export const DEFAULT_RENDER_STATE: FieldRenderState = {
@@ -353,5 +421,11 @@ export const DEFAULT_RENDER_STATE: FieldRenderState = {
 	cascadeTint: 0,
 	cascadeFall: 0,
 	cascadeFade: 1,
-	cascadeMute: 0
+	cascadeMute: 0,
+	riversClass: RIVERS_CLASS.none,
+	riversEngage: 0,
+	riversTint: 0,
+	riversOthersDim: 1,
+	riversMute: 0,
+	riversKinds: DEFAULT_RIVERS_KINDS
 };

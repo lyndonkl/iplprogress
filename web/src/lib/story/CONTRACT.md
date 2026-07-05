@@ -1,4 +1,4 @@
-# Story Shell Contract — R1a (+ R1b field capabilities: §11 picking · §12 filtering; + R2a Ch 2: §13 worm-space · §14 run-out cascade)
+# Story Shell Contract — R1a (+ R1b field capabilities: §11 picking · §12 filtering; + R2a Ch 2: §13 worm-space · §14 run-out cascade; + R2b Ch 3: §15 frontier plane · §16 dismissal rivers)
 
 The scene system every scene builder codes against. The shell (this directory +
 `lib/field/` + `lib/state/`) is owned by the story-shell architect; **scene
@@ -52,7 +52,7 @@ scrubs the field from the previous scene's `fieldState` to this scene's
 
 ```ts
 {
-  layout: 'free' | 'columns' | 'wall' | 'assembly' | 'worms';
+  layout: 'free' | 'columns' | 'wall' | 'assembly' | 'worms' | 'frontier';
   reveal?: number;    // assembly stream-in 0..1 (chronological by point index)
   dim?: number;       // global luminance ×, 1 = full (default 1)
   wplDim?: number;    // WPL-points luminance × (C1-2 shelf staging; default 1)
@@ -83,8 +83,12 @@ revealed chronologically as `reveal` scrubs 0→1 (the counter set piece; at
 `reveal:1` it is position-identical to `free`, so assembly→free is seamless) ·
 `worms` = Ch 2 worm-space (x = balls-faced 1..60+ from `ballsfaced.u8`, y =
 cumulative innings runs from `cumruns.u8`, settled as a low-alpha density haze;
-fixed data aspect ratio + letterbox — §13). All scalar fields lerp during the
-morph; highlight lift/boost/dim lerp so subsets glide in and out.
+fixed data aspect ratio + letterbox — §13) · `frontier` = Ch 3 economy ×
+bowling-strike-rate plane (x = bowler-season economy, y = bowler-season strike
+rate, both from the interleaved `bowlerplane.u8`, settled as a low-alpha density
+haze of dense bowler-season clouds; fixed data aspect ratio + letterbox — §15).
+All scalar fields lerp during the morph; highlight lift/boost/dim lerp so subsets
+glide in and out.
 
 **Every scalar here is luminance/position, never hue.** Hue is identity only
 (team color, WPL family) — standing rule.
@@ -693,3 +697,277 @@ re-encodes `attrs.u8` bit 6, the seed covers it and `setRunouts` becomes optiona
   ledger delta 0). Both are no-ops for R1 until consumed by a Ch 2 scene.
 - The worm haze + cascade fall live in the shared `computeCore()`, so the pick
   pass tracks fallen points and never drifts from the visual field.
+
+---
+
+## 15. The frontier plane — Ch 3's controlling morph (R2b `frontier` layout)
+
+Chapter 3's single controlling morph (free→frontier, analogous to Ch 1's
+free→wall and Ch 2's free→worms). Every ball condenses onto its **bowler-season**
+coordinate, settling into a **low-alpha density haze** of dense bowler-season
+clouds: **x = economy** (runs leaked per over; left = cheap, right = expensive)
+and **y = bowling strike rate** (legal balls per bowler-credited wicket; bottom =
+strikes fast, top = strikes slow). Both axes are "lower is better", so the
+promised land is the **bottom-left corner** (cheap AND deadly) and the retreating
+Pareto edge is the lower-left staircase. Positions are **in-shader**; no positions
+cross the wire. Add nothing yourself — the shell owns the layout.
+
+### 15.1 Declaring it
+
+```ts
+fieldState: { layout: 'frontier' }   // that's it — free→frontier is the morph
+```
+
+The field lands as the haze automatically (base alpha drops to a haze level as
+the field morphs into the plane, restored on the way out — no-op for every R1/R2a
+layout). The reader's **team stays ignited at full brightness** through the haze
+(personalization survives — the payoff card re-centres on your dots). The morph
+is the chapter's ONE layout morph; the dismissal rivers (§16), the season retreat
+(a §12 `filterSeason` brighten), the dot-grid, the leak gauge and the WPL
+brighten are all subset / filter / 2D / colour-state beats that **compose** with
+`frontier` and spend no second morph.
+
+### 15.2 The buffer — ONE interleaved `bowlerplane.u8` (read this)
+
+The pipeline ships **one** buffer, `bowlerplane.u8` — **2 bytes per point**,
+field point order, `byteLength == 2 × nPoints`, loaded like `wallheat.u8` /
+`cumruns.u8` into `FieldData.bowlerPlane`. (This supersedes the older storyboard's
+imagined two separate `bowlecon.u8` + `bowlsr.u8`; **the emitted artifact wins**.)
+The shell binds it as two non-normalized u8 attributes off ONE
+`THREE.InterleavedBuffer` (no copy):
+
+- **byte 0 = economy**, linear over **[4.0, 16.0] RPO** → 0..254. Decode:
+  `economy = 4 + b0/254 × 12`. `b0/254` IS the normalized x position.
+- **byte 1 = bowling strike rate**, linear over **[8.0, 60.0]** balls/wicket →
+  0..254, with **255 = sentinel** = "no bowler-credited wicket" → clamps to the
+  top `60+` bucket. Decode: `strike_rate = 8 + b1/254 × 52` for `b1 < 255`.
+
+Both display ranges are baked into `lib/field/layout.ts` as `FRONTIER_ECON_LO/HI`
+(4/16) and `FRONTIER_SR_LO/HI` (8/60). **These mirror the emitted artifact** —
+`scenes/ch3.json` `frontier.axis` and `bowlerplane_buffer` carry the same lo/hi,
+exactly as `WALLHEAT_NEUTRAL_BYTE` mirrors the pipeline's wallheat pivot. If the
+buffer is ever re-encoded over a different range, both move together (a build
+sign-off constant, §5.2 of the storyboard). Because the buffer is encoded over
+the same lo/hi the box spans, `b0/254` is the exact normalized axis position, so
+the GL haze and the SVG `frontierPoint` mapping (§15.4) can never drift.
+
+### 15.3 Honesty lock (do not fight it)
+
+The plot's **data aspect ratio is FIXED** (`FRONTIER_ASPECT`, world width : height)
+and independent of the viewport — the frame **letterboxes** (adds margin) rather
+than stretching, so the bottom-left "cheap and deadly" corner sits in the same
+place on desktop and portrait phone and the rightward retreat reads identically.
+The aspect + fill + cloud-jitter constants live in `lib/field/layout.ts`
+(`FRONTIER_ASPECT`, `FRONTIER_FILL`, `FRONTIER_CLOUD`) and are the owner-tunable
+constants flagged for build sign-off; changing them keeps the fixed-aspect +
+letterbox invariant. **The clouds never re-sort:** a bowler-season's economy and
+strike rate are fixed once the season is over, so the C3-3 season retreat is a
+`filterSeason` brighten (§12) over the held plane — real data migration, never a
+second layout morph.
+
+### 15.4 Drawing the edge / ghost trail / axes — `field.getFrontierLayout()`
+
+The per-season Pareto edge ("the edge of the possible"), the ghost trail, the
+seven-an-over reference line, the axes and the persistent orientation anchors are
+the **scene's job on the annotation plane** (SVG registered to field coordinates)
+— **never** GL geometry (the cardinality rule; hull vertices are a build-time
+lookup in `ch3.json`, never client-fit). Register them with:
+
+```ts
+import { frontierPoint } from '$lib/field/layout';
+const fl = field.getFrontierLayout();            // null before first resize — guard
+if (fl) {
+  // map raw (economy, strikeRate) from ch3.json → world, then → CSS px
+  const world = frontierPoint(fl, economy, strikeRate);  // e.g. a hull vertex
+  const css = field.projectToCss(world.x, world.y);      // place the SVG vertex here
+}
+```
+
+`getFrontierLayout()` returns the fixed-aspect box + display ranges + registered
+landmarks (rebuilt on resize):
+
+```ts
+{
+  left, width, bottom, height;      // the letterboxed data box (world)
+  econLo, econHi, srLo, srHi;       // display ranges (mirror ch3.json frontier.axis)
+  cellHalfW, cellHalfH;             // per-bowler-season cloud jitter (density haze)
+  sevenX;                           // world x of the seven-an-over reference line
+  home: { x0, y0, x1, y1 };         // the bottom-left "cheap and deadly" home-zone box
+  cheapX, expensiveX, fastY, slowY; // axis end-anchor world coords (cheap/expensive · fast/slow)
+}
+```
+
+`frontierPoint(layout, economy, strikeRate)` is the **exact** mapping the shader
+uses (both clamped to the display range), so the SVG edge/ghost/reference lines
+and the GL haze can never drift. Pass raw units straight from `ch3.json`. (A
+bowler-season with no wicket has no strike rate; those points clamp to the `60+`
+top in the shader and are simply not drawn as SVG vertices by the scene.)
+
+### 15.5 Reduced motion & pipeline dependency
+
+Reduced motion jump-cuts free→frontier live (the settled haze end state, team glow
+intact) — declare `reducedMotionEndState: { layout: 'frontier' }` (or let it
+default to `fieldState`). **Pipeline dependency:** the plane needs
+`bowlerplane.u8` (`FieldData.bowlerPlane`, 2×n bytes). The loader auto-detects it;
+**until it ships, the plane collapses to the bottom-left corner** (graceful — R1
+and R2a never use `frontier`). No other new buffer; positions are in-shader.
+
+---
+
+## 16. The dismissal rivers — Ch 3's hero subset-highlight (R2b `rivers`)
+
+A **reversible** stream of the **bowler-credited wicket** subset out of the
+frontier clouds into a **flat-baseline 100%-stacked band** and back (C3-4). It is
+a cross-cutting modifier (like the highlight, the §9 re-sort and the §14 cascade)
+— it composes with `frontier` and does **NOT** spend a second controlling morph.
+As the reader scrubs, every wicket ball **lifts out of its cloud** and stacks into
+a horizontal band for its dismissal kind (bowled · leg before · stumped · caught),
+the bands **stacked flat between a fixed 0 baseline (bottom) and 100 (top)**, each
+band's thickness the kind's share of that season's wickets, flowing left→right
+across per-season strips. Scrubbing back returns the wickets to their clouds (the
+reverse leg is free). Run-outs / retired are excluded (a fielding event, told in
+Ch 2), so every share here shares one denominator: the wickets the bowler earned.
+
+### 16.1 Declaring it — `SceneFieldState.rivers`
+
+```ts
+rivers?: {
+  class: 'wicket';       // the bowler-credited wicket subset (aDismissal >= 0)
+  engage: number;        // 0 = points in their clouds · 1 = fully stacked in the bands
+  kinds?: ('bowled'|'lbw'|'stumped'|'caught')[]; // band order bottom→top
+                         //   (default ['bowled','lbw','stumped','caught'] so the two
+                         //    woodwork dismissals sit adjacent + baseline-anchored)
+  tint?: number;         // categorical dismissal recolor strength 0..1 (gated hue
+                         //   exception; bowled+lbw share one hue, caught + stumped
+                         //   each distinct). Default 1
+  othersDim?: number;    // luminance × for non-wicket points (default 0.12)
+  muteIdentity?: number; // team-glow desaturation through the beat (default 1)
+} | null;
+```
+
+**How it animates.** `engage` lerps like any scalar during the scene's morph: the
+scene that DECLARES the rivers pulls `engage` 0→1 (wickets fly out — staggered per
+point so each traces one path, object constancy — and stack into their kind's band,
+thickness = that kind's share by season, the bands always summing to the full
+0-to-100 height). The **next scene declares no `rivers`**, so `engage` lerps 1→0
+and the wickets settle back into their clouds — the reverse leg is free. The
+`kinds` order keeps **bowled and leg before adjacent + baseline-anchored** so the
+"stumps" group reads as one shrinking region. The `tint` categorical palette
+(`C_RIVER_STUMPS` for bowled+lbw · `C_RIVER_CAUGHT` · `C_RIVER_STUMPED` in
+`shaders.ts`) is luminance-distinct, **brighter than any team red**, and avoids the
+WPL teal; the exact hues are the remaining owner sign-off (storyboard §7c).
+`muteIdentity` desaturates the reader's team glow one stop for the beat (the
+red-team collision guard, §0.1 — the same guardrail Ch 2 put on its cascade).
+Reduced motion jump-cuts to `engage:1` (the settled 100%-stacked band).
+
+### 16.2 The engage is a caption STEP → drive it from `dynamicState`
+
+`engage` advances across the scene's HOLD (after the free→frontier bit settles),
+so it can't ride the morph — drive it from `SceneDef.dynamicState(progress, held)`,
+exactly like the C1-5 re-sort tint and the C2-4 cascade sweep:
+
+```ts
+{
+  id: 'ch3-rivers',
+  scrollLength: 220, morphLength: 40,
+  fieldState: {
+    layout: 'frontier',
+    rivers: { class: 'wicket', engage: 0, tint: 1, othersDim: 0.1, muteIdentity: 1 }
+  },
+  // reduced motion jump-cuts straight to the settled 100%-stacked band:
+  reducedMotionEndState: {
+    layout: 'frontier',
+    rivers: { class: 'wicket', engage: 1, tint: 1, othersDim: 0.1, muteIdentity: 1 }
+  },
+  // stack the wickets into the bands as the caption scrolls:
+  dynamicState: (progress, held) => ({
+    ...held,
+    rivers: { ...held.rivers!, engage: Math.min(1, progress / 0.6) }
+  }),
+  annotations: DismissalRivers,
+  footnote: 'dismissal'
+}
+```
+
+The rivers are a POSITION modifier — the shell warns (dev) if they engage while a
+`resort` or `cascade` is also engaged (all move points; stage them apart).
+
+### 16.3 Feeding wicket-kind membership — `field.setDismissals(kindByIndex)` (READ THIS)
+
+Membership is a per-point GL flag (`aDismissal`): **-1 = not a bowler-credited
+wicket**, **0 bowled · 1 lbw · 2 caught · 3 stumped**. The pipeline has **not**
+re-encoded `attrs.u8` bits for dismissal kind yet, so the scene supplies membership
+at runtime from the columnar `wicket_kind` array — the working-today path with
+**zero pipeline dependency**, exactly like Ch 2's `field.setRunouts`:
+
+```ts
+// once, when the scene mounts (before the rivers engage):
+const kind = new Int8Array(arrays.wicketKind.length).fill(-1);
+for (let i = 0; i < arrays.wicketKind.length; i++) {
+  const k = arrays.wicketKind[i];              // '', 'bowled', 'lbw', 'caught', 'stumped', 'run out', …
+  if (k === 'bowled') kind[i] = 0;
+  else if (k === 'lbw') kind[i] = 1;
+  else if (k === 'caught' || k === 'caught and bowled') kind[i] = 2;
+  else if (k === 'stumped') kind[i] = 3;       // run out / retired excluded (fielding events)
+}
+field.setDismissals(kind);                     // baked into aDismissal ONCE, no per-frame cost
+```
+
+The point order of the columnar `wicket_kind` array **is** the field's point order
+(same as every per-point buffer), so index `i` is the field index to flag. Call
+`setDismissals` once; it O(n)-bakes the flag **and recomputes the stacked band
+positions** (the per-point cumulative-share slot, cached — no per-frame cost on
+scrub), then renders (demand mode preserved). Pass `null` to clear membership. When
+the pipeline re-encodes `attrs.u8` for dismissal kind, this seed can read it and
+`setDismissals` becomes optional.
+
+### 16.4 Anchoring band labels + the 0-to-100 axis — `field.getRiversLayout()`
+
+The band labels, the **0-to-100 share axis** on the left, the season axis along the
+bottom, and the era-ghost band boundaries are the scene's SVG, drawn from
+`ch3.json`'s per-season shares and registered to these world coords:
+
+```ts
+{
+  xs: number[];       // per-season strip centre world x, indexed by gi (NaN = none)
+  gis: number[];      // strips in x order (IPL seasons then WPL seasons)
+  stripHalfW: number; // in-strip jitter half-width
+  left, width;        // the band box (world)
+  bottom, top, height;// world y at 0% share (baseline) · 100% · the span
+  bands: {            // the bands bottom→top, with POOLED-share label anchors
+    kind: 'bowled'|'lbw'|'stumped'|'caught';
+    loFrac, hiFrac;   // cumulative-share bounds 0..1 (pooled across all seasons)
+    centerY;          // world y of the band's pooled-share centre (label anchor)
+  }[];
+}
+```
+
+Draw a band boundary at cumulative share `c` for season strip `gi` at world
+`(xs[gi], bottom + c × height)`; the `bands` array gives a stable per-band label
+anchor from the pooled shares (it reflects the last stack order seen by
+`applyState`/`setDismissals`). All strips are contiguous (no league gap) so the
+bands flow as one river; the scene draws the WPL split + season axis in SVG.
+
+### 16.5 What the platform added (for the pipeline/other agents)
+
+- **New `LayoutId` `frontier`** (code 5) + **new `FieldRenderState` fields**:
+  `riversClass`, `riversEngage`, `riversTint`, `riversOthersDim`, `riversMute`,
+  `riversKinds` (set by `resolveRenderState`). All default inactive (`riversClass`
+  -1; `frontier` is never a layout in R1/R2a) — so **R1a/R1b/R2a scenes render
+  byte-identically** (verified: the density-haze weight, the team-ignite mute and
+  every new branch are no-ops when `frontier` isn't in the A/B mix and no rivers
+  are declared).
+- **New optional buffer, zero wire cost until it ships:** `bowlerplane.u8`
+  (`FieldData.bowlerPlane`, 2×n interleaved — binds zeros until present, so the
+  plane collapses to the corner) and the client-baked `aDismissal` flag (default
+  -1, supplied via `setDismissals`; `aRiverPos` is derived on-device). No new
+  **required** buffer; `frontier` positions are in-shader from `bowlerplane.u8`.
+- **Pipeline asks (integration):** emit `bowlerplane.u8` (2 bytes/point, byte 0
+  economy over [4,16], byte 1 strike rate over [8,60] with 255 = no-wicket
+  sentinel, `ballsfaced.u8` point order) — **shipped**; optionally re-encode
+  `attrs.u8` bits for dismissal kind later (a re-encode like Ch 1's bit-5 / Ch 2's
+  bit-6; the client-baked `setDismissals` path makes it optional). Keep the
+  `FRONTIER_*` display-range constants in `layout.ts` in lock-step with
+  `ch3.json` `frontier.axis` / `bowlerplane_buffer`.
+- The frontier haze + the rivers fly-out live in the shared `computeCore()`, so the
+  pick pass tracks the flown points and never drifts from the visual field.

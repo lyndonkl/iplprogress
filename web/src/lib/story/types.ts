@@ -2,10 +2,12 @@ import type { Component } from 'svelte';
 import type { FieldHandle } from '$lib/field/field';
 import type {
 	CascadeClass,
+	DismissalKind,
 	FilterMode,
 	HighlightClass,
 	LayoutId,
-	ResortColumns
+	ResortColumns,
+	RiversClass
 } from '$lib/field/types';
 import type { FootnoteId } from './footnotes';
 
@@ -15,7 +17,7 @@ import type { FootnoteId } from './footnotes';
  * See CONTRACT.md in this directory for the full contract and ownership map.
  */
 
-export type ChapterId = 'coldopen' | 'picker' | 'ch1' | 'ch2' | 'endcard' | 'bowl';
+export type ChapterId = 'coldopen' | 'picker' | 'ch1' | 'ch2' | 'ch3' | 'endcard' | 'bowl';
 
 /** Uniform-driven subset highlight: lift/tint points matching a class mask. */
 export interface SubsetHighlight {
@@ -95,6 +97,44 @@ export interface RunoutCascade {
 }
 
 /**
+ * The dismissal rivers (§16 capability — the Ch 3 hero subset-highlight). A
+ * cross-cutting subset that streams the bowler-credited wicket points OUT of the
+ * `frontier` clouds into a FLAT-BASELINE 100%-stacked band (one strip per season,
+ * bands = dismissal kinds, thickness = that season's kind share), and back. It
+ * composes with the `frontier` layout and does NOT spend a second controlling
+ * morph (like `highlight`, `resort` and `cascade`). As `engage` scrubs 0→1 the
+ * wickets fly out and stack; the NEXT scene declaring no rivers lerps `engage`
+ * back to 0 and they settle into their clouds (reversible, the reverse leg is
+ * free). Drive `engage` across the hold from a caption step via
+ * `SceneDef.dynamicState` (a post-morph field change, like the C1-5 tint). The
+ * wicket points recolour categorically by dismissal kind (the ONE gated hue
+ * exception in Ch 3), weighted by `tint`.
+ *
+ * MEMBERSHIP: the shell reads a per-point `aDismissal` GL flag (-1 none / 0
+ * bowled / 1 lbw / 2 caught / 3 stumped). The scene supplies it at runtime with
+ * `field.setDismissals(kindByIndex)` (a per-point array derived from the columnar
+ * `wicket_kind`, run-outs / retired excluded). See CONTRACT §16.
+ */
+export interface SubsetRivers {
+	/** which subset streams — only 'wicket' today (the bowler-credited wickets) */
+	class: RiversClass;
+	/** 0 = points in their clouds · 1 = fully stacked into the bands (default 0) */
+	engage: number;
+	/**
+	 * band stack order bottom→top; default ['bowled','lbw','stumped','caught'] so
+	 * the two woodwork dismissals sit adjacent + baseline-anchored as one "stumps"
+	 * group. List all four kinds.
+	 */
+	kinds?: DismissalKind[];
+	/** categorical dismissal-kind recolor strength 0..1 — the hue exception (default 1) */
+	tint?: number;
+	/** luminance × for non-wicket points while engaged (default 0.12) */
+	othersDim?: number;
+	/** team-glow desaturation 0..1 through the beat (red-team guard; default 1) */
+	muteIdentity?: number;
+}
+
+/**
  * A scene's declarative field state — the layout the field ARRIVES at while
  * the scene scrubs in, plus the cross-cutting uniform states. Omitted fields
  * take the defaults in fieldstate.ts (reveal 1 · dim 1 · wplDim 1 · labels 0 ·
@@ -116,6 +156,8 @@ export interface SceneFieldState {
 	resort?: SubsetResort | null;
 	/** season-swept run-out flash+fall over worm-space, or null/omitted for none (§14) */
 	cascade?: RunoutCascade | null;
+	/** dismissal wicket-subset stream into the flat-baseline band over the frontier plane, or null/omitted for none (§16) */
+	rivers?: SubsetRivers | null;
 	/** whether the picked team's balls stay ignited (default true — §2 standing rule) */
 	teamIgnite?: boolean;
 	/**

@@ -59,6 +59,14 @@ SANDBOX_SET = ("columnar.json.gz", "matches.json", "scenes/sandbox.json")
 # zero extra bytes). All lazy-loaded at Ch 2 entry; held to the per-chapter
 # budget.
 CH2_SET_FILES = ("scenes/ch2.json", "cumruns.u8")
+# R2b Chapter 3 "The Counterrevolution": the whole chapter — the Attack-
+# Containment frontier + hull + ghost trail, Dot+, Dismissal DNA rivers, the
+# Death-Wide Tax, the two dot-grid finals, the middle-overs crack ratio, the WPL
+# two-clocks beat, the 20 gravity-defier payoff cards, and the footnote layer —
+# ships in one scene doc (scenes/ch3.json), plus the bowler-season economy x
+# strike-rate per-point buffer bowlerplane.u8 (the controlling-morph coordinate,
+# 2 bytes/point). Lazy-loaded at Ch 3 entry; held to the per-chapter budget.
+CH3_SET_FILES = ("scenes/ch3.json", "bowlerplane.u8")
 # Engine tables under engines/: R2a's engine #1 (par/SR+) + engine #5 (entry
 # states) consumed by Chapter 2, plus the parallel-track engine #2 (re288) +
 # engine #3 (wp_grid) built during R2/R3a and consumed in R3b. All lazy-loaded
@@ -102,6 +110,7 @@ def build_ledger(out_root: Path = canon.OUT_ROOT) -> dict:
     )
     sandbox_files = [n for n in SANDBOX_SET if n in artifacts]
     ch2_files = [n for n in CH2_SET_FILES if n in artifacts]
+    ch3_files = [n for n in CH3_SET_FILES if n in artifacts]
     engine_files = sorted(n for n in artifacts if n.startswith(ENGINES_PREFIXES))
 
     checks = [
@@ -133,6 +142,13 @@ def build_ledger(out_root: Path = canon.OUT_ROOT) -> dict:
             "budget_gz": BUDGET_CHAPTER_GZ,
             "actual_gz": gz_sum(ch2_files),
             "pass": bool(ch2_files) and gz_sum(ch2_files) <= BUDGET_CHAPTER_GZ,
+        },
+        {
+            "name": "chapter ch3 (scene + bowlerplane buffer)",
+            "files": ch3_files,
+            "budget_gz": BUDGET_CHAPTER_GZ,
+            "actual_gz": gz_sum(ch3_files),
+            "pass": bool(ch3_files) and gz_sum(ch3_files) <= BUDGET_CHAPTER_GZ,
         },
         {
             "name": "engines (ch2 par/entry + R3b parallel-track re288/wp_grid)",

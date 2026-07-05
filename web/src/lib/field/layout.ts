@@ -279,3 +279,208 @@ export function wormPoint(
 	const wy = Math.min(Math.max(cumRuns, 0), w.runsCap) / w.runsCap;
 	return { x: w.left + wx * w.width, y: w.bottom + wy * w.height };
 }
+
+/* ---------------------------------------------------------------------------
+ * The frontier plane (Ch 3 controlling morph, CONTRACT §15). Every ball
+ * condenses onto its BOWLER-SEASON coordinate, forming dense bowler-season
+ * clouds settled as a low-alpha density haze:
+ *   x = economy         (runs leaked per over; LEFT = cheap, RIGHT = expensive)
+ *   y = bowling strike rate (legal balls per bowler-credited wicket;
+ *                            BOTTOM = strikes fast, TOP = strikes slow)
+ * so the promised land is the BOTTOM-LEFT corner (cheap AND deadly). Both axes
+ * are "lower is better", so the retreating Pareto edge is the lower-left
+ * staircase — drawn by the SCENE on the annotation plane (SVG), never GL
+ * geometry. Positions are in-shader from the interleaved `bowlerplane.u8`
+ * (byte 0 = economy, byte 1 = strike rate); no positions cross the wire.
+ *
+ * HONESTY LOCK (storyboard §0.1 / §5.2, mirroring worm-space): the plot's DATA
+ * aspect ratio is FIXED and independent of the viewport — the frame LETTERBOXES
+ * (adds margin) rather than stretching, so the bottom-left "cheap and deadly"
+ * corner sits in the same place on desktop and portrait phone and the rightward
+ * retreat reads identically. These constants MIRROR the emitted artifact's
+ * coordinate space (`ch3.json` `frontier.axis` / `bowlerplane_buffer`): the
+ * economy/strike-rate lo/hi below MUST equal the pipeline's, exactly as
+ * WALLHEAT_NEUTRAL_BYTE mirrors the pipeline's wallheat pivot — if the buffer is
+ * re-encoded over a different range these move with it.
+ * ------------------------------------------------------------------------- */
+
+/** Economy display range (RPO) — the x axis. Mirrors bowlerplane byte-0 decode. */
+export const FRONTIER_ECON_LO = 4;
+export const FRONTIER_ECON_HI = 16;
+/** Bowling-strike-rate display range (balls per wicket) — the y axis. Mirrors byte-1. */
+export const FRONTIER_SR_LO = 8;
+export const FRONTIER_SR_HI = 60;
+/** The "seven-an-over" containment reference line (economy = 7). */
+export const FRONTIER_SEVEN = 7;
+/** Right/top edges of the bottom-left "cheap and deadly" home zone (econ, SR). */
+export const FRONTIER_HOME_ECON = 7;
+export const FRONTIER_HOME_SR = 24;
+/**
+ * Fixed world width : world height for the data box (viewport-independent,
+ * letterboxed). Owner-tunable (§5.2) — changing it keeps the letterbox invariant.
+ */
+export const FRONTIER_ASPECT = 1.15;
+/** Fraction of the frame the fixed-aspect box fills (letterbox margin + label room). */
+export const FRONTIER_FILL = 0.84;
+/** Per-bowler-season cloud jitter radius, as a fraction of the box (density texture). */
+export const FRONTIER_CLOUD = 0.014;
+
+export interface FrontierLayout {
+	/** world x at economy = FRONTIER_ECON_LO (the plot's left edge, "cheap") */
+	left: number;
+	/** world width spanning economy lo → hi */
+	width: number;
+	/** world y at strike-rate = FRONTIER_SR_LO (the plot's baseline, "fast") */
+	bottom: number;
+	/** world height spanning strike-rate lo → hi */
+	height: number;
+	/** economy display range (x) — mirrors the buffer decode */
+	econLo: number;
+	econHi: number;
+	/** bowling-strike-rate display range (y) — mirrors the buffer decode */
+	srLo: number;
+	srHi: number;
+	/** in-cloud x jitter half-width (density haze), world units */
+	cellHalfW: number;
+	/** in-cloud y jitter half-height (density haze), world units */
+	cellHalfH: number;
+	/** world x of the seven-an-over reference line (economy = FRONTIER_SEVEN) */
+	sevenX: number;
+	/** the bottom-left "cheap and deadly" home-zone box, world coords */
+	home: { x0: number; y0: number; x1: number; y1: number };
+	/** persistent axis end-anchor world positions (cheap/expensive on x; fast/slow on y) */
+	cheapX: number;
+	expensiveX: number;
+	fastY: number;
+	slowY: number;
+}
+
+/**
+ * Fixed-aspect, letterboxed frontier-plane box for the current frame — the
+ * largest box of the locked data aspect that fits, then centred. Scenes map the
+ * per-season Pareto edge / ghost trail / reference lines from `ch3.json` (raw
+ * economy + strike-rate units) into it via `frontierPoint`.
+ */
+export function computeFrontier(halfW: number, halfH: number): FrontierLayout {
+	const frameW = 2 * halfW * FRONTIER_FILL;
+	const frameH = 2 * halfH * FRONTIER_FILL;
+	let width = frameH * FRONTIER_ASPECT;
+	if (width > frameW) width = frameW;
+	const height = width / FRONTIER_ASPECT;
+	const left = -width / 2;
+	const bottom = -height / 2;
+
+	const econSpan = FRONTIER_ECON_HI - FRONTIER_ECON_LO;
+	const srSpan = FRONTIER_SR_HI - FRONTIER_SR_LO;
+	const xAt = (econ: number): number =>
+		left + ((Math.min(Math.max(econ, FRONTIER_ECON_LO), FRONTIER_ECON_HI) - FRONTIER_ECON_LO) / econSpan) * width;
+	const yAt = (sr: number): number =>
+		bottom + ((Math.min(Math.max(sr, FRONTIER_SR_LO), FRONTIER_SR_HI) - FRONTIER_SR_LO) / srSpan) * height;
+
+	return {
+		left,
+		width,
+		bottom,
+		height,
+		econLo: FRONTIER_ECON_LO,
+		econHi: FRONTIER_ECON_HI,
+		srLo: FRONTIER_SR_LO,
+		srHi: FRONTIER_SR_HI,
+		cellHalfW: width * FRONTIER_CLOUD,
+		cellHalfH: height * FRONTIER_CLOUD,
+		sevenX: xAt(FRONTIER_SEVEN),
+		home: { x0: left, y0: bottom, x1: xAt(FRONTIER_HOME_ECON), y1: yAt(FRONTIER_HOME_SR) },
+		cheapX: left,
+		expensiveX: left + width,
+		fastY: bottom,
+		slowY: bottom + height
+	};
+}
+
+/**
+ * World coordinate for a (economy, bowling-strike-rate) data point in the given
+ * frontier box — the EXACT mapping the shader uses (both clamped to the display
+ * range). Scenes call this to register the SVG Pareto edge, the ghost trail, the
+ * seven-an-over line and the axis anchors to the GL haze via `field.projectToCss`,
+ * so the annotation plane and the density haze can never drift. Pass raw units
+ * (economy in RPO, strike rate in balls-per-wicket) straight from `ch3.json`.
+ */
+export function frontierPoint(
+	f: FrontierLayout,
+	economy: number,
+	strikeRate: number
+): { x: number; y: number } {
+	const ex = (Math.min(Math.max(economy, f.econLo), f.econHi) - f.econLo) / (f.econHi - f.econLo);
+	const sy = (Math.min(Math.max(strikeRate, f.srLo), f.srHi) - f.srLo) / (f.srHi - f.srLo);
+	return { x: f.left + ex * f.width, y: f.bottom + sy * f.height };
+}
+
+/* ---------------------------------------------------------------------------
+ * Dismissal-rivers layout (Ch 3 subset-highlight, CONTRACT §16). The wicket
+ * subset streams OUT of the frontier clouds into a FLAT-BASELINE 100%-stacked
+ * band: one vertical strip per season group (laid contiguously left→right so
+ * the bands flow as continuous rivers), y = cumulative share 0 (baseline) → 1
+ * (top). Each strip is partitioned bottom→top into the dismissal-kind bands
+ * whose thicknesses are that season's kind shares. This is pure geometry (strip
+ * x's + the band box); the per-point stacked y-fraction and the pooled band
+ * label anchors are computed in field.ts from the setDismissals membership.
+ * ------------------------------------------------------------------------- */
+
+/** Fraction of the frame width the band box fills. */
+export const RIVERS_FILL_W = 0.9;
+/** Fraction of the frame height the band box fills (the 0→100% share axis). */
+export const RIVERS_FILL_H = 0.64;
+
+export interface RiversLayout {
+	/** world x of each group's season strip centre, indexed by gi (NaN = excluded) */
+	xs: number[];
+	/** the gi's that received a strip, in x order (IPL seasons then WPL seasons) */
+	gis: number[];
+	/** in-strip x jitter half-width (fills the strip so bands read continuous) */
+	stripHalfW: number;
+	/** world x of the band box left edge */
+	left: number;
+	/** world width of the band box (all strips) */
+	width: number;
+	/** world y at 0% share (the flat baseline) */
+	bottom: number;
+	/** world y at 100% share (the top) */
+	top: number;
+	/** world height spanning 0 → 100% share */
+	height: number;
+}
+
+/**
+ * Contiguous per-season strips across the full width (IPL block then WPL block,
+ * each season-sorted), filling a centred band box. No league gap — the bands
+ * flow as one river; the scene draws the season axis + the WPL split in SVG.
+ */
+export function computeRivers(groups: GroupMeta[], halfW: number, halfH: number): RiversLayout {
+	const ipl = groups.filter((g) => g.league === 'ipl').sort((a, b) => a.season - b.season);
+	const wpl = groups.filter((g) => g.league === 'wpl').sort((a, b) => a.season - b.season);
+	const ordered = [...ipl, ...wpl];
+
+	const width = 2 * halfW * RIVERS_FILL_W;
+	const left = -width / 2;
+	const height = 2 * halfH * RIVERS_FILL_H;
+	const bottom = -height / 2;
+	const slotW = width / Math.max(1, ordered.length);
+
+	const xs: number[] = new Array(groups.length).fill(NaN);
+	const gis: number[] = [];
+	ordered.forEach((g, i) => {
+		xs[g.gi] = left + (i + 0.5) * slotW;
+		gis.push(g.gi);
+	});
+
+	return {
+		xs,
+		gis,
+		stripHalfW: slotW * 0.46,
+		left,
+		width,
+		bottom,
+		top: bottom + height,
+		height
+	};
+}

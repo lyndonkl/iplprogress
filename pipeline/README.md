@@ -17,6 +17,7 @@ python3 pipeline/flatten.py \
   && python3 pipeline/entry.py \
   && python3 pipeline/re288.py \
   && python3 pipeline/wp.py \
+  && python3 pipeline/bowlerplane.py \
   && python3 pipeline/payoff_harness.py \
   && python3 pipeline/ledger.py \
   && python3 -m unittest discover -s pipeline/tests -q
@@ -24,12 +25,18 @@ python3 pipeline/flatten.py \
 
 Order matters: `flatten.py` emits the point stream + per-point attributes + columnar
 dataset + `matches.json` and writes `meta.json`; `scenes.py` emits `scenes/coldopen.json`
-+ `scenes/ch1.json` + `scenes/sandbox.json` (the R1b preset); `par.py` and `entry.py`
-emit the R2a engine tables under `engines/` (they read only the corpus + `canon`, never
-an R1 artifact); `re288.py` and `wp.py` are the **parallel-track engines #2/#3** (RE288
-run-expectancy surfaces + the win-probability grids / Leverage Index) — they also read
-only the corpus + `canon`, emit `engines/re288.json` + `engines/wp_grid.json`, and are
-consumed by **R3b** (not by any R2a scene); `payoff_harness.py` emits `payoff/ch1.json`;
++ `scenes/ch1.json` + `scenes/sandbox.json` (the R1b preset) + `scenes/ch2.json` +
+**`scenes/ch3.json`** (R2b — it imports `bowlerplane.build()` for the bowler-season
+frontier, so the JSON frontier and the buffer coordinates are one computation); `par.py`
+and `entry.py` emit the R2a engine tables under `engines/` (they read only the corpus +
+`canon`, never an R1 artifact); `re288.py` and `wp.py` are the **parallel-track engines
+#2/#3** (RE288 run-expectancy surfaces + the win-probability grids / Leverage Index) —
+they also read only the corpus + `canon`, emit `engines/re288.json` + `engines/wp_grid.json`,
+and are consumed by **R3b** (not by any R2a scene); `bowlerplane.py` (R2b, engine #1
+family) emits the **`bowlerplane.u8`** per-point buffer (the Chapter-3 economy x
+strike-rate morph coordinate) and registers it in `meta.json` — it must run **after**
+`flatten`/`scenes` (which write `meta.json`) so the manifest stays byte-deterministic;
+`payoff_harness.py` emits `payoff/ch1.json`;
 `ledger.py` audits everything on disk against the blueprint §2 budgets. The harness and
 the ledger exit non-zero on failure. The whole build runs in seconds and is **byte-for-byte
 deterministic** (gzip level 9, `mtime=0`; JSON compact, new artifacts key-sorted) —
@@ -41,7 +48,8 @@ verified by rebuilding and diffing checksums.
 |---|---|
 | `canon.py` | Engine #4 canonicalization: 62 raw venue strings → 37 canonical grounds, franchise renames (DD→DC, KXIP→PBKS, RCB Bangalore→Bengaluru in both leagues, Rising Pune unified; Gujarat **Lions ≠ Titans ≠ Giants**), season normalization (`'2007/08'`→2008 … — always the year the cricket was played, verified equal to `dates[0]` year for all 1331 matches), D/L flag, super-over innings detection, **and the R1a 20-franchise id table** (`TEAMS`/`team_id`): league-scoped ids 0–19 (IPL's 15 sorted by name, then the WPL's 5 — the WPL DC/MI/RCB are distinct franchises with their own ids), approximate-brand kit colors, `active` flags (Deccan Chargers, Gujarat Lions, Kochi, Pune Warriors, Rising Pune Supergiant are `false`). Every lookup raises `KeyError` on unmapped input. |
 | `flatten.py` | One chronological pass emitting all per-point contract artifacts (see below). |
-| `scenes.py` | R1a/R1b scene aggregates: `scenes/coldopen.json` (You-Draw-It truth series + corpus facts), `scenes/ch1.json` (ignition, out-rate, defiers, sixes, aerial ledger, WPL beat), and `scenes/sandbox.json` (R1b minimal-bowl preset + team/season facets + tap-a-ball tooltip roster). |
+| `scenes.py` | R1a/R1b/R2a/R2b scene aggregates: `scenes/coldopen.json` (You-Draw-It truth series + corpus facts), `scenes/ch1.json` (ignition, out-rate, defiers, sixes, aerial ledger, WPL beat), `scenes/sandbox.json` (R1b minimal-bowl preset + team/season facets + tap-a-ball tooltip roster), `scenes/ch2.json` (the anchor elegy), and **`scenes/ch3.json`** (R2b "The Counterrevolution": the Attack-Containment frontier + Pareto hull + Ashwin ghost trail, Dot+, the Dismissal-DNA rivers, the Death-Wide Tax, the two dot-grid finals, the middle-overs crack ratio, the WPL two-clocks beat, the 20 gravity-defier payoff cards, and the footnote layer). Imports `bowlerplane.build()` for the bowler-season data. |
+| `bowlerplane.py` | **R2b, engine #1 family** — the bowler-season economy x strike-rate plane. Emits the per-point buffer `bowlerplane.u8` (2 bytes/point in field order: byte 0 = bowler-season economy, byte 1 = bowling strike rate) AND exposes `build()` (the bowler-season aggregates + the phase-economy par + the phasepar-convention batter marginal) consumed by `scenes.build_ch3`. Economy = (batter runs + wides + no-balls) per 6 legal balls, byes/legbyes excluded; strike rate = legal balls per bowler-credited wicket. |
 | `par.py` | **Engine #1** (R2a) — par baselines / SR+ family. Emits `engines/phasepar.json` (season × over-phase par, the Ch 2 anchor baseline + par worm), `engines/par.json` (the shrunk + calibrated venue × innings conditional model + the anchor-extinction / sub-120-occupancy validation roll-ups), and `engines/srplus.json` (per-batter-season SR+). See the model + thresholds section below. |
 | `entry.py` | **Engine #5 full** (R2a) — entry states / derived batting positions. Emits `engines/entry.json`: one row per batter-innings with entry ball-index, wickets fallen, innings#, derived batting position, chase RRR at entry, and the innings outcome. |
 | `re288.py` | **Engine #2** (parallel track, consumed R3b) — RE288 run-expectancy surfaces. Emits `engines/re288.json`: expected first-innings runs-to-come on the (overs-bowled × wickets-lost) grid, per era band + evidence-masked pooled WPL, weighted-isotonic-smoothed so runs-to-come is monotone in both axes. Gate-tested by `tests/test_engines.py`. |
@@ -97,6 +105,8 @@ index, over, delivery index):
 | `engines/entry.json` **(R2a)** | Engine #5 entry states: columnar arrays over 20,488 batter-innings — `{league (0/1), season, match_index, innings, batter (dict-coded), position, entry_ball (legal-ball index), wickets, rrr (chases only, else null), balls_faced, runs, dismissed}` + a `batter` names dict. |
 | `engines/re288.json` **(engine #2, R3b)** | RE288 run-expectancy surfaces. Per surface (5 IPL era bands + pooled evidence-masked WPL) a 20×10 grid `re[o][w]` = expected first-innings runs-to-come from `o` overs bowled, `w` down (runs.total, extras included), first innings only, non-D/L. Weighted-isotonic-smoothed → monotone non-increasing in both wickets and overs; each cell carries its raw `n`; WPL cells with `n < 15` carry `masked=1`. Each surface ships a `calibration` block (pooled predicted == actual). |
 | `engines/wp_grid.json` **(engine #3, R3b)** | Win-probability lookup grids + Leverage Index. `second_innings.surfaces` — per surface (5 era bands + `ipl pooled` + evidence-masked WPL) a 20×10×10 grid `wp[overs_left][wickets_in_hand][rrr_bucket]` = P(chase win), monotone non-increasing in required rate & non-decreasing in wickets; the pooled surface also carries `leverage_index`. `first_innings_defend` — P(bat-first win \| final-total bucket) per era, monotone in total. `calibration` — the binding reliability table + the raw era anchor. Built empirically (a lookup, never a live model), target.overs==20, non-D/L. |
+| `scenes/ch3.json` **(R2b)** | Chapter 3 "The Counterrevolution". `frontier` (the Attack-Containment plane: `under7` share per era + season, the per-league-season Pareto `hull`, the Ashwin `ghost_trail`, the refuted econ~SR `correlation`, and the `axis` encoding the buffer shares), `dot_plus` (season dot rate + Dot+ leaderboard + dot-scarcity index), `dismissal_dna` (era shares + per-season `rivers` counts), `death_wide_tax` (per-season death wides/100 + the doubling), `dot_grid` (the 2009 + 2026 Finals as 120-cell outcome grids), `crack_ratio` (middle-overs, per era), `wpl_beat` (the two clocks), `gravity_defiers` (20 franchise True-Economy cards), `footnotes` (True Economy 7.79→9.38, True Wickets/24, Phase Fingerprint, FIB, the refuted correlation, conventions), and `bowlerplane_buffer` (the `bowlerplane.u8` decode spec). |
+| `bowlerplane.u8` **(R2b)** | Per-point buffer, **2 bytes/point** in the field point order (season-blocked, super overs excluded — identical to the other buffers). Byte 0 = the delivery's bowler-season economy, quantized linearly over [4.0, 16.0] RPO → 0..254 (clamped); byte 1 = its bowling strike rate over [8.0, 60.0] legal-balls-per-wicket → 0..254 (clamped), `255` = the "no strike rate" sentinel (the bowler-season took no bowler-credited wicket). Lets the field condense every ball toward its bowler-season's coordinate on the economy × strike-rate plane (Ch 3's controlling morph). Wides/no-balls carry their bowler-season coordinate like any delivery; every delivery has a bowler, so there are no non-bowler deliveries. Decode: `economy = 4 + b0/254*12`; `strike_rate = 8 + b1/254*52` (b1 < 255). |
 | `ledger.json` | the payload audit (build report, excluded from its own budget math) |
 
 ## R1a recipe pins (metric definitions that reconcile with the catalog teasers)
@@ -239,6 +249,63 @@ spot check of the 2019 IPL Final.
   (SR convention), `runs` (`runs.batter`), `dismissed` (a real dismissal of this batter
   fell — retired hurt/out excluded).
 
+## Chapter 3 recipe pins (R2b — "The Counterrevolution")
+
+Every number below is recounted independently by `tests/test_r2b.py` and, where the
+catalog gives a teaser, reconciled **exactly** (the pipeline artifact is authoritative).
+
+- **Conventions.** Economy = (batter runs + wides + no-balls) per 6 **legal** balls,
+  byes/legbyes excluded (project-wide). Legal ball = not a wide and not a no-ball. Dot =
+  legal ball with `runs.total == 0`. Strike rate = legal balls per **bowler-credited**
+  wicket (caught, bowled, lbw, stumped, caught-and-bowled, hit-wicket; **not** run outs
+  or retirements). Over-phases: powerplay 1-6, middle 7-15, death 16-20.
+- **Attack-Containment frontier — economy under 7.0** (bowler-seasons ≥ 90 legal balls):
+  IPL 2008-10 **49 / 169 = 29.0%** → 2023-26 **4 / 267 = 1.5%** ✅ (the catalog's "49 of
+  169 (29%)" → "4 of 267 (1%)", exact on numerator, denominator and share). The 90-ball
+  floor is what reproduces those exact counts.
+- **The refuted econ~SR correlation:** Pearson r across qualifying bowler-seasons is weakly
+  **positive**: IPL 2008-10 **+0.12** → 2023-26 **+0.03**; WPL **+0.34** ✅ exact. The
+  hull's retreat carries the story, not the correlation.
+- **Dot rate (Dot+ backdrop):** IPL 2008-10 **37.6%** → 2023-26 **33.0%**; WPL **38.5%**
+  (≈ IPL 2009) ✅ exact. Dot+ leaderboard (≥ 200 legal balls, season × over-number
+  baseline) leads with Narine-2012 (142.6), Bumrah-2024/25, Rashid-2020 — elite dot
+  manufacture (Dot+ 130+).
+- **Dismissal DNA** (shares over **bowler-credited** dismissals — run outs/retirements
+  excluded from the denominator — with "caught" **excluding** caught-and-bowled): bowled+lbw
+  **27.4% → 21.3%**, caught **65.2% → 74.0%**, stumped **4.2% → 1.9%** ✅ (catalog
+  27.4/65.2/4.2 → 21.3/74.1/1.9); WPL stumped **6.8%** ✅. That exact cut (bowler-credited
+  denominator, caught-minus-c&b) is what makes all three teasers reproduce at once.
+- **Death-Wide Tax:** death-over (16-20) wides per 100 legal balls **doubled** — IPL 2008-10
+  **3.13** → 2023-26 **6.45** (×2.06); WPL just **2.69** (the wide-yorker arms race is a
+  men's-league phenomenon). These are the recount; the catalog's ≈3.3/6.7/2.8 are the same
+  wide-delivery-per-100-legal metric on an earlier snapshot (the WPL 2.69≈2.8 match confirms
+  the delivery-count basis over a wide-runs basis).
+- **Middle-overs crack ratio** = P(wicket after 3+ straight dots) / P(wicket after a scoring
+  ball): WPL **1.18** (above 1 — dots still buy wickets) vs modern IPL **0.81** (below 1 —
+  the IPL defused them), IPL 2008-10 **0.84**. Story-exact (catalog WPL 1.11 / IPL 0.84);
+  the level is definition-sensitive, so the tests assert WPL > 1 > IPL-recent, not a constant.
+- **True Economy (the gravity-defier payoff):** par = the league-season economy for the
+  bowler-season's exact legal-ball phase mix (a death specialist priced against death par);
+  TrueEcon = par − actual. Best per franchise (all 20): MI **JJ Bumrah 2024 (+3.22)**, SRH
+  **Rashid Khan 2020 (+2.52)**, KKR **SP Narine 2026 (+3.00)**; WPL cards carry a designed
+  short-sample flag. League bowler-charged economy rose **7.79 → 9.38** RPO ✅ (catalog exact).
+- **Dot-grid finals** (each a full 120-legal-ball first innings, dot rate at its season's
+  average, so the erosion is honest): **2009 Final** Deccan Chargers 47 dots (39.2% ≈ season
+  39.1%) vs **2026 Final** Gujarat Titans 38 dots (31.7% ≈ season 32.7%). Resolved by
+  (league, season, stage == "Final"), never a hard-coded index.
+- **Footnotes.** FIB drift caught **60.0% → 72.6%**, run outs **12.1% → 5.2%** ✅ (catalog
+  59.9/72.3, 12.0/5.3). Phase Fingerprint is definition-sensitive: the shipped recompute
+  (death share ≥ 2× league death availability, min 60 balls) gives 0% (2008) → a mid-era
+  peak → **0% (2026)** — the emergence-then-slump shape the catalog reports (its 0→17.3,
+  peak 20.6 lands higher under its own availability recipe; both directions ship, the
+  catalog value flagged as a reference).
+- **Engine #1 consumption (gate).** True Economy's par is engine #1's phase-par family
+  flipped to the bowling side. `bowlerplane.build` recomputes the batting marginal (batter
+  runs per ball faced — wides excluded, no-balls counted, engine #1's exact denominator) and
+  `test_r2b` asserts it reconciles **byte-for-byte** with `engines/phasepar.json`
+  `expected_runs_per_ball` for every (league, season, phase), so Ch 3 can never drift from
+  engine #1.
+
 ## Budgets (ledger) — actuals
 
 - **Cold-open critical set** (`meta.json` + `groups.json` + `group_ids.u16` +
@@ -262,7 +329,13 @@ spot check of the 2019 IPL Final.
   9,694, phasepar.json 1,305. Parallel track (engine #2/#3, consumed R3b): wp_grid.json
   33,050, re288.json 6,632 — the two new engines add only ~40 KB gz, leaving ~1.8 MB of
   headroom in the bucket.
-- Full read-through ≤ 25 MB gz → actual ~1.30 MB gz (R2a engines + the parallel track).
+- **Chapter 3** (`scenes/ch3.json` + `bowlerplane.u8`, lazy-loaded at Ch 3 entry): ≤ 2 MB gz
+  → actual **77,377 B gz**. bowlerplane.u8 632,398 B raw / **67,898 B gz** (2 bytes × 316,199
+  points; the bowler-season coordinate runs constant within a bowler's spell, so it gzips
+  hard), ch3.json **9,479 B gz** (frontier hull + ghost trail + Dot+/DNA/death-wide series +
+  the two 120-cell grids + 20 gravity-defier cards + footnotes).
+- Full read-through ≤ 25 MB gz → actual ~1.58 MB gz (R2a engines + the parallel track + the
+  R2b Ch 3 buffer).
 - The `ledger.py` rows enumerate exactly the shipped filenames (no phantom
   `draw/truth.json` / `ch1/outrate.json` rows — those never shipped; the R1a scene
   data lives in `scenes/coldopen.json` + `scenes/ch1.json`).
@@ -270,7 +343,7 @@ spot check of the 2019 IPL Final.
 ## Tests
 
 ```sh
-python3 -m unittest discover -s pipeline/tests -q     # 160 tests
+python3 -m unittest discover -s pipeline/tests -q     # 193 tests
 ```
 
 - `test_canon.py` — canonicalization tables exhaustive over the corpus in **both**
@@ -345,6 +418,24 @@ python3 -m unittest discover -s pipeline/tests -q     # 160 tests
   reproduced from raw; the defend curve monotone in total and 170-189 repriced **~0.70 →
   ~0.40** (catalog 74% → 38%); the Leverage Index present, non-negative, endgame cells > 3.
   Both engine files on-disk == a fresh `build_doc()` byte-for-byte.
+
+- `test_r2b.py` **(R2b, Chapter 3)** — `scenes/ch3.json` + `bowlerplane.u8` against a fully
+  independent season-blocked recount (own economy/strike-rate/dismissal classifiers): the
+  frontier's economy-under-7 counts **exact** (49/169 → 4/267) and matched to the recount per
+  era; the refuted correlation (+0.12/+0.03/+0.34); the Pareto hull is a real lower-left
+  staircase (economy strictly descends as strike rate rises); the Ashwin ghost trail spans
+  ≥ 12 frontiers with economy rising end-to-end; dot rate 37.6/33.0/38.5 and Dot+ leaderboard;
+  Dismissal DNA 27.4/65.2/4.2 → 21.3/74.0/1.9 (bowler-credited denom, caught-excl-c&b) matched
+  to the recount; death wides doubling 3.13 → 6.45 (WPL 2.69); crack ratio WPL > 1 > IPL-recent,
+  matched to the recount; the two dot-grid finals (120 cells each, dot% self-consistent, 2009
+  darker than 2026); 20 gravity-defier cards (all franchise ids, WPL small-sample flagged,
+  TrueEcon = par − actual, Bumrah/Rashid headliners); footnotes (True Economy 7.79/9.38, FIB
+  60.0/72.6 + 12.1/5.2, Phase-Fingerprint emergence-then-slump); the **buffer contract**
+  (length == 2 × n_points, deterministic re-encode, the SR sentinel count equals the balls in
+  0-wicket bowler-seasons and the economy byte never sentinels, a coordinate round-trip for MI
+  Bumrah-2024); the **engine #1 gate** (Ch 3's batter marginal == `engines/phasepar.json`
+  `expected_runs_per_ball` for every (league, season, phase)); and `ch3.json` on-disk ==
+  `ch3_doc(build_ch3())` byte-for-byte.
 
 Snapshot constants live at the top of each test file; a new Cricsheet drop that changes
 the corpus must update them consciously.

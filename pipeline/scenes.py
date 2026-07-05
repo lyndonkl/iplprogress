@@ -54,6 +54,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import canon
 import flatten
 import wallheat
+import bowlerplane
 
 SCENES_DIR = canon.OUT_ROOT / "scenes"
 
@@ -623,12 +624,17 @@ TOOLTIP_FIELDS = [
 # IPL Final, Mumbai Indians beat Chennai Super Kings by 1 run — Malinga's final
 # over. Resolved robustly by (league, season, stage, teams) with a margin
 # cross-check, never by a hard-coded match_index.
+# NOTE: these two strings are kept in sync with the committed, voice-guide
+# rewrite of scenes/sandbox.json (commit 0303051 "Rewrite all user-facing copy
+# to the voice guide"). That commit edited the emitted JSON directly without
+# updating this source, so a plain rebuild reverted it; syncing the source here
+# restores byte-identity AND removes the em dashes the voice guide forbids.
 PRESET_LABEL = (
-    "2019 IPL Final — Mumbai Indians beat Chennai Super Kings by 1 run"
+    "2019 IPL Final: Mumbai Indians beat Chennai Super Kings by 1 run"
 )
 PRESET_BLURB = (
-    "Mumbai Indians defend nine off Lasith Malinga's final over to beat "
-    "Chennai Super Kings by a single run — the closest final in IPL history."
+    "Chennai need nine off Lasith Malinga's final over. Mumbai hold on to win "
+    "by a single run, the closest final in IPL history."
 )
 PRESET_TEAMS = frozenset({"Mumbai Indians", "Chennai Super Kings"})
 
@@ -1568,6 +1574,782 @@ def ch2_doc(acc) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# R2b — Chapter 3 "The Counterrevolution" (scenes/ch3.json)
+# ---------------------------------------------------------------------------
+#
+# Bowling's answer to the batting explosion. Reuses the SR+/par engine (#1)
+# family: the era-honest currency here is True Economy (economy vs its era's
+# phase par), the bowling mirror of SR+. Two authoritative passes:
+#
+#   * bowlerplane.build() — the bowler-season economy x strike-rate plane (also
+#     the source of the bowlerplane.u8 per-point buffer, so the JSON frontier
+#     and the buffer coordinates are the SAME numbers by construction).
+#   * build_ch3() — the season/era aggregates that are NOT bowler-season-keyed:
+#     dot rate, Dismissal DNA, the Death-Wide Tax, the middle-overs crack ratio,
+#     the two dot-grid finals, and the Phase Fingerprint footnote.
+#
+# CONVENTIONS (documented project-wide; match the metrics-catalog recipes):
+#   economy = (batter runs + wides + no-balls) per 6 LEGAL balls, byes/legbyes
+#     excluded; strike rate = legal balls per bowler-credited wicket; a legal
+#     ball = not a wide and not a no-ball; dot = legal ball with runs.total==0.
+#   Dismissal DNA shares are over BOWLER-CREDITED dismissals (run outs and
+#   retirements excluded from the denominator), "caught" excludes caught-and-
+#   bowled — the exact cut that reproduces the catalog's 27.4/65.2/4.2.
+#
+# ENGINE #1 CONSUMPTION: True Economy's par is engine #1's phase-par family,
+# flipped to the bowler-charged convention. build_ch3 recomputes the batting
+# marginal (batter runs per ball faced, wides excluded / no-balls counted —
+# engine #1's exact denominator) and tests/test_r2b.py asserts it reconciles
+# byte-for-byte with engines/phasepar.json, so Ch 3 can never drift from
+# engine #1.
+
+CH3_FINGERPRINT_MIN_BALLS = 60      # min legal balls to classify a bowler-season phase
+CH3_FINGERPRINT_RATIO = 2.0         # death share / league death availability >= 2x => specialist
+CH3_CRACK_K = 3                     # k >= 3 consecutive dots = "under pressure"
+# The two dot-grid exemplar innings (each season's Final, first innings). Chosen so
+# each Final's first-innings dot rate sits NEAR its era's pooled mean (early 37.6,
+# modern 33.0), keeping the visual gap honest: the 2010 Final (36.7%) replaces the
+# 2009 Final (39.2%, a 7.5pp gap vs 2026's 31.7% — 63% larger than the honest 4.6pp
+# league shift the scene cites); 2010 vs 2026 is a ~5pp gap, close to the real shift.
+CH3_DOTGRID_FINALS = (("ipl", 2010), ("ipl", 2026))
+CH3_DOTPLUS_TOP = 12                # Dot+ leaderboard length
+# Bowler-credited dismissal kinds (shared with bowlerplane).
+CH3_BOWLER_WKT = bowlerplane.BOWLER_WICKET_KINDS
+
+
+def _pearson(xs, ys) -> float:
+    n = len(xs)
+    if n < 2:
+        return 0.0
+    mx = sum(xs) / n
+    my = sum(ys) / n
+    cov = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    sx = (sum((x - mx) ** 2 for x in xs)) ** 0.5
+    sy = (sum((y - my) ** 2 for y in ys)) ** 0.5
+    return cov / (sx * sy) if sx and sy else 0.0
+
+
+def _pareto_hull(points: list) -> list:
+    """Pareto-efficient set for MINIMIZING both economy and strike rate (the
+    lower-left staircase — the best economy achievable at each strike rate).
+    points = [(econ, sr, bowler, wkts, balls)]; ties broken deterministically.
+    """
+    pts = sorted(points, key=lambda p: (p[0], p[1], p[2]))  # econ asc, then sr, then name
+    hull = []
+    best_sr = float("inf")
+    for p in pts:
+        # scanning by ascending economy: p is efficient iff no earlier (lower or
+        # equal economy) point had a strictly lower strike rate.
+        if p[1] < best_sr:
+            hull.append(p)
+            best_sr = p[1]
+    return sorted(hull, key=lambda p: (p[1], p[0]))  # emit sorted by strike rate
+
+
+def build_ch3(data_root: Path = canon.DATA_ROOT) -> dict:
+    """The season/era corpus pass for Chapter 3 (separate from build()/build_ch2
+    so R1/R2a scene bytes stay byte-identical)."""
+    season_dot = defaultdict(lambda: [0, 0])          # (lg, ss) -> [dots, legal]
+    dna_season = defaultdict(lambda: defaultdict(int))  # (lg, ss) -> {kind: count}
+    death = defaultdict(lambda: [0, 0])               # (lg, ss) -> [wide deliveries, death legal]
+    crack = defaultdict(lambda: [0, 0, 0, 0])         # bandkey -> [k0 balls, k0 wkts, k>=3 balls, k>=3 wkts]
+    wpl_stumped = defaultdict(lambda: [0, 0])         # ss -> [stumped, bowler-credited total]
+    fp_bowler = defaultdict(lambda: [0, 0])           # (lg, ss, bowler) -> [death legal, total legal]
+    fp_league = defaultdict(lambda: [0, 0])           # (lg, ss) -> [death legal, total legal]
+    dotgrid = {}                                      # (lg, ss) -> innings record (first innings of the Final)
+
+    for match_index, (_date, _mid, league, path) in enumerate(
+        flatten.sorted_match_files(data_root)
+    ):
+        with open(path) as fh:
+            match = json.load(fh)
+        info = match["info"]
+        season = canon.canon_season(info)
+        bk = band_key(league, season)
+        is_final = flatten.match_stage(info) == "Final"
+        want_grid = (league, season) in CH3_DOTGRID_FINALS and is_final
+        teams = [canon.canon_team(t) for t in info["teams"]]
+        venue = canon.canon_venue(info["venue"])
+
+        innings_no = 0
+        for innings in match.get("innings", []):
+            if canon.is_super_over(innings):
+                continue
+            innings_no += 1
+            bat = canon.canon_team(innings["team"])
+            others = [t for t in teams if t != bat]
+            opponent = others[0] if len(others) == 1 else "?"
+            run_dots = 0  # consecutive legal-ball dots so far in this innings
+            grid_outcomes, grid_wickets = [], []
+            grab = want_grid and innings_no == 1
+            for over in innings["overs"]:
+                ph = phase_of(over["over"])  # 0 pp / 1 middle / 2 death
+                for dl in over["deliveries"]:
+                    ex = dl.get("extras", {})
+                    wide = "wides" in ex
+                    noball = "noballs" in ex
+                    legal = not (wide or noball)
+                    total = dl["runs"]["total"]
+                    is_wkt = bool(dl.get("wickets"))
+                    if legal:
+                        season_dot[(league, season)][1] += 1
+                        if total == 0:
+                            season_dot[(league, season)][0] += 1
+                        fp_bowler[(league, season, dl["bowler"])][1] += 1
+                        fp_league[(league, season)][1] += 1
+                        if ph == 2:
+                            death[(league, season)][1] += 1
+                            fp_bowler[(league, season, dl["bowler"])][0] += 1
+                            fp_league[(league, season)][0] += 1
+                        if ph == 1:  # crack ratio: middle overs only
+                            c = crack[bk]
+                            if run_dots == 0:
+                                c[0] += 1
+                                if is_wkt:
+                                    c[1] += 1
+                            elif run_dots >= CH3_CRACK_K:
+                                c[2] += 1
+                                if is_wkt:
+                                    c[3] += 1
+                        if grab:
+                            grid_outcomes.append(flatten.outcome_class(dl))
+                            grid_wickets.append(1 if is_wkt else 0)
+                        run_dots = run_dots + 1 if total == 0 else 0
+                    if ph == 2 and wide:
+                        death[(league, season)][0] += 1
+                    for w in dl.get("wickets", []):
+                        k = w["kind"]
+                        if k in RETIRED_KINDS:
+                            continue
+                        dna_season[(league, season)][k] += 1
+                        if league == "wpl":
+                            wpl_stumped[season][1] += 1
+                            if k == "stumped":
+                                wpl_stumped[season][0] += 1
+            if grab:
+                dots = grid_outcomes.count(flatten.OUT_DOT)
+                dotgrid[(league, season)] = {
+                    "match_index": match_index,
+                    "batting_team": bat,
+                    "opponent": opponent,
+                    "season": season,
+                    "date": str(info["dates"][0]),
+                    "venue": venue,
+                    "city": canon.GROUND_CITY[venue],
+                    "stage": "Final",
+                    "legal_balls": len(grid_outcomes),
+                    "dots": dots,
+                    "dot_pct": r1(100.0 * dots / len(grid_outcomes)) if grid_outcomes else None,
+                    "outcomes": grid_outcomes,
+                    "wickets": grid_wickets,
+                }
+
+    return {
+        "season_dot": season_dot,
+        "dna_season": dna_season,
+        "death": death,
+        "crack": crack,
+        "wpl_stumped": wpl_stumped,
+        "fp_bowler": fp_bowler,
+        "fp_league": fp_league,
+        "dotgrid": dotgrid,
+        "bp": bowlerplane.build(data_root),
+    }
+
+
+# --- Chapter 3 sections ---------------------------------------------------
+
+
+def _qualifying_bowler_seasons(bp):
+    """[(league, season, bowler, econ, sr, wkts, balls)] with >= 90 legal balls."""
+    out = []
+    for (lg, ss, bowler), rec in bp["bowler_seasons"].items():
+        if rec.legal < bowlerplane.MIN_LEGAL_BALLS:
+            continue
+        out.append((lg, ss, bowler, bowlerplane.economy(rec),
+                    bowlerplane.strike_rate(rec), rec.wkts, rec.legal))
+    return out
+
+
+def frontier_section(bp) -> dict:
+    qual = _qualifying_bowler_seasons(bp)
+
+    # (a) economy-under-7 share per era band + per season
+    era = {k: [0, 0] for k in BAND_KEYS}
+    per_season = defaultdict(lambda: [0, 0])
+    for lg, ss, _b, econ, _sr, _w, _n in qual:
+        bk = band_key(lg, ss)
+        era[bk][1] += 1
+        per_season[(lg, ss)][1] += 1
+        if econ < 7.0:
+            era[bk][0] += 1
+            per_season[(lg, ss)][0] += 1
+    under7 = {
+        "definition": "share of bowler-seasons (>= 90 legal balls) with economy under 7.0 runs per over",
+        "era_bands": {
+            k: {"under7": era[k][0], "qualifiers": era[k][1],
+                "pct": r1(100.0 * era[k][0] / era[k][1]) if era[k][1] else None}
+            for k in BAND_KEYS
+        },
+        "per_season": [
+            {"league": lg, "season": ss, "under7": v[0], "qualifiers": v[1],
+             "pct": r1(100.0 * v[0] / v[1]) if v[1] else None}
+            for (lg, ss), v in sorted(per_season.items())
+        ],
+    }
+
+    # (b) Pareto hull per league-season (drop 0-wicket seasons — no SR axis)
+    by_ls = defaultdict(list)
+    for lg, ss, b, econ, sr, w, n in qual:
+        if sr is not None:
+            by_ls[(lg, ss)].append((econ, sr, b, w, n))
+    hull_seasons = []
+    for (lg, ss), pts in sorted(by_ls.items()):
+        hull = _pareto_hull(pts)
+        hull_seasons.append({
+            "league": lg, "season": ss,
+            "points": [
+                {"economy": r2(e), "strike_rate": r1(s), "bowler": b,
+                 "wickets": w, "balls": n}
+                for e, s, b, w, n in hull
+            ],
+        })
+
+    # (c) ghost trail — one great across every frontier
+    gl, gb = bowlerplane.GHOST_BOWLER
+    trail = []
+    for lg, ss, b, econ, sr, w, n in sorted(qual, key=lambda q: q[1]):
+        if lg == gl and b == gb:
+            trail.append({"season": ss, "economy": r2(econ),
+                          "strike_rate": r1(sr) if sr is not None else None,
+                          "wickets": w, "balls": n})
+
+    # (d) the refuted econ~SR correlation, per era
+    corr = {}
+    pair = defaultdict(lambda: ([], []))
+    for lg, ss, _b, econ, sr, _w, _n in qual:
+        if sr is not None:
+            pair[band_key(lg, ss)][0].append(econ)
+            pair[band_key(lg, ss)][1].append(sr)
+    for k in BAND_KEYS:
+        e, s = pair[k]
+        corr[k] = {"r": round(_pearson(e, s), 2), "n": len(e)}
+
+    return {
+        "definition": (
+            "Every bowler-season (>= 90 legal balls) is a point on the economy x "
+            "strike-rate plane. Economy = (batter runs + wides + no-balls) per 6 "
+            "legal balls (byes/legbyes excluded). Strike rate = legal balls per "
+            "bowler-credited wicket. Both are better when LOWER, so the Pareto "
+            "hull is the lower-left edge and the containment corner (economy < 7) "
+            "is the left edge. The hull retreats season by season."
+        ),
+        "axis": {
+            "economy": {"lo": bowlerplane.ECON_LO, "hi": bowlerplane.ECON_HI,
+                        "unit": "runs per over", "better": "lower"},
+            "strike_rate": {"lo": bowlerplane.SR_LO, "hi": bowlerplane.SR_HI,
+                            "unit": "legal balls per wicket", "better": "lower",
+                            "sentinel": bowlerplane.SENTINEL,
+                            "sentinel_meaning": "bowler-season took no bowler-credited wicket"},
+            "buffer": "bowlerplane.u8 — byte 0 = economy, byte 1 = strike rate; see bowlerplane_buffer",
+        },
+        "under7": under7,
+        "hull": {
+            "note": "Pareto-efficient bowler-seasons (best economy for each strike rate), per league-season, sorted by strike rate.",
+            "seasons": hull_seasons,
+        },
+        "ghost_trail": {
+            "bowler": gb, "league": gl,
+            "note": "one great bowler's drift across every frontier — even elite economy rises with the tide",
+            "points": trail,
+        },
+        "correlation": {
+            "definition": "Pearson r between economy and strike rate across qualifying bowler-seasons — the refuted sub-claim (weakly positive, not negative); the hull carries the story, not the correlation.",
+            "era_bands": corr,
+        },
+    }
+
+
+def dot_plus_section(acc3) -> dict:
+    bp = acc3["bp"]
+    season_dot = acc3["season_dot"]
+
+    def dot_pct(lg, ss):
+        d, l = season_dot[(lg, ss)]
+        return r1(100.0 * d / l) if l else None
+
+    def era_dot(lg, lo, hi):
+        d = sum(season_dot[(lg, s)][0] for s in range(lo, hi + 1))
+        l = sum(season_dot[(lg, s)][1] for s in range(lo, hi + 1))
+        return r1(100.0 * d / l) if l else None
+
+    per_season = [
+        {"league": lg, "season": ss,
+         "dot_pct": dot_pct(lg, ss), "legal_balls": season_dot[(lg, ss)][1]}
+        for lg in ("ipl", "wpl")
+        for ss in (canon.IPL_SEASONS if lg == "ipl" else canon.WPL_SEASONS)
+    ]
+
+    # Dot+ leaderboard (era-normalized dot manufacturing, >= 200 legal balls)
+    rows = []
+    for (lg, ss, bowler), rec in bp["bowler_seasons"].items():
+        if rec.legal < bowlerplane.DOTPLUS_MIN_BALLS:
+            continue
+        dp = bowlerplane.dot_plus(rec, bp["so_dot"])
+        if dp is None:
+            continue
+        rows.append({"dot_plus": r1(dp), "league": lg, "season": ss,
+                     "bowler": bowler, "dots": rec.dots,
+                     "expected_dots": r1(bowlerplane.expected_dots(rec, bp["so_dot"])),
+                     "balls": rec.legal})
+    rows.sort(key=lambda r: (-r["dot_plus"], r["league"], r["season"], r["bowler"]))
+
+    ref = era_dot("ipl", 2008, 2010)
+    scarcity = [
+        {"league": lg, "season": ss,
+         "dot_scarcity_index": r1(100.0 * ref / dot_pct(lg, ss))
+         if dot_pct(lg, ss) else None}
+        for lg in ("ipl", "wpl")
+        for ss in (canon.IPL_SEASONS if lg == "ipl" else canon.WPL_SEASONS)
+    ]
+
+    return {
+        "definition": (
+            "Dot = legal ball with no run at all (runs.total == 0). Dot+ = 100 x "
+            "actual dots / dots an average bowler would make with the same season "
+            "x over-number mix (>= 200 legal balls). 100 = league average of its "
+            "own time; dots are a deflating currency, so a high 2026 Dot+ is a "
+            "harder achievement than the same rate in 2009."
+        ),
+        "era_headline": {
+            "ipl_2008_2010": ref,
+            "ipl_2023_2026": era_dot("ipl", 2023, 2026),
+            "wpl_2023_2026": era_dot("wpl", 2023, 2026),
+        },
+        "per_season": per_season,
+        "dot_scarcity": {
+            "reference": "IPL 2008-2010 dot rate = index 100; higher = a dot is scarcer (more valuable) than the early IPL",
+            "per_season": scarcity,
+        },
+        "leaderboard": rows[:CH3_DOTPLUS_TOP],
+    }
+
+
+def dismissal_dna_section(acc3) -> dict:
+    dna_season = acc3["dna_season"]
+
+    def era_kinds(lg, lo, hi):
+        agg = defaultdict(int)
+        for s in range(lo, hi + 1):
+            for k, v in dna_season[(lg, s)].items():
+                agg[k] += v
+        return agg
+
+    def shares(agg):
+        denom = sum(v for k, v in agg.items() if k != "run out")  # bowler-credited
+        if not denom:
+            return None
+        caught = agg.get("caught", 0)  # excludes caught and bowled
+        cb = agg.get("caught and bowled", 0)
+        bl = agg.get("bowled", 0) + agg.get("lbw", 0)
+        st = agg.get("stumped", 0)
+        return {
+            "bowler_credited": denom,
+            "bowled_lbw_pct": r1(100.0 * bl / denom),
+            "caught_pct": r1(100.0 * caught / denom),
+            "caught_and_bowled_pct": r1(100.0 * cb / denom),
+            "stumped_pct": r1(100.0 * st / denom),
+            "run_outs": agg.get("run out", 0),
+            "kinds": {k: agg[k] for k in sorted(agg)},
+        }
+
+    era = {
+        "ipl 2008-2010": shares(era_kinds("ipl", 2008, 2010)),
+        "ipl 2011-2015": shares(era_kinds("ipl", 2011, 2015)),
+        "ipl 2016-2019": shares(era_kinds("ipl", 2016, 2019)),
+        "ipl 2020-2022": shares(era_kinds("ipl", 2020, 2022)),
+        "ipl 2023-2026": shares(era_kinds("ipl", 2023, 2026)),
+        "wpl 2023-2026": shares(era_kinds("wpl", 2023, 2026)),
+    }
+    rivers = [
+        {"league": lg, "season": ss,
+         "kinds": {k: dna_season[(lg, ss)][k] for k in sorted(dna_season[(lg, ss)])}}
+        for lg in ("ipl", "wpl")
+        for ss in (canon.IPL_SEASONS if lg == "ipl" else canon.WPL_SEASONS)
+    ]
+    return {
+        "definition": (
+            "How wickets fall. Shares are over BOWLER-CREDITED dismissals (run "
+            "outs and retirements excluded from the denominator); 'caught' "
+            "excludes caught-and-bowled (kept separate). Bowlers stopped "
+            "attacking stumps and started attacking the long boundary."
+        ),
+        "era_bands": era,
+        "rivers": {
+            "note": "per-kind counts per league-season for the dismissal-kind streamgraph (the actual wicket balls).",
+            "per_season": rivers,
+        },
+    }
+
+
+def death_wide_tax_section(acc3) -> dict:
+    death = acc3["death"]
+
+    def rate(lg, ss):
+        w, l = death[(lg, ss)]
+        return r2(100.0 * w / l) if l else None
+
+    def era_rate(lg, lo, hi):
+        w = sum(death[(lg, s)][0] for s in range(lo, hi + 1))
+        l = sum(death[(lg, s)][1] for s in range(lo, hi + 1))
+        return r2(100.0 * w / l) if l else None
+
+    per_season = [
+        {"league": lg, "season": ss, "wides_per_100_legal": rate(lg, ss),
+         "wide_deliveries": death[(lg, ss)][0], "death_legal_balls": death[(lg, ss)][1]}
+        for lg in ("ipl", "wpl")
+        for ss in (canon.IPL_SEASONS if lg == "ipl" else canon.WPL_SEASONS)
+    ]
+    early = era_rate("ipl", 2008, 2010)
+    recent = era_rate("ipl", 2023, 2026)
+    return {
+        "definition": (
+            "Death overs = overs 16-20. Wides per 100 legal balls in the death "
+            "overs (count of wide deliveries; byes/legbyes irrelevant). The arms "
+            "race made flesh: bowlers chasing wide-yorker extremes leak more free "
+            "runs than ever."
+        ),
+        "era_headline": {
+            "ipl_2008_2010": early,
+            "ipl_2023_2026": recent,
+            "wpl_2023_2026": era_rate("wpl", 2023, 2026),
+            "doubling_factor": round(recent / early, 2) if early else None,
+        },
+        "per_season": per_season,
+    }
+
+
+def dot_grid_section(acc3) -> dict:
+    dg = acc3["dotgrid"]
+    innings = []
+    for lg, ss in CH3_DOTGRID_FINALS:
+        rec = dg.get((lg, ss))
+        if rec is None:
+            continue
+        innings.append({
+            "label": f"{ss} IPL Final",
+            "league": lg,
+            **rec,
+        })
+    return {
+        "definition": (
+            "Each cell is one legal ball of a real innings, read left to right, "
+            "top to bottom (120 cells = a full 20 overs). Outcome code: 0 = dot "
+            "(no run), 1 = single, 2 = two or three, 3 = four, 4 = six, 5 = other "
+            "(byes/leg-byes off a legal ball). A separate wickets array flags the "
+            "ball a wicket fell. Both innings are their season's Final, first "
+            "innings — dot rates sit at each season's average, so the erosion of "
+            "the dark cells is honest, not cherry-picked."
+        ),
+        "outcome_legend": {"0": "dot", "1": "single", "2": "two or three",
+                           "3": "four", "4": "six", "5": "other (byes/leg-byes)"},
+        "innings": innings,
+    }
+
+
+def crack_ratio_section(acc3) -> dict:
+    crack = acc3["crack"]
+
+    def ratio(bk):
+        c = crack[bk]
+        p0 = c[1] / c[0] if c[0] else None
+        p3 = c[3] / c[2] if c[2] else None
+        if not p0:
+            return None
+        return {
+            "p_wicket_k0": round(p0, 4),
+            "p_wicket_kge3": round(p3, 4) if p3 is not None else None,
+            "crack_ratio": round(p3 / p0, 2) if p3 is not None else None,
+            "n_k0": c[0], "n_kge3": c[2],
+        }
+
+    return {
+        "definition": (
+            "Middle overs (7-15). Crack ratio = P(wicket next ball after 3+ "
+            "straight dots) / P(wicket next ball after a scoring ball). Above 1, "
+            "dot pressure still buys wickets; below 1, batters have defused it. "
+            "This is why IPL bowling economies inflated even as bowler skill grew."
+        ),
+        "era_bands": {
+            "ipl 2008-2010": ratio("ipl 2008-2010"),
+            "ipl 2023-2026": ratio("ipl 2023-2026"),
+            "wpl 2023-2026": ratio("wpl 2023-2026"),
+        },
+        "headline": "Dots still kill in the WPL (crack ratio above 1); the modern IPL defused them (below 1).",
+    }
+
+
+def wpl_beat3_section(acc3) -> dict:
+    season_dot = acc3["season_dot"]
+    wpl_stumped = acc3["wpl_stumped"]
+    death = acc3["death"]
+    crack = acc3["crack"]
+
+    d = sum(season_dot[("wpl", s)][0] for s in canon.WPL_SEASONS)
+    l = sum(season_dot[("wpl", s)][1] for s in canon.WPL_SEASONS)
+    dw = sum(death[("wpl", s)][0] for s in canon.WPL_SEASONS)
+    dl = sum(death[("wpl", s)][1] for s in canon.WPL_SEASONS)
+    st = sum(wpl_stumped[s][0] for s in canon.WPL_SEASONS)
+    stt = sum(wpl_stumped[s][1] for s in canon.WPL_SEASONS)
+    per_season_stumped = [
+        {"season": s, "stumped": wpl_stumped[s][0], "bowler_credited": wpl_stumped[s][1],
+         "pct": r1(100.0 * wpl_stumped[s][0] / wpl_stumped[s][1]) if wpl_stumped[s][1] else None}
+        for s in canon.WPL_SEASONS
+    ]
+    cw = crack["wpl 2023-2026"]
+    ci = crack["ipl 2023-2026"]
+    crack_w = round((cw[3] / cw[2]) / (cw[1] / cw[0]), 2) if cw[0] and cw[2] else None
+    crack_i = round((ci[3] / ci[2]) / (ci[1] / ci[0]), 2) if ci[0] and ci[2] else None
+    return {
+        "note": (
+            "Two clocks in the same breath. On the calendar clock the WPL sits "
+            "where the IPL did in 2009 (dot rate). In the same beat, the stats "
+            "that refuse the timeline: it is a spinner's league (stumpings), the "
+            "wide-yorker arms race is a men's-league thing (low death wides), and "
+            "dot pressure still buys wickets there. A different ecosystem, not an "
+            "earlier one."
+        ),
+        "dot_rate_pct": r1(100.0 * d / l) if l else None,
+        "dot_rate_matches": "IPL 2009",
+        "stumped": {
+            "pooled_pct": r1(100.0 * st / stt) if stt else None,
+            "per_season": per_season_stumped,
+            "ipl_2023_2026_pct": None,  # filled from dismissal_dna in ch3_doc
+        },
+        "death_wides_per_100_legal": r2(100.0 * dw / dl) if dl else None,
+        "crack_ratio_wpl": crack_w,
+        "crack_ratio_ipl_2023_2026": crack_i,
+    }
+
+
+def gravity_defiers_section(acc3) -> dict:
+    bp = acc3["bp"]
+    phase_eco = bp["phase_eco"]
+    best = {}  # (league, franchise) -> record
+    for rec in bp["bowler_seasons"].values():
+        if rec.legal < bowlerplane.MIN_LEGAL_BALLS:
+            continue
+        te = bowlerplane.true_economy(rec, phase_eco)
+        fr = bowlerplane.franchise(rec)
+        if te is None or fr is None:
+            continue
+        e = bowlerplane.economy(rec)
+        par = bowlerplane.par_economy(rec, phase_eco)
+        cur = best.get((rec.league, fr))
+        cand = (te, {
+            "league": rec.league,
+            "franchise": fr,
+            "franchise_id": canon.team_id(rec.league, fr),
+            "bowler": rec.bowler,
+            "season": rec.season,
+            "economy": r2(e),
+            "par_economy": r2(par),
+            "true_economy": r2(te),
+            "wickets": rec.wkts,
+            "balls": rec.legal,
+            "small_sample": rec.league == "wpl" or rec.legal < 150,
+        })
+        if cur is None or cand[0] > cur[0] or (
+            cand[0] == cur[0] and cand[1]["bowler"] < cur[1]["bowler"]
+        ):
+            best[(rec.league, fr)] = cand
+
+    variants = [v[1] for v in best.values()]
+    variants.sort(key=lambda v: v["franchise_id"])
+    return {
+        "definition": (
+            "Your franchise's gravity-defier: the bowler-season that beat its "
+            "era's tide by the most. True Economy = par economy - actual economy, "
+            "where par is the league-season economy for the exact phase mix the "
+            "bowler bowled (a death specialist is priced against death par). "
+            "Positive = leaks fewer runs than its era should. This is engine #1's "
+            "par family, flipped from batting to bowling."
+        ),
+        "wpl_note": "WPL cards carry a short-sample flag by design — four seasons is not nineteen.",
+        "variants": variants,
+    }
+
+
+def _batting_par(bp):
+    """Batting par SR per era from the phasepar-convention marginal (batter runs
+    per ball faced x 100). Reconciles byte-for-byte with engines/phasepar.json —
+    asserted in tests/test_r2b.py (the engine #1 consumption gate)."""
+    bm = bp["batter_marginal"]
+
+    def era_sr(lg, lo, hi):
+        runs = sum(bm[(lg, s, ph)][0] for s in range(lo, hi + 1) for ph in bowlerplane.PHASES
+                   if (lg, s, ph) in bm)
+        balls = sum(bm[(lg, s, ph)][1] for s in range(lo, hi + 1) for ph in bowlerplane.PHASES
+                    if (lg, s, ph) in bm)
+        return r1(100.0 * runs / balls) if balls else None
+
+    return {
+        "ipl_2008_2010": era_sr("ipl", 2008, 2010),
+        "ipl_2023_2026": era_sr("ipl", 2023, 2026),
+        "wpl_2023_2026": era_sr("wpl", 2023, 2026),
+    }
+
+
+def phase_fingerprint(acc3) -> dict:
+    """Death-specialist emergence footnote — share of death balls delivered by
+    bowler-seasons over-indexed to the death (death share / league death
+    availability >= 2x, min 60 legal balls), per IPL season."""
+    fp_bowler = acc3["fp_bowler"]
+    fp_league = acc3["fp_league"]
+    rows = []
+    for ss in canon.IPL_SEASONS:
+        dl, tl = fp_league[("ipl", ss)]
+        avail = dl / tl if tl else 0.0
+        spec = 0
+        for (lg, s, _b), (db, tb) in fp_bowler.items():
+            if lg != "ipl" or s != ss or tb < CH3_FINGERPRINT_MIN_BALLS:
+                continue
+            if avail > 0 and (db / tb) / avail >= CH3_FINGERPRINT_RATIO:
+                spec += db
+        rows.append({"season": ss,
+                     "specialist_death_share_pct": r1(100.0 * spec / dl) if dl else None})
+    peak = max((r for r in rows if r["specialist_death_share_pct"] is not None),
+               key=lambda r: r["specialist_death_share_pct"], default=None)
+    return {
+        "definition": (
+            "Death balls delivered by 2x-death-over-indexed bowler-seasons "
+            "(death share of a bowler's legal balls >= 2x the league's death "
+            "availability, min 60 legal balls). The death specialist rose then "
+            "eroded (Impact Player flexibility?)."
+        ),
+        "per_season": rows,
+        "start_2008_pct": rows[0]["specialist_death_share_pct"],
+        "end_2026_pct": rows[-1]["specialist_death_share_pct"],
+        "peak": peak,
+        "catalog_reference": {
+            "note": "The catalog reports 0.0% (2008) -> 17.3% (2023), peak 20.6% (2021) under its own availability recipe; this recompute is definition-sensitive and lands lower, but the shape (emergence then a 2026 slump) is the same.",
+            "start_pct": 0.0, "recent_pct": 17.3, "peak_pct": 20.6, "peak_season": 2021,
+        },
+    }
+
+
+def footnotes3_section(acc3) -> dict:
+    bp = acc3["bp"]
+    phase_eco = bp["phase_eco"]
+    dna_season = acc3["dna_season"]
+
+    # True Economy headline: league bowler-charged economy per era
+    def league_econ(lg, lo, hi):
+        num = 0.0
+        den = 0
+        for s in range(lo, hi + 1):
+            for ph in range(3):
+                cell = phase_eco.get((lg, s, ph))
+                if cell:
+                    num += cell[0]
+                    den += cell[1]
+        return r2(6.0 * num / den) if den else None
+
+    # FIB — caught & run-out share over ALL dismissals, per era
+    def fib(lg, lo, hi):
+        agg = defaultdict(int)
+        for s in range(lo, hi + 1):
+            for k, v in dna_season[(lg, s)].items():
+                agg[k] += v
+        tot = sum(agg.values())
+        caught = agg.get("caught", 0) + agg.get("caught and bowled", 0)
+        return {"caught_pct": r1(100.0 * caught / tot) if tot else None,
+                "run_out_pct": r1(100.0 * agg.get("run out", 0) / tot) if tot else None}
+
+    corr = frontier_section(bp)["correlation"]["era_bands"]
+    return {
+        "economy_convention": (
+            "Economy is bowler-charged: batter runs + wides + no-balls per 6 "
+            "legal balls. Byes and leg-byes are excluded everywhere in this piece "
+            "(they are not the bowler's fault) — this shifts league RPO ~0.15 vs "
+            "an all-extras economy."
+        ),
+        "true_economy": {
+            "definition": "TrueEcon = par economy - conceded economy for the exact phase mix bowled (engine #1's par family, flipped to bowling).",
+            "league_charged_economy": {
+                "ipl_2008_2010": league_econ("ipl", 2008, 2010),
+                "ipl_2023_2026": league_econ("ipl", 2023, 2026),
+            },
+            "headline": "League bowler-charged economy rose from 7.79 to 9.38 RPO — a 7.5 economy went from league-par to nearly 2 runs an over better than par.",
+            "batting_par_sr_reference": _batting_par(bp),
+            "engine1_note": "The batting par SR reference is engine #1's phase-par (engines/phasepar.json); the reconciliation is asserted in tests.",
+        },
+        "true_wickets_per_24": (
+            "TrueW24 = (actual - expected wickets) per 24 balls, expected from the "
+            "same league-season baseline. The bowling mirror of the SR+ family; "
+            "who actually took more wickets than their era should."
+        ),
+        "phase_fingerprint": phase_fingerprint(acc3),
+        "fib": {
+            "definition": "Field-Independent Bowling strips fielder-dependent luck. Caught rose and run-outs collapsed, so raw bowler stats are less skill-reflective now than in 2008 — exactly the drift FIB removes.",
+            "ipl_2008_2010": fib("ipl", 2008, 2010),
+            "ipl_2023_2026": fib("ipl", 2023, 2026),
+        },
+        "refuted_correlation": {
+            "note": "The cross-bowler economy~strike-rate correlation is weakly POSITIVE, not negative — pitch the hull's retreat, not the correlation.",
+            "ipl_2008_2010_r": corr["ipl 2008-2010"]["r"],
+            "ipl_2023_2026_r": corr["ipl 2023-2026"]["r"],
+            "wpl_2023_2026_r": corr["wpl 2023-2026"]["r"],
+        },
+        "crack_ratio_construction": (
+            "Raw release ratios are always below 1 (pressure states coincide with "
+            "good bowlers), so the crack ratio is the honest read: P(wicket after "
+            "3+ dots) / P(wicket after a scoring ball), middle overs, run outs "
+            "included as pressure dismissals."
+        ),
+    }
+
+
+def ch3_doc(acc3) -> dict:
+    dna = dismissal_dna_section(acc3)
+    wpl = wpl_beat3_section(acc3)
+    # cross-link the IPL modern stumped share into the WPL two-clocks beat
+    ipl_recent = dna["era_bands"].get("ipl 2023-2026")
+    if ipl_recent is not None:
+        wpl["stumped"]["ipl_2023_2026_pct"] = ipl_recent["stumped_pct"]
+    return {
+        "chapter": 3,
+        "title": "The Counterrevolution",
+        "register": "the resistance mutates",
+        "era_bands": band_meta(),
+        "frontier": frontier_section(acc3["bp"]),
+        "dot_plus": dot_plus_section(acc3),
+        "dismissal_dna": dna,
+        "death_wide_tax": death_wide_tax_section(acc3),
+        "dot_grid": dot_grid_section(acc3),
+        "crack_ratio": crack_ratio_section(acc3),
+        "wpl_beat": wpl,
+        "gravity_defiers": gravity_defiers_section(acc3),
+        "footnotes": footnotes3_section(acc3),
+        "bowlerplane_buffer": {
+            "file": "bowlerplane.u8",
+            "bytes_per_point": 2,
+            "point_order": flatten.POINT_ORDER,
+            "byte0": "bowler-season economy",
+            "byte1": "bowler-season bowling strike rate",
+            "economy": {"lo": bowlerplane.ECON_LO, "hi": bowlerplane.ECON_HI,
+                        "decode": "economy = lo + byte0/254 * (hi - lo)"},
+            "strike_rate": {"lo": bowlerplane.SR_LO, "hi": bowlerplane.SR_HI,
+                            "sentinel": bowlerplane.SENTINEL,
+                            "sentinel_meaning": "no bowler-credited wicket (strike rate undefined)",
+                            "decode": "strike_rate = lo + byte1/254 * (hi - lo), for byte1 < 255"},
+            "wides_noballs": "carry their bowler-season coordinate like any delivery (they belong to that bowler-season and count toward its economy)",
+            "qualifier_note": "every delivery is encoded; frontier plotting uses only bowler-seasons with >= 90 legal balls (derivable: economy byte, or the frontier.hull list).",
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
 # Emission
 # ---------------------------------------------------------------------------
 
@@ -1582,6 +2364,9 @@ def main(out_root: Path = canon.OUT_ROOT) -> dict:
     classify_anchors(acc2)
     ch2 = ch2_doc(acc2)
 
+    acc3 = build_ch3()
+    ch3 = ch3_doc(acc3)
+
     scenes_dir = out_root / "scenes"
     scenes_dir.mkdir(parents=True, exist_ok=True)
     sizes = {}
@@ -1590,6 +2375,7 @@ def main(out_root: Path = canon.OUT_ROOT) -> dict:
         ("ch1.json", ch1),
         ("sandbox.json", sandbox),
         ("ch2.json", ch2),
+        ("ch3.json", ch3),
     ):
         raw = flatten.compact_json(doc, sort_keys=True)
         (scenes_dir / name).write_bytes(raw)
@@ -1643,7 +2429,35 @@ def main(out_root: Path = canon.OUT_ROOT) -> dict:
         f"{ar['wpl 2023-2026']['sub120_share_pct']}%)"
     )
     print(f"ch2 payoff: 16 variants, {n_empty} designed empty state(s)")
-    return {"coldopen": coldopen, "ch1": ch1, "sandbox": sandbox, "ch2": ch2}
+    u7 = ch3["frontier"]["under7"]["era_bands"]
+    dna = ch3["dismissal_dna"]["era_bands"]
+    dw = ch3["death_wide_tax"]["era_headline"]
+    print(
+        "ch3 economy under 7: ipl 2008-2010 "
+        f"{u7['ipl 2008-2010']['pct']}% ({u7['ipl 2008-2010']['under7']}/"
+        f"{u7['ipl 2008-2010']['qualifiers']}) -> ipl 2023-2026 "
+        f"{u7['ipl 2023-2026']['pct']}% ({u7['ipl 2023-2026']['under7']}/"
+        f"{u7['ipl 2023-2026']['qualifiers']})"
+    )
+    print(
+        "ch3 dismissal DNA (bowled+lbw / caught / stumped): ipl 2008-2010 "
+        f"{dna['ipl 2008-2010']['bowled_lbw_pct']}/{dna['ipl 2008-2010']['caught_pct']}/"
+        f"{dna['ipl 2008-2010']['stumped_pct']} -> ipl 2023-2026 "
+        f"{dna['ipl 2023-2026']['bowled_lbw_pct']}/{dna['ipl 2023-2026']['caught_pct']}/"
+        f"{dna['ipl 2023-2026']['stumped_pct']}"
+    )
+    print(
+        f"ch3 death wides/100: ipl {dw['ipl_2008_2010']} -> {dw['ipl_2023_2026']} "
+        f"(x{dw['doubling_factor']}), wpl {dw['wpl_2023_2026']}"
+    )
+    cr = ch3["crack_ratio"]["era_bands"]
+    print(
+        f"ch3 crack ratio: wpl {cr['wpl 2023-2026']['crack_ratio']} vs "
+        f"ipl 2023-2026 {cr['ipl 2023-2026']['crack_ratio']}"
+    )
+    gd = ch3["gravity_defiers"]["variants"]
+    print(f"ch3 gravity-defiers: {len(gd)} franchise cards")
+    return {"coldopen": coldopen, "ch1": ch1, "sandbox": sandbox, "ch2": ch2, "ch3": ch3}
 
 
 if __name__ == "__main__":
