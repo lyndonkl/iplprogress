@@ -14,7 +14,7 @@
 	<div class="stars" aria-hidden="true"></div>
 	<div class="stakes" class:reduced>
 		<h1>Something happened to cricket scoring.</h1>
-		<p>Draw what you think it was.</p>
+		<p>You’ve felt it. Now draw it.</p>
 		<div class="cue" aria-hidden="true">↓</div>
 	</div>
 </div>

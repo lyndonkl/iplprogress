@@ -241,7 +241,7 @@ export interface BallTooltip {
 	inningsLabel: string;
 	/** over.ball, 1-based for humans (over/ball are 0-based in the data) */
 	overBall: string;
-	/** "4 runs off the bat" / "OUT — bowled" / "dot ball" / "2 (extras)" */
+	/** "4 runs off the bat" / "Out, bowled" / "dot ball" / "2 (extras)" */
 	result: string;
 	/** the match's result line, e.g. "Mumbai Indians won by 1 run" */
 	resultText: string;
@@ -256,12 +256,12 @@ export interface BallTooltip {
 export function buildTooltip(col: Columnar, matches: MatchInfo[], idx: number): BallTooltip {
 	const a = col.arrays;
 	const d = col.dicts;
-	const battingTeam = d.batting_team[a.batting_team[idx]] ?? '—';
+	const battingTeam = d.batting_team[a.batting_team[idx]] ?? '-';
 	const mi = a.match_index[idx];
 	const m = matches[mi];
 
 	const opponent =
-		m && m.teams ? (m.teams.find((t) => t !== battingTeam) ?? '—') : '—';
+		m && m.teams ? (m.teams.find((t) => t !== battingTeam) ?? '-') : '-';
 	const matchLabel = m ? `${m.season} · ${m.stage}` : `season ${a.season[idx]}`;
 	const date = m ? m.date : '';
 	const venue = m ? m.venue : '';
@@ -274,7 +274,7 @@ export function buildTooltip(col: Columnar, matches: MatchInfo[], idx: number): 
 	let result: string;
 	if (a.wicket[idx] === 1) {
 		const kind = d.wicket_kind[a.wicket_kind[idx]] ?? '';
-		result = kind ? `OUT — ${kind}` : 'OUT';
+		result = kind ? `Out, ${kind}` : 'Out';
 	} else {
 		const rb = a.runs_batter[idx];
 		const rt = a.runs_total[idx];
@@ -285,8 +285,8 @@ export function buildTooltip(col: Columnar, matches: MatchInfo[], idx: number): 
 	}
 
 	return {
-		batter: d.batter[a.batter[idx]] ?? '—',
-		bowler: d.bowler[a.bowler[idx]] ?? '—',
+		batter: d.batter[a.batter[idx]] ?? '-',
+		bowler: d.bowler[a.bowler[idx]] ?? '-',
 		battingTeam,
 		opponent,
 		matchLabel,

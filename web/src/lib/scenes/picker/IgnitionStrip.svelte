@@ -62,12 +62,12 @@
 	});
 
 	const ariaLabel = $derived.by(() => {
-		if (lines.length === 0) return 'Strike-rate strip: no data.';
+		if (lines.length === 0) return 'Scoring strip: no data yet.';
 		const parts = lines.map(
 			(l) =>
-				`${l.era}: strike rate ${l.sr10.toFixed(1)} on balls one to ten, ${l.sr20.toFixed(1)} on the next ten`
+				`${l.era}: ${l.sr10.toFixed(1)} runs per 100 on the first ten balls, ${l.sr20.toFixed(1)} on the next ten`
 		);
-		return `Strike rate on a zero-to-180 scale. ${parts.join('; ')}.`;
+		return `Runs per 100 balls, on a zero-to-180 scale. ${parts.join('; ')}.`;
 	});
 </script>
 
@@ -78,7 +78,7 @@
 		<line class="gridline" x1={AXIS_X + 6} y1={y(MAX_SR)} x2={X2 + 8} y2={y(MAX_SR)} />
 		<text class="tick" x={AXIS_X} y={y(0) + 3} text-anchor="end">0</text>
 		<text class="tick" x={AXIS_X} y={y(MAX_SR) + 3} text-anchor="end">{MAX_SR}</text>
-		<text class="axis-name" x={AXIS_X + 6} y={TOP - 6}>strike rate</text>
+		<text class="axis-name" x={AXIS_X + 6} y={TOP - 6}>runs per 100 balls</text>
 
 		{#each lines as l, i (l.era)}
 			<line

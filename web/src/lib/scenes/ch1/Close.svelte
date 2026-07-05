@@ -16,10 +16,10 @@
 	<div class="caption-slot" class:shown>
 		<div class="scene-card">
 			<p>
-				Batters attacked from ball one — and those balls cost them nothing extra. Where risk
-				rose later, they paid it on purpose. That freedom rewired everything: what a good
-				score is, what bowlers do, <strong>what a wicket is worth.</strong> That's the rest
-				of the story.
+				Batters started attacking from ball one, and those early balls cost them nothing extra.
+				Where the risk rose later, they paid it on purpose. That freedom rewired everything:
+				what a good score is, what bowlers do, <strong>what a wicket is worth.</strong> That is
+				the rest of the story.
 			</p>
 		</div>
 	</div>

@@ -21,8 +21,8 @@
 		{:else}
 			<div class="scene-card">
 				<p>
-					For T20's first decade, an innings began with a ritual: <strong>the sighter</strong>.
-					Ten balls of having a look. Getting your eye in. Respecting the bowler.
+					For T20's first ten years, every innings opened the same way, with a little ritual: <strong>the sighter</strong>.
+					Ten balls of just having a look. Getting your eye in. Giving the bowler some respect.
 				</p>
 				<p class="follow">Watch what happened to it.</p>
 			</div>

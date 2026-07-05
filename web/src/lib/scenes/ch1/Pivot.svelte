@@ -12,7 +12,7 @@
 <div class="pin" class:active>
 	<div class="scene-card center">
 		<p>
-			Of course they score faster. <strong>They must be getting out more — right?</strong>
+			Of course they score faster now. <strong>So they must be getting out way more too. Right?</strong>
 		</p>
 	</div>
 </div>

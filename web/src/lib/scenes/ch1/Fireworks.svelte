@@ -144,7 +144,7 @@
 				</div>
 			{/each}
 			{#if showTwoTone}
-				<div class="fw-legend">Bright slice = a top-10 hitter's six</div>
+				<div class="fw-legend">Bright slice = a six from one of the season's ten biggest hitters</div>
 			{/if}
 		</div>
 	{/if}
@@ -153,40 +153,40 @@
 		{#if step === 1}
 			<div class="scene-card">
 				<p>
-					<strong>Every IPL six ever hit, stacked by season.</strong> 2008: a six every
-					{bpsFirst ?? '—'} balls. 2026: <strong>every {bpsLast ?? '—'}.</strong>
+					<strong>Every IPL six ever hit, one dot each, stacked up by season.</strong> Back in 2008,
+					a six landed every {bpsFirst ?? '-'} balls. By 2026, <strong>one every {bpsLast ?? '-'}.</strong>
 				</p>
 				<p class="note">
-					The WPL's sixes stay on its shelf — its scoring engine gets its own beat, next.
+					The WPL's sixes stay parked on their own shelf for now. Its batting gets its own moment next.
 				</p>
 			</div>
 		{:else if step === 2}
 			<div class="scene-card">
 				<p>
-					Batters aren't just swinging more —
+					It is not just that batters swing big more often.
 					<strong>
-						more big swings land:
-						{aerialEarly ? fmt1(aerialEarly.execution_pct) : '—'}% →
-						{aerialRecent ? fmt1(aerialRecent.execution_pct) : '—'}%.
+						More of those big swings are landing:
+						{aerialEarly ? fmt1(aerialEarly.execution_pct) : '-'}% then,
+						{aerialRecent ? fmt1(aerialRecent.execution_pct) : '-'}% now.
 					</strong>
 					<button
 						class="dagger"
 						onclick={() => footnotesOpen.set('sixes')}
 						aria-label="How we computed this">ⓘ</button
 					>
-					Braver <em>and</em> better.
+					Braver, <em>and</em> better at it.
 				</p>
 			</div>
 		{:else if step === 3}
 			<div class="scene-card">
 				<p>
-					And the six stopped being a specialist's weapon.
+					And the six stopped belonging to a handful of big hitters.
 					<strong>
-						Players with ten-plus sixes in a season:
-						{s2008 ? s2008.players_10plus_sixes : '—'} in 2008 →
-						{s2026 ? s2026.players_10plus_sixes : '—'} in 2026.
+						Batters hitting ten or more sixes in a season:
+						{s2008 ? s2008.players_10plus_sixes : '-'} in 2008,
+						{s2026 ? s2026.players_10plus_sixes : '-'} in 2026.
 					</strong>
-					{#if showTwoTone}Watch the specialists' slice of every column shrink.{/if}
+					{#if showTwoTone}Watch the big hitters' slice of each column shrink.{/if}
 					<button
 						class="dagger"
 						onclick={() => footnotesOpen.set('sixes')}

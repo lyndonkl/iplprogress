@@ -50,10 +50,10 @@
 	{#if ch2}
 		<div class="panel-slot">
 			<div class="panel">
-				<p class="panel-title">The shape of an innings <span class="illus">— illustration</span></p>
+				<p class="panel-title">The shape of an innings <span class="illus">(illustration)</span></p>
 				<div class="shapes">
 					<figure class="shape">
-						<svg viewBox="0 0 {VB} {VB}" role="img" aria-label="A 2008 two-act innings: a line that crawls, then kinks upward into a steeper launch">
+						<svg viewBox="0 0 {VB} {VB}" role="img" aria-label="A 2008 innings that crawls, then kinks upward into a steeper climb">
 							<line x1="8" y1="192" x2="192" y2="192" class="axis" />
 							<line x1="8" y1="192" x2="8" y2="8" class="axis" />
 							<!-- build / launch split marker -->
@@ -61,16 +61,16 @@
 							<polyline points={twoAct} class="casing" class:on={twoActOn} />
 							<polyline points={twoAct} class="stroke build" class:on={twoActOn} />
 						</svg>
-						<figcaption><span class="tag build-tag">build</span> then <span class="tag launch-tag">launch</span> — 2008</figcaption>
+						<figcaption><span class="tag build-tag">build</span> then <span class="tag launch-tag">launch</span>, 2008</figcaption>
 					</figure>
 					<figure class="shape">
-						<svg viewBox="0 0 {VB} {VB}" role="img" aria-label="A 2026 flat-max innings: one straight steep line from the first ball">
+						<svg viewBox="0 0 {VB} {VB}" role="img" aria-label="A 2026 innings: one straight steep line from the first ball">
 							<line x1="8" y1="192" x2="192" y2="192" class="axis" />
 							<line x1="8" y1="192" x2="8" y2="8" class="axis" />
 							<polyline points={flatMax} class="casing" class:on={flatOn} />
 							<polyline points={flatMax} class="stroke launch" class:on={flatOn} />
 						</svg>
-						<figcaption><span class="tag launch-tag">one gear: flat out</span> — 2026</figcaption>
+						<figcaption><span class="tag launch-tag">one gear: flat out</span>, 2026</figcaption>
 					</figure>
 				</div>
 			</div>
@@ -81,23 +81,23 @@
 		{#if step === 1}
 			<div class="scene-card">
 				<p>
-					The classic T20 innings had <strong>gears</strong>: see off the bowling, consolidate,
-					then launch. You can see the change of pace — the line bends upward.
+					The old T20 innings had <strong>gears</strong>. See off the bowling, build, then launch.
+					You can watch it on the left: the line crawls, then bends steeply up.
 				</p>
 			</div>
 		{:else if step === 2}
 			<div class="scene-card">
 				<p>
-					The modern innings has <strong>one gear: flat out.</strong> No see-off, no
-					consolidation — just the launch.
+					The modern innings has <strong>one gear: flat out.</strong> From ball one, straight into
+					the launch.
 				</p>
 			</div>
 		{:else}
 			<div class="scene-card chip">
 				<p>
 					Innings that shifted up a gear late were <strong>a third</strong> of the long ones once
-					(<strong>{twoActEarly !== null ? fmt1(twoActEarly) : '—'}%</strong>). Now
-					<strong>a quarter</strong> (<strong>{twoActModern !== null ? fmt1(twoActModern) : '—'}%</strong>).
+					(<strong>{twoActEarly !== null ? fmt1(twoActEarly) : '-'}%</strong>). Now
+					<strong>a quarter</strong> (<strong>{twoActModern !== null ? fmt1(twoActModern) : '-'}%</strong>).
 					<button class="dagger" onclick={() => footnotesOpen.set('gear-shift')} aria-label="How we counted the gears">ⓘ</button>
 					The build-up went with the man who used to play it.
 				</p>

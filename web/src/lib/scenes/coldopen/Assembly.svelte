@@ -85,7 +85,7 @@
 		const out: Stop[] = [];
 		const t2008 = first.get(marks[0]); // 2008 fully in = first 2009 point
 		if (t2008 !== undefined)
-			out.push({ id: 's2008', at: t2008, pinned: false, text: `2008: the first ${fmt(t2008)}.` });
+			out.push({ id: 's2008', at: t2008, pinned: false, text: `2008. The first ${fmt(t2008)} balls.` });
 		const t2015 = first.get(marks[1]); // 2015 passes = first 2016 point
 		if (t2015 !== undefined)
 			out.push({ id: 's2015', at: t2015, pinned: false, text: `${fmt(t2015)} and climbing.` });
@@ -95,7 +95,7 @@
 				id: 'ceiling',
 				at: tCeiling,
 				pinned: false,
-				text: '2023: the year the ceiling broke —'
+				text: '2023. The year scoring took off.'
 			});
 		const tWpl = first.get(marks[3]); // the WPL's first delivery rains in
 		if (tWpl !== undefined)
@@ -103,13 +103,13 @@
 				id: 'wpl',
 				at: tWpl,
 				pinned: true,
-				text: `And a second league assembles — deliberately apart, its own body of light. The WPL: ${fmt(wplTotal)} deliveries.`
+				text: `A second league lands, off on its own. That’s the WPL: ${fmt(wplTotal)} deliveries, its own cloud of light.`
 			});
 		// captions fire in buffer order — each names what is actually raining in.
 		// The pipeline now emits IPL 2023 before WPL 2023 (season-blocked point
 		// order), restoring the authored sequence: the ceiling micro fires a
-		// beat BEFORE the pinned WPL caption. The em dash on "the ceiling
-		// broke —" hands into the WPL card that follows it.
+		// beat BEFORE the pinned WPL caption, so the 2023 line lands and then the
+		// WPL card takes the caption slot.
 		out.sort((a, b) => a.at - b.at);
 		return out;
 	});
@@ -174,9 +174,9 @@
 				</p>
 				{#if reduced}
 					<p class="note narration">
-						Between 2008 and 2026, {fmt(deliveries)} deliveries were bowled across the IPL and WPL
-						— {fmt(matches)} matches, {fmt(players)} players. The WPL’s {fmt(wplTotal)} arrive as
-						their own constellation, apart from the IPL’s cloud.
+						Between 2008 and 2026, {fmt(deliveries)} deliveries were bowled across the IPL and WPL.
+						That’s {fmt(matches)} matches and {fmt(players)} players. The WPL’s {fmt(wplTotal)}
+						deliveries arrive as their own cloud, off to one side of the IPL’s.
 					</p>
 				{/if}
 			</div>

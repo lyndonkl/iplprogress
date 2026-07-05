@@ -74,9 +74,9 @@
 	const neutralPct = $derived(heat ? (heat.neutral_byte / 255) * 100 : (73 / 255) * 100);
 	const legendLabels = $derived(
 		heat?.legend_labels ?? [
-			'Below the 2008-10 batter',
-			'Like the 2008-10 batter',
-			'Hotter than the 2008-10 batter'
+			'Hit softer than a 2008 batter',
+			'About the same',
+			'Hit harder than a 2008 batter'
 		]
 	);
 
@@ -201,32 +201,32 @@
 		{#if step === 1}
 			<div class="scene-card">
 				<p>
-					Every ball, arranged by how long its batter had been in.
-					<strong>Left edge: a batter's first balls.</strong> Rows climb from 2008 at the
-					bottom to 2026 at the top. Brightness = runs.
+					Here is every ball again. Now each one sits by how long the batter had been in when they faced it.
+					<strong>The left edge is their very first balls.</strong> Old seasons sit at the
+					bottom, new ones at the top. Brighter means more runs.
 				</p>
 			</div>
 		{:else if step === 2}
 			<div class="scene-card">
 				<p>
-					<strong>2008: the left edge is dark.</strong> New batters blocked, nudged, had a
-					look. The sighter, visible from space.
+					Look at the bottom row, 2008. <strong>The left edge is dark.</strong> Those first
+					balls barely scored. New batters blocked, nudged, and had a look. That is the sighter.
 				</p>
 			</div>
 		{:else if step === 3}
 			<div class="scene-card">
 				<p>
-					Now colour each ball by how hard it's hit — versus a 2008 batter at the very same
-					point. <strong>The corner catches fire:</strong> the opening balls, once played quietly,
-					now blaze.
+					Now the colours change what they mean. The hotter a ball glows, the harder it was
+					hit than a 2008 batter managed at the same point. <strong>Watch the bottom-left corner
+					catch fire.</strong> The opening balls, once played quietly, now blaze.
 				</p>
 			</div>
 		{:else if step === 4}
 			<div class="scene-card chip">
 				<p>
 					<strong>
-						First ball of the innings: struck at {srBall1Early ?? '—'} in 2008, {srBall1Recent ??
-							'—'} now.
+						Take just the first ball. Batters used to score off it at {srBall1Early ?? '-'} runs per 100 balls.
+							Now it is {srBall1Recent ?? '-'}.
 					</strong>
 					<button
 						class="dagger"
@@ -235,7 +235,7 @@
 					>
 						ⓘ
 					</button>
-					The revolution lives at the start of the innings.
+					The revolution starts on ball one.
 				</p>
 			</div>
 		{/if}
@@ -245,7 +245,7 @@
 	     visible through the heat beat (steps 3-4, or the whole scene under reduced
 	     motion). The swatch stops match the shader; labels come from ch1.json. -->
 	<div class="legend" class:on={heatOn} aria-hidden={!heatOn}>
-		<p class="legend-title">Each ball vs a 2008 batter at the same point</p>
+		<p class="legend-title">How each ball compares with a 2008 batter at the same point</p>
 		<div class="legend-bar">
 			<span class="neutral-tick" style="left:{neutralPct.toFixed(1)}%"></span>
 		</div>

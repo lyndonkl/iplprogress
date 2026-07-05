@@ -106,12 +106,12 @@
 		<div class="panel-slot" class:shown>
 			<!-- deliberately distinct frame: teal edge + header band (≠ out-rate strip) -->
 			<div class="panel">
-				<p class="panel-title">Strike rate, ball by ball</p>
+				<p class="panel-title">Scoring rate, ball by ball</p>
 				<svg
 					viewBox="0 0 {W} {H}"
 					style="font-size:{FONT}px"
 					role="img"
-					aria-label="Strike rate, ball by ball, over balls 1 to {maxLabel} of the innings, on a zero-based fixed scale: IPL 2008-10, IPL 2023-26, and the WPL as peers"
+					aria-label="Scoring rate in runs per 100 balls, ball by ball, over balls 1 to {maxLabel} of the innings, on a zero-based fixed scale. IPL 2008-10, IPL 2023-26, and the WPL side by side"
 				>
 					{#each [0, 50, 100, 150, 200] as g (g)}
 						<line
@@ -127,7 +127,7 @@
 						{/if}
 					{/each}
 					<text x={12} y={MT + plotH / 2} class="yname" transform="rotate(-90 12 {MT + plotH / 2})">
-						strike rate
+						runs per 100 balls
 					</text>
 
 					{#each ticks as t (t)}
@@ -152,9 +152,9 @@
 
 				<!-- the engine pair: share of runs scored in fours (zero-based bars) -->
 				{#if foursWpl !== null && foursIpl !== null}
-					<div class="engine" role="img" aria-label="Share of runs scored in fours, bars on a fixed 0 to 50 percent scale: WPL {fmt1(foursWpl)} percent, IPL 2023-26 {fmt1(foursIpl)} percent">
+					<div class="engine" role="img" aria-label="Share of runs that come from fours, bars on a fixed 0 to 50 percent scale. WPL {fmt1(foursWpl)} percent, IPL 2023-26 {fmt1(foursIpl)} percent">
 						<p class="engine-title">
-							Share of runs scored in fours <span class="scale-note">— 0–50% scale</span>
+							Share of runs that come from fours <span class="scale-note">(0 to 50% scale)</span>
 						</p>
 						<div class="bar-row">
 							<span class="bar-name wpl-ink">WPL</span>
@@ -181,12 +181,12 @@
 		<div class="caption-slot" class:shown>
 			<div class="scene-card">
 				<p>
-					<strong>The WPL is already moving — and not on the IPL's track.</strong>
-					Four seasons in, its first-ten-balls strike rate —
-					<strong class="wpl-ink">{fmt1(beat.first10_sr.wpl_2023_2026)}</strong> — sits where
-					IPL 2008 stood. But the engine is new:
-					<strong class="wpl-ink">{fmt1(beat.runs_from_fours_pct.wpl_2023_2026)}% of its runs come in fours.</strong>
-					The modern IPL: {fmt1(beat.runs_from_fours_pct.ipl_2023_2026)}%.
+					<strong>The WPL is going its own way.</strong>
+					Just four seasons old, over its first ten balls it scores at
+					<strong class="wpl-ink">{fmt1(beat.first10_sr.wpl_2023_2026)}</strong> runs per 100 balls. That is right where
+					the IPL sat back in 2008. But it gets its runs differently.
+					<strong class="wpl-ink">{fmt1(beat.runs_from_fours_pct.wpl_2023_2026)}% of them come from fours.</strong>
+					In today's IPL it is {fmt1(beat.runs_from_fours_pct.ipl_2023_2026)}%.
 				</p>
 			</div>
 		</div>

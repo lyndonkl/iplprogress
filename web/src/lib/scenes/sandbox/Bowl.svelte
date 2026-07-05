@@ -243,8 +243,8 @@
 	<!-- intro (non-interactive) -->
 	<div class="intro">
 		<p class="overline">The Bowl · The Field Is Yours</p>
-		<p class="lede">The field is yours. Every ball ever — filter it, tap it.</p>
-		<p class="hint">Tap any lit ball to name the exact delivery.</p>
+		<p class="lede">Every dot is one ball, from every IPL and WPL match ever played. The whole field is yours now.</p>
+		<p class="hint">Filter it below, or tap any bright ball to see exactly what happened on it.</p>
 	</div>
 
 	<!-- the famous-match preset card (shown while the preset is engaged) -->
@@ -293,12 +293,12 @@
 					<option value="">All teams</option>
 					<optgroup label="IPL">
 						{#each iplTeams as t (t.id)}
-							<option value={String(t.id)}>{t.short} — {t.name}</option>
+							<option value={String(t.id)}>{t.short} · {t.name}</option>
 						{/each}
 					</optgroup>
 					<optgroup label="WPL">
 						{#each wplTeams as t (t.id)}
-							<option value={String(t.id)}>{t.short} — {t.name}</option>
+							<option value={String(t.id)}>{t.short} · {t.name}</option>
 						{/each}
 					</optgroup>
 				</select>
@@ -345,7 +345,7 @@
 		<div class="readout" aria-live="polite">
 			<span class="rd-sel">{selectionLabel}</span>
 			<span class="rd-count"
-				>{count != null ? count.toLocaleString('en-US') : '—'}<span class="rd-unit"> balls</span></span
+				>{count != null ? count.toLocaleString('en-US') : '-'}<span class="rd-unit"> balls</span></span
 			>
 		</div>
 

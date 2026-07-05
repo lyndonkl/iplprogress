@@ -121,9 +121,9 @@
 		<div class="chart-slot" class:shown={step >= 1}>
 			<figure
 				class="chart"
-				aria-label="The out-rate, ball by ball, over balls 1 to {maxLabel} of the innings — IPL 2008-10 and 2023-26 on a fixed 0 to 10 percent scale"
+				aria-label="How often batters get out, ball by ball, over balls 1 to {maxLabel} of the innings. IPL 2008-10 and 2023-26, on a fixed 0 to 10 percent scale"
 			>
-				<figcaption class="chart-title">The out-rate, ball by ball</figcaption>
+				<figcaption class="chart-title">How often batters get out, ball by ball</figcaption>
 				<svg viewBox="0 0 {W} {H}" style="font-size:{FONT}px" role="img" aria-hidden="true">
 					<!-- fixed-scale gridlines: 0 / 2.5 / 5 / 7.5 / 10% (y honesty-locked) -->
 					{#each [0, 2.5, 5, 7.5, 10] as g (g)}
@@ -176,11 +176,11 @@
 						class="tick-tap"
 						style="left:{(xAt(t) / W) * 100}%; top:{(yAt(0) / H) * 100}%;"
 						onclick={() => (selectedBall = selectedBall === t ? null : t)}
-						aria-label="Ball {t}: who most defied the out-rate"
+						aria-label="Ball {t}: who beat the odds of getting out"
 					></button>
 				{/each}
 			</figure>
-			<p class="hint">Tap ball 1 · 3 · 5 · 10 · 15 · 20 — who most defied the out-rate.</p>
+			<p class="hint">Tap ball 1, 3, 5, 10, 15 or 20 to see who beat the odds of getting out.</p>
 		</div>
 	{/if}
 
@@ -189,34 +189,34 @@
 		{#if step === 1}
 			<div class="scene-card">
 				<p>
-					This is <strong>how often a batter gets out, ball by ball</strong>
+					This shows <strong>how often a batter gets out, ball by ball.</strong>
 					<button
 						class="dagger"
 						onclick={() => footnotesOpen.set('out-rate')}
 						aria-label="How we computed this">ⓘ</button
 					>
-					— the grey line is 2008-10. Out-rate on any early ball: about one in twenty.
+					The grey line is 2008-10. On any early ball, that chance is about one in twenty.
 				</p>
 			</div>
 		{:else if step === 2}
 			<div class="scene-card">
 				<p>
-					Now 2023-26. <strong>The lines sit on top of each other.</strong> Across the first
-					ten balls:
+					Now add 2023-26. <strong>The two lines sit right on top of each other.</strong> Over the
+					first ten balls, batters got out
 					<strong>
-						{first10Early !== null ? fmt2(first10Early) : '—'}% then.
-						{first10Recent !== null ? fmt2(first10Recent) : '—'}% now.
+						{first10Early !== null ? fmt2(first10Early) : '-'}% of the time then,
+						{first10Recent !== null ? fmt2(first10Recent) : '-'}% now.
 					</strong>
-					All that extra attack — at no extra risk.
+					All that extra attack, and no extra risk.
 				</p>
 			</div>
 		{:else if step === 3}
 			<div class="scene-card">
 				<p>
-					That's the story of modern batting in one picture:
-					<strong>not recklessness — skill.</strong> One honest note: this is a
-					first-ten-balls fact. Later in the innings risk <em>did</em> rise —
-					<strong>priced and paid on purpose. Chapter 5 publishes the price list.</strong>
+					That is modern batting in one picture. It looks fearless.
+					<strong>It is actually just skill.</strong> One honest note. This holds for the
+					first ten balls. Later in the innings, the risk <em>did</em> climb.
+					<strong>Batters took that on by choice. Chapter 5 lays out what it cost.</strong>
 				</p>
 			</div>
 		{/if}
@@ -224,24 +224,24 @@
 
 	<!-- defier mini card: bottom sheet, tap/keyboard, never hover -->
 	{#if defierCard}
-		<div class="defier-sheet" role="dialog" aria-label="Ball {defierCard.ball}: who most defied the out-rate">
+		<div class="defier-sheet" role="dialog" aria-label="Ball {defierCard.ball}: who beat the odds of getting out">
 			<div class="sheet-head">
 				<p class="sheet-title">
-					Ball {defierCard.ball}: who most defied the out-rate <span class="era">IPL 2023-26</span>
+					Ball {defierCard.ball}: who beat the odds of getting out <span class="era">IPL 2023-26</span>
 				</p>
 				<button class="close" onclick={() => (selectedBall = null)} aria-label="Close">×</button>
 			</div>
 			<ol>
 				{#each defierCard.top3 as d (d.name)}
 					<li>
-						<strong>{d.name}</strong> — made it past ball {defierCard.ball} in {d.survival_pct}%
-						of innings · strike rate through balls 1–{defierCard.ball}: {d.sr_through_ball}
+						<strong>{d.name}</strong> made it past ball {defierCard.ball} in {d.survival_pct}%
+						of their innings, scoring at {d.sr_through_ball} runs per 100 balls to get there
 					</li>
 				{/each}
 			</ol>
 			<p class="baseline">
-				The league: {defierCard.baseline.survival_pct}% make it past ball {defierCard.ball} ·
-				strike rate {defierCard.baseline.sr_through_ball}. Min 300 balls in the era.
+				The league average: {defierCard.baseline.survival_pct}% make it past ball {defierCard.ball},
+				scoring at {defierCard.baseline.sr_through_ball} runs per 100 balls. Minimum 300 balls faced in the era.
 			</p>
 		</div>
 	{/if}

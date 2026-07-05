@@ -331,8 +331,8 @@
 
 		<div class="chart interactive" bind:clientWidth={w} bind:clientHeight={h}>
 			<p class="sr-only">
-				A chart of 200-run innings per season, 2008 to 2026. The drawing interaction is
-				pointer-only — choose “Just show me” below to see the answer.
+				A chart of 200-run innings each season from 2008 to 2026. You draw the line with a
+				pointer. To see the answer without drawing, choose the “Just show me” button below.
 			</p>
 
 			{#if w > 0 && totals && preDrawn && truth}
@@ -403,32 +403,32 @@
 					<div class="chip" role="status" bind:clientHeight={chipH} style:top="{chipTop}px">
 						{#if branch === 'over'}
 							<p>
-								<strong>You out-dreamed it — barely.</strong> 2026 alone put up
-								<strong>{truthEnd}</strong> two-hundreds, more than any season in history. Your
-								line: <strong>{y26}</strong>.
+								<strong>You dreamed even bigger than it turned out.</strong> In 2026, teams passed
+								200 <strong>{truthEnd}</strong> times, more than any season ever. Your line:
+								<strong>{y26}</strong>.
 							</p>
 						{:else if branch === 'early'}
 							<p>
-								<strong>You called the flood — but rang the bell early.</strong> From 2013 to 2022
-								you imagined <strong>{sketchSum1322}</strong> two-hundreds; the league managed
-								<strong>{truthSum1322}</strong>. Then 2023 happened.
+								<strong>You called it. You just called it too soon.</strong> From 2013 to 2022 you
+								drew <strong>{sketchSum1322}</strong> scores over 200. The league only managed
+								<strong>{truthSum1322}</strong>. Then 2023 hit.
 							</p>
 						{:else if branch === 'right'}
 							<p>
-								<strong>You knew.</strong> But do you know <strong>when</strong> it broke? The eye
-								says <strong>2018</strong> — the year the sixes exploded. The scoreboard says
+								<strong>You knew it was coming.</strong> But do you know <strong>when</strong>? Your
+								eye says <strong>2018</strong>, when the big hitting took off. The scoreboard says
 								<strong>2023</strong>.
 							</p>
 						{:else if gentleFloodEarly}
 							<p>
-								<strong>You imagined the flood early — then lost your nerve.</strong> The real
-								2026: <strong>{truthEnd}</strong>.
+								<strong>You saw it coming early, then pulled back.</strong> In 2026, teams passed
+								200 <strong>{truthEnd}</strong> times.
 							</p>
 						{:else}
 							<p>
-								<strong>You were {truthEnd - y26} two-hundreds too gentle about 2026.</strong> The
-								real number: <strong>{truthEnd}</strong>. For fifteen years you’d have been right —
-								then the ceiling broke.
+								<strong>You guessed low.</strong> In 2026, teams passed 200
+								<strong>{truthEnd}</strong> times. For the first fifteen years your line would’ve
+								been close. Then scoring took off.
 							</p>
 						{/if}
 					</div>

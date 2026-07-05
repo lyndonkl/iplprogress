@@ -18,37 +18,37 @@
 	const teamClause = $derived(
 		$pickedTeam !== null && $pickedTeam.league !== null && $pickedTeam.team !== 'neutral'
 			? `, opening on ${$pickedTeam.team}`
-			: ' — opening on the 2019 final, or on whichever team you pick'
+			: '. It opens on the 2019 final, or on whichever team you pick'
 	);
 </script>
 
 <div class="pin">
 	<div class="scene-card interactive card">
-		<p class="overline">Chapter 2 of 10 — The Last of the Anchors · done</p>
+		<p class="overline">Chapter 2 of 10: The Last of the Anchors · done</p>
 
 		<h2>Every ball is still here.</h2>
 		<p class="promise">
-			The field behind this card is the one you watched assemble — every delivery the IPL and
-			WPL have ever seen. That was the promise: they never leave. The rest of the story is
-			told on top of them.
+			The field behind this card is the one you watched build. Every ball the IPL and WPL
+			have ever bowled is in it. That was the promise: they never leave. The rest of the
+			story is told on top of them.
 		</p>
 
 		<p class="next">
-			<strong>Next — Chapter 3: The Counterrevolution.</strong>
-			<em>When batting changes this much, the men with the ball have to answer.</em>
-			<span class="tag">in build — the story grows chapter by chapter</span>
+			<strong>Up next: Chapter 3, The Counterrevolution.</strong>
+			<em>When batting changes this much, the bowlers have to answer.</em>
+			<span class="tag">in build · the story grows chapter by chapter</span>
 		</p>
 
 		<p class="tease">
 			<strong>The field is yours.</strong>
-			Every one of the {n.toLocaleString('en-US')} balls on this screen, filterable under your
-			thumb — season by season, team by team{teamClause}. Tap any ball to name it.
+			All {n.toLocaleString('en-US')} balls on this screen, filterable under your thumb, season
+			by season and team by team{teamClause}. Tap any ball to name it.
 			<a class="tease-link" href="{base}/#bowl">Keep scrolling into the sandbox →</a>
 		</p>
 
 		<p class="navhint">
 			The whole shape of the story lives in the <span class="glyph" aria-hidden="true">☰</span>
-			menu, top right — every chapter by name, lighting up as it lands. Your team pick rides
+			menu, top right. Every chapter by name, lighting up as it lands. Your team pick rides
 			along, and you can change it there anytime.
 		</p>
 

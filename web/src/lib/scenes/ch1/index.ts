@@ -35,7 +35,7 @@ export const scenes: SceneDef[] = [
 		id: 'ch1-title',
 		chapter: 'ch1',
 		anchor: 'ch1',
-		navLabel: 'Chapter 1 — The Death of the Sighter',
+		navLabel: 'Chapter 1: The Death of the Sighter',
 		scrollLength: 80,
 		morphLength: 40,
 		// free field dimmed behind the title; loop stopped while holding

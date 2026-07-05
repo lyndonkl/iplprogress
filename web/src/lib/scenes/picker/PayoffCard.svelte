@@ -121,37 +121,37 @@
 		const lines: string[] = [];
 		if (wplBody && clock !== null) {
 			lines.push(
-				`At the same league age the IPL’s run rate fell: ${f2(iplRR[0])} → ${f2(iplRR[iplRR.length - 1])} over league years 1–4 (IPL year 1 = 2008, WPL year 1 = 2023).`
+				`At the same league age, the IPL’s runs an over fell: ${f2(iplRR[0])} → ${f2(iplRR[iplRR.length - 1])} across league years 1 to 4 (IPL year 1 = 2008, WPL year 1 = 2023).`
 			);
 			lines.push(
-				`Year by year — IPL ${iplRR.map(f2).join(' / ')} · WPL ${wplRR.map(f2).join(' / ')}. Neither path is a straight line; endpoints alone flatter both.`
+				`Year by year: IPL ${iplRR.map(f2).join(' / ')} · WPL ${wplRR.map(f2).join(' / ')}. Neither line is a straight climb. Look only at the endpoints and both look tidier than they really were.`
 			);
 			lines.push(
-				`Eras on this card: ${v.era_labels.early} vs ${v.era_labels.recent}. First-ten-ball samples: ${num(v.sample_balls_early)} and ${num(v.sample_balls_recent)} balls.`
+				`The two eras here: ${v.era_labels.early} vs ${v.era_labels.recent}. First-ten-ball counts: ${num(v.sample_balls_early)} and ${num(v.sample_balls_recent)} balls.`
 			);
 			lines.push(clock.definition);
 		} else {
 			lines.push(
 				v.empty_state
-					? `No ${v.era_labels.early} innings to compare — the ${v.era_labels.recent} sample is ${num(v.sample_balls_recent)} balls.`
-					: `Era bands: ${v.era_labels.early} vs ${v.era_labels.recent}. First-ten-ball samples: ${num(v.sample_balls_early)} and ${num(v.sample_balls_recent)} balls.`
+					? `No ${v.era_labels.early} innings to compare against. The ${v.era_labels.recent} sample is ${num(v.sample_balls_recent)} balls.`
+					: `The two eras here: ${v.era_labels.early} vs ${v.era_labels.recent}. First-ten-ball counts: ${num(v.sample_balls_early)} and ${num(v.sample_balls_recent)} balls.`
 			);
 			lines.push(
-				'Franchise renames merge histories — Delhi Daredevils → Delhi Capitals, Kings XI Punjab → Punjab Kings, Royal Challengers Bangalore → Bengaluru.'
+				'When a team changed its name, we merged the two histories. Delhi Daredevils → Delhi Capitals, Kings XI Punjab → Punjab Kings, Royal Challengers Bangalore → Bengaluru.'
 			);
 		}
 		if (v.fastest_starter !== undefined) {
 			lines.push(
-				`Fastest-starter rule: minimum 100 first-ten balls faced (${v.fastest_starter.name}: ${num(v.fastest_starter.first10_balls)}).`
+				`Fastest-starter rule: a batter needs at least 100 first-ten balls faced to qualify (${v.fastest_starter.name}: ${num(v.fastest_starter.first10_balls)}).`
 			);
 		}
-		lines.push('Wides don’t count toward balls faced; no-balls do.');
+		lines.push('Wides don’t count as a ball faced. No-balls do.');
 		return lines;
 	});
 
 	const changeLabel = $derived(
 		kind === 'neutral' && !isFallback
-			? 'Pick a team — this card re-deals in its colors'
+			? 'Pick a team and this card re-deals in their colors'
 			: 'Not your team? Change it'
 	);
 
@@ -170,8 +170,8 @@
 		<p class="overline">Chapter 1 payoff</p>
 		<h3>The card didn’t arrive.</h3>
 		<p class="note">
-			This card renders from the pipeline’s payoff data, which didn’t load. The chapter above
-			stands on its own — nothing in it depended on the card.
+			The data for this card didn’t load this time. No worries: the chapter above stands on its
+			own, and nothing in it needed the card.
 		</p>
 		{#if payoff === undefined}
 			<button class="change" type="button" onclick={() => void refresh()}>Try again</button>
@@ -195,25 +195,25 @@
 		</header>
 
 		{#if isFallback}
-			<p class="note">No card for {effPick?.team} yet — here’s the league-wide one.</p>
+			<p class="note">No card for {effPick?.team} yet. Here’s the league-wide one instead.</p>
 		{/if}
 
 		{#if wplBody && clock !== null}
 			<!-- the bespoke WPL card: maturity clock, two clocks framing, no deficit language -->
-			<p class="viz-label">Run rate, league years 1–4 — one scale</p>
+			<p class="viz-label">Runs an over, league years 1 to 4, one shared scale</p>
 			<MaturityLines ipl={iplRR} wpl={wplRR} />
 			<p class="headline">
-				Four seasons in, your league is <strong>already climbing</strong>: run rate
-				<strong class="wpl-num">{f2(wplRR[0])} → {f2(wplRR[wplRR.length - 1])}</strong> — while
-				the IPL at the same age was still falling.
+				Four seasons in, your league is <strong>already climbing</strong>. Teams score more every
+				year: <strong class="wpl-num">{f2(wplRR[0])} → {f2(wplRR[wplRR.length - 1])}</strong> runs an
+				over. At the same young age, the IPL was still falling.
 			</p>
 			{#if honesty !== null}
 				<p class="honesty">{honesty}</p>
 			{/if}
 			{#if teamPair !== null}
 				<p class="headline pair">
-					{v.team}’s first ten balls:
-					<strong class="wpl-num">{f1(teamPair.early)} → {f1(teamPair.recent)}</strong>.
+					Look at {v.team}’s own first ten balls:
+					<strong class="wpl-num">{f1(teamPair.early)} → {f1(teamPair.recent)}</strong> runs per 100 balls.
 				</p>
 			{:else}
 				<!-- discrete team-pair field (no honesty tail) — never the full
@@ -222,19 +222,19 @@
 			{/if}
 			<p class="plant">Remember that clock. We’ll come back to it.</p>
 		{:else}
-			<p class="viz-label">Strike rate: first ten balls, then the next ten — 0–180 scale</p>
+			<p class="viz-label">Runs per 100 balls: first ten, then the next ten (0 to 180 scale)</p>
 			<IgnitionStrip early={earlyRow} recent={recentRow} {accent} />
 			{#if v.empty_state}
-				<p class="note">No {v.era_labels.early} innings — the club didn’t exist yet.</p>
+				<p class="note">No {v.era_labels.early} innings. The club didn’t exist yet.</p>
 			{/if}
 			<p class="headline">{v.headline}</p>
 		{/if}
 
 		{#if v.fastest_starter !== undefined}
 			<p class="starter">
-				Fastest starter in {starterTeam} history: <strong>{v.fastest_starter.name}</strong> — SR
-				<strong>{f1(v.fastest_starter.first10_sr)}</strong> on {pronoun} first ten balls (min 100
-				balls).
+				Fastest starter in {starterTeam} history: <strong>{v.fastest_starter.name}</strong>. Came
+				out swinging at <strong>{f1(v.fastest_starter.first10_sr)}</strong> runs per 100 balls on
+				{pronoun} first ten (minimum 100 balls faced).
 			</p>
 		{/if}
 

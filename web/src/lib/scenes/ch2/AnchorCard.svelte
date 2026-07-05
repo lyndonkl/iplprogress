@@ -106,7 +106,7 @@
 
 <div class="pin" class:active>
 	<div class="card-slot" class:shown>
-	<article class="payoff" bind:this={rootEl} aria-label="Chapter 2 team payoff — your last anchor">
+	<article class="payoff" bind:this={rootEl} aria-label="Chapter 2 team payoff, your last anchor">
 		{#if v === null}
 			<p class="overline">Chapter 2 payoff</p>
 			<p class="dealing" role="status">Dealing your card…</p>
@@ -122,7 +122,7 @@
 			</header>
 
 			{#if isFallback}
-				<p class="note">No card for {$pickedTeam?.team} yet — here’s the league-wide one.</p>
+				<p class="note">No card for {$pickedTeam?.team} yet. Here’s the league-wide one.</p>
 			{/if}
 
 			{#if v.empty_state}
@@ -131,14 +131,14 @@
 				     current franchise a qualifying slowest innings, so no live variant
 				     sets empty_state; kept authored + unit-tested against future data. -->
 				<p class="headline">
-					<strong>Born post-anchor — your franchise never had one.</strong>
-					{v.team} came into the game after the careful accumulator was already gone. The archetype
-					this chapter mourns was never part of its story.
+					<strong>Your franchise was born too late for one.</strong>
+					{v.team} came into the game after the patient, stay-in batter had already gone. The kind
+					of player this chapter mourns was never part of its story.
 				</p>
 			{:else if kind === 'neutral'}
-				<p class="viz-label">The most recent anchor the IPL has seen — {v.batter}, {v.season}</p>
+				<p class="viz-label">The most recent anchor the IPL has seen: {v.batter}, {v.season}</p>
 				<figure class="worm-fig">
-					<svg viewBox="0 0 {VBW} {VBH}" role="img" aria-label="{v.batter}'s {v.runs} off {v.balls}, a slow worm against the day's going rate">
+					<svg viewBox="0 0 {VBW} {VBH}" role="img" aria-label="{v.batter}'s {v.runs} off {v.balls}, a slow rising line against the day's going rate">
 						<line x1={PAD} y1={VBH - PAD} x2={VBW - PAD} y2={VBH - PAD} class="axis" />
 						<line x1={PAD} y1={VBH - PAD} x2={PAD} y2={PAD} class="axis" />
 						<polyline points={parPts} class="par" />
@@ -150,18 +150,18 @@
 					{/if}
 				</figure>
 				<p class="headline">
-					The league’s last anchors: slow innings fell from
-					<strong>{anchorEarly !== null ? fmt1(anchorEarly) : '—'}%</strong> of every ball to
-					<strong>{anchorModern !== null ? fmt1(anchorModern) : '—'}%</strong>, and the risky single
-					— the run-out — from <strong>{runoutEarly !== null ? fmt1(runoutEarly) : '—'}%</strong> of
-					wickets to <strong>{runoutModern !== null ? fmt1(runoutModern) : '—'}%</strong>. A whole way
+					The league’s last anchors. Slow innings fell from
+					<strong>{anchorEarly !== null ? fmt1(anchorEarly) : '-'}%</strong> of every ball to
+					<strong>{anchorModern !== null ? fmt1(anchorModern) : '-'}%</strong>. And the risky single,
+					the run-out, fell from <strong>{runoutEarly !== null ? fmt1(runoutEarly) : '-'}%</strong> of
+					wickets to <strong>{runoutModern !== null ? fmt1(runoutModern) : '-'}%</strong>. A whole way
 					of batting, gone in a generation.
 				</p>
-				<p class="elegy">The most recent to play it: {v.batter} — {v.runs} off {v.balls}, strike rate {fmt1(v.sr)} against a going rate of {fmt1(v.par_sr)}{#if rarity !== null}; one of just {rarity} the league produced all {v.season}{/if}.</p>
+				<p class="elegy">The most recent to play it: {v.batter}. {v.runs} off {v.balls}, scoring {fmt1(v.sr)} runs per 100 balls against a going rate of {fmt1(v.par_sr)}{#if rarity !== null}. One of just {rarity} the league produced all {v.season}{/if}.</p>
 			{:else}
 				<p class="viz-label">{v.batter} · {v.venue}, {v.date}</p>
 				<figure class="worm-fig">
-					<svg viewBox="0 0 {VBW} {VBH}" role="img" aria-label="{v.batter}'s {v.runs} off {v.balls}, a slow worm against the day's going rate">
+					<svg viewBox="0 0 {VBW} {VBH}" role="img" aria-label="{v.batter}'s {v.runs} off {v.balls}, a slow rising line against the day's going rate">
 						<line x1={PAD} y1={VBH - PAD} x2={VBW - PAD} y2={VBH - PAD} class="axis" />
 						<line x1={PAD} y1={VBH - PAD} x2={PAD} y2={PAD} class="axis" />
 						<polyline points={parPts} class="par" />
@@ -173,18 +173,18 @@
 					{/if}
 				</figure>
 				<p class="headline">
-					<strong>{v.balls} balls, {v.runs} runs, strike rate {fmt1(v.sr)}.</strong>
-					Boundaries: {fmt1(v.boundary_pct)}% of what {pronounObj === 'her' ? 'she' : 'he'} faced. The
-					day’s going rate: {fmt1(v.par_sr)}.
+					<strong>{v.balls} balls, {v.runs} runs, scoring {fmt1(v.sr)} runs per 100.</strong>
+					Big hits: just {fmt1(v.boundary_pct)}% of the balls {pronounObj === 'her' ? 'she' : 'he'} faced.
+					The day’s going rate: {fmt1(v.par_sr)}.
 				</p>
 				<p class="elegy">
-					{v.team}’s most recent anchor{#if rarity !== null} — one of just {rarity} the {leagueLabel} produced all {v.season}{/if}. The careful accumulator is all but gone, and the game is quicker for its going.
+					{v.team}’s most recent anchor{#if rarity !== null}, one of just {rarity} the {leagueLabel} produced all {v.season}{/if}. The patient, stay-in batter is all but gone, and the game is quicker for it.
 				</p>
 			{/if}
 
 			<button class="dagger-btn" onclick={() => footnotesOpen.set('payoff-ch2')} aria-label="How the anchor was counted">ⓘ how we counted an anchor</button>
 			<button class="change" type="button" onclick={() => requestTeamChange(returnAnchor)}>
-				{kind === 'neutral' && !isFallback ? 'Pick a team — this card re-deals in its colours' : 'Not your team? Change it'}
+				{kind === 'neutral' && !isFallback ? 'Pick a team and this card re-deals in its colours' : 'Not your team? Change it'}
 			</button>
 		{/if}
 	</article>

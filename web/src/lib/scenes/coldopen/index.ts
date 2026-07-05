@@ -28,7 +28,7 @@ export const scenes: SceneDef[] = [
 		id: 'co-stakes',
 		chapter: 'coldopen',
 		anchor: 'coldopen',
-		navLabel: 'Cold open — Draw it',
+		navLabel: 'Cold open: Draw it',
 		scrollLength: 120,
 		fieldState: UNBORN,
 		annotations: Stakes

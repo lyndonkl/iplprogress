@@ -148,9 +148,9 @@
 
 <div class="pin" bind:this={rootEl}>
 	<div class="panel">
-		<p class="bridge">Thirty-odd thousand of these points belong to one team. Yours?</p>
+		<p class="bridge">Thirty-odd thousand of these dots belong to one team. Yours?</p>
 		<h2>Pick your team.</h2>
-		<p class="sub">Its deliveries ignite in its colors — and stay lit through the whole story.</p>
+		<p class="sub">Its balls light up in its colors, and stay lit through the whole story.</p>
 
 		<div class="tiles" bind:this={tilesEl} role="group" aria-label="Pick your team">
 			<!-- the skip IS a tile: first, full-width, identical styling (locked rule) -->
@@ -165,7 +165,7 @@
 				onclick={() => select(null)}
 			>
 				<span class="chip all">ALL</span>
-				<span class="name">No team — show me everything.</span>
+				<span class="name">No team. Show me everything.</span>
 			</button>
 
 			{#if teams.length > 0}
@@ -183,7 +183,7 @@
 					{/each}
 				</div>
 			{:else}
-				<p class="note" role="status">The crests are still assembling with the field…</p>
+				<p class="note" role="status">The teams are still loading in with the field…</p>
 			{/if}
 		</div>
 

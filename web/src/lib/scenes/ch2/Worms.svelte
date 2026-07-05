@@ -159,24 +159,25 @@
 		{#if step === 1}
 			<div class="scene-card">
 				<p>
-					Draw an innings as a rising line: <strong>runs climbing with every ball faced.</strong>
-					Steep line, fast scoring. Flat line, slow. Every ball ever bowled is in the haze.
+					Every dot is one ball. The further right, <strong>the more balls the batter had faced.</strong>
+					The higher up, the more runs. A fast innings climbs steeply, a slow one stays flat.
+					Every ball ever bowled is in this cloud.
 				</p>
 			</div>
 		{:else if step === 2}
 			<div class="scene-card">
 				<p>
-					This is what a normal innings looks like now — <strong>it sprints.</strong> The day's
-					going rate barely pauses for breath.
+					The grey line is the day's going rate, what a good team would be on. <strong>Look how it
+					sprints.</strong> Barely a pause for breath.
 				</p>
 			</div>
 		{:else}
 			<div class="scene-card chip">
 				<p>
-					And this is <strong>an anchor.</strong>
+					The gold line is one anchor's innings.
 					<button class="dagger" onclick={() => footnotesOpen.set('anchor-definition')} aria-label="How we counted an anchor">ⓘ</button>
-					Same runs to chase, a different animal entirely — patient, boundary-light,
-					<strong>holding on.</strong>
+					Same target, but <strong>look at it crawl.</strong> Barely a big shot in sight. Just nudge a
+					single, live to face the next ball, and <strong>let the big hitters swing</strong> at the other end.
 				</p>
 			</div>
 		{/if}

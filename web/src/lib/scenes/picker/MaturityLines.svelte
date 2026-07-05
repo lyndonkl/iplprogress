@@ -46,8 +46,8 @@
 			vals.length > 1 && vals[vals.length - 1] < vals[0] ? 'falling' : 'climbing';
 		const f = (vals: number[]): string => vals.map((v) => v.toFixed(2)).join(', ');
 		return (
-			`Run rate by league age, years one to four, on one 7-to-9 scale. ` +
-			`IPL: ${f(ipl)} — ${dir(ipl)}. WPL: ${f(wpl)} — ${dir(wpl)}.`
+			`Runs an over across league years one to four, both lines on one 7-to-9 scale. ` +
+			`The IPL line is ${dir(ipl)}: ${f(ipl)}. The WPL line is ${dir(wpl)}: ${f(wpl)}.`
 		);
 	});
 </script>
@@ -59,7 +59,7 @@
 		<line class="gridline" x1={LEFT - 4} y1={y(D_MAX)} x2={RIGHT + 8} y2={y(D_MAX)} />
 		<text class="tick" x={LEFT - 10} y={y(D_MIN) + 3} text-anchor="end">{D_MIN}</text>
 		<text class="tick" x={LEFT - 10} y={y(D_MAX) + 3} text-anchor="end">{D_MAX}</text>
-		<text class="axis-name" x={LEFT - 4} y={TOP - 6}>run rate</text>
+		<text class="axis-name" x={LEFT - 4} y={TOP - 6}>runs an over</text>
 
 		<polyline class="ipl" points={path(ipl)} />
 		<polyline class="wpl" points={path(wpl)} />

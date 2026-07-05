@@ -254,7 +254,7 @@
 			<div class="overlay error" role="alert">
 				<p><strong>The field can’t assemble.</strong></p>
 				<p class="detail">
-					Data files are missing from <code>/data/</code> — the pipeline emits
+					Data files are missing from <code>/data/</code>. The pipeline emits
 					<code>meta.json · groups.json · teams.json · group_ids.u16 · attrs.u8 ·
 					ballsfaced.u8 · team.u8</code> into <code>web/static/data/</code> at integration.
 				</p>

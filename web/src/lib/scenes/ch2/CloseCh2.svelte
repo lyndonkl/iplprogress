@@ -18,9 +18,9 @@
 	<div class="caption-slot" class:shown>
 		<div class="scene-card">
 			<p>
-				The anchor is gone — and the game is <strong>faster and braver</strong> for losing him. But
-				he was the <strong>first</strong> casualty, not the last: when batting changes this much, the
-				men with the ball have to answer. <strong>That's next.</strong>
+				The anchor is gone, and the game is <strong>faster and braver</strong> for losing him. But
+				he was only the <strong>first</strong> to fall. When batting changes this much, the bowlers
+				have to answer. <strong>That's next.</strong>
 			</p>
 		</div>
 	</div>

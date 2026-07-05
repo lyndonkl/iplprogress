@@ -32,7 +32,7 @@ export const scenes: SceneDef[] = [
 		id: 'ch2-title',
 		chapter: 'ch2',
 		anchor: 'ch2',
-		navLabel: 'Chapter 2 — The Last of the Anchors',
+		navLabel: 'Chapter 2: The Last of the Anchors',
 		scrollLength: 100,
 		morphLength: 45,
 		// free field dimmed one stop behind the eulogy; Ch 1→Ch 2 is free→free

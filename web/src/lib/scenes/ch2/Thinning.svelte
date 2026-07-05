@@ -172,7 +172,7 @@
 	{#if reduced && firstSeason && lastSeason}
 		<div class="small-multiple">
 			<figure class="mini">
-				<figcaption>{firstSeason.season} — a sample of anchors</figcaption>
+				<figcaption>{firstSeason.season}: a sample of anchors</figcaption>
 				<svg viewBox="0 0 {MINI} {MINI}" role="img" aria-label="{firstSeason.season} anchor innings, several slow rising lines">
 					{#each firstSeason.exemplars.slice(0, firstSeason.k) as e (e.batter)}
 						<polyline points={miniPoints(e.cum_runs)} class="mini-anchor" />
@@ -180,7 +180,7 @@
 				</svg>
 			</figure>
 			<figure class="mini">
-				<figcaption>{lastSeason.season} — a survivor or two</figcaption>
+				<figcaption>{lastSeason.season}: a survivor or two</figcaption>
 				<svg viewBox="0 0 {MINI} {MINI}" role="img" aria-label="{lastSeason.season} anchor innings, one or two slow rising lines">
 					{#each lastSeason.exemplars.slice(0, lastSeason.k) as e (e.batter)}
 						<polyline points={miniPoints(e.cum_runs)} class="mini-anchor" />
@@ -196,7 +196,7 @@
 	     lands (step 3). Reduced motion keeps it static-legible (never dimmed). -->
 	{#if ch2 && seasonsIpl.length}
 		<div class="chart-slot" class:dimmed={!reduced && step === 2}>
-			<figure class="chart" aria-label="Anchor share of every ball bowled, by season, {minYear} to {maxYear}, on a zero-based scale — {shareEarly !== null ? fmt1(shareEarly) : ''}% falling to {shareModern !== null ? fmt1(shareModern) : ''}%">
+			<figure class="chart" aria-label="Slow innings as a share of every ball bowled, by season, {minYear} to {maxYear}, on a zero-based scale. {shareEarly !== null ? fmt1(shareEarly) : ''}% falling to {shareModern !== null ? fmt1(shareModern) : ''}%">
 				<figcaption class="chart-title">Slow innings, share of every ball bowled</figcaption>
 				<svg viewBox="0 0 {W} {H}" style="font-size:{FONT}px" role="img" aria-hidden="true">
 					{#each [0, 6, 12, 18] as g (g)}
@@ -225,24 +225,24 @@
 		{#if step === 1}
 			<div class="scene-card">
 				<p>
-					<strong>Every team once carried two or three.</strong> The anchor was doctrine — see off
-					the new ball, bat till the end, let the others tee off.
+					<strong>Every team once carried two or three of them.</strong> The anchor was the plan.
+					See off the new ball, bat till the end, and let the others tee off.
 				</p>
 			</div>
 		{:else if step === 2}
 			<div class="scene-card">
 				<p>
-					Watch them thin out. Slow innings ate <strong>{shareEarly !== null ? fmt1(shareEarly) : '—'}% of every
-						ball bowled</strong> in the league's earliest seasons; in the last four, just
-					<strong>{shareModern !== null ? fmt1(shareModern) : '—'}%</strong> — a whole way of batting hunted
-					toward the margins. By the final seasons its survivors are <strong>few enough to name.</strong>
+					Watch them thin out. Slow innings filled <strong>{shareEarly !== null ? fmt1(shareEarly) : '-'}% of every
+					ball bowled</strong> in the league's first seasons. In the last four, just
+					<strong>{shareModern !== null ? fmt1(shareModern) : '-'}%</strong>. A whole way of batting, pushed to
+					the edges. By the end you can <strong>count the survivors on one hand.</strong>
 				</p>
 			</div>
 		{:else}
 			<div class="scene-card chip">
 				<p>
-					A whole archetype, all but gone from the game — <strong>and the game is quicker and
-						braver for its passing.</strong>
+					A whole kind of batter, all but gone. <strong>And the game is quicker and braver for
+					it.</strong>
 					<button class="dagger" onclick={() => footnotesOpen.set('anchor-extinction')} aria-label="How we counted the decline">ⓘ</button>
 				</p>
 			</div>
@@ -259,12 +259,12 @@
 			<ol>
 				{#each survivors as s (s.batter)}
 					<li>
-						<strong>{s.batter}</strong> — {s.runs} off {s.balls}: strike rate {fmt1(s.sr)},
-						well under the day's going rate of {fmt1(s.par_sr)}
+						<strong>{s.batter}</strong>: {s.runs} off {s.balls}. That is {fmt1(s.sr)} runs per 100 balls,
+						well below the day's going rate of {fmt1(s.par_sr)}
 					</li>
 				{/each}
 			</ol>
-			<p class="baseline">Slow for their day — each one well below the going rate, few enough to name.</p>
+			<p class="baseline">Slow for their day. Each one well below the going rate, and few enough to name.</p>
 		</div>
 	{/if}
 </div>

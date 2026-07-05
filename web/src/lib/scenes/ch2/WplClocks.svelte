@@ -139,11 +139,11 @@
 		<div class="caption-slot" class:shown>
 			<div class="scene-card">
 				<p>
-					<strong>The WPL never had an anchor era to lose.</strong> Four seasons in, its
-					slow-innings share already sits at the modern IPL's — born past the anchor. Yet its
-					run-outs run at <strong class="wpl-ink">{fmt1(b.runout_share_pct)}%</strong> —
-					mid-revolution, partway down the IPL's long fall.
-					<strong>Two clocks: batting modern, running mid-clock.</strong>
+					<strong>The WPL never had an anchor era to lose. It was born modern.</strong> On the left
+					dial, its slow-innings share already sits where the IPL is today. On the right, its
+					run-outs are still on the move, at <strong class="wpl-ink">{fmt1(b.runout_share_pct)}%</strong>,
+					partway down the IPL's long fall.
+					<strong>One league, two clocks running at once.</strong>
 					<button class="dagger" onclick={() => footnotesOpen.set('wpl-two-clocks-ch2')} aria-label="How the WPL numbers were counted">ⓘ</button>
 				</p>
 			</div>

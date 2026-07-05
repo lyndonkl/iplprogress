@@ -79,7 +79,7 @@
 <div class="pin" class:reduced class:active>
 	{#if ch2 && seasons.length}
 		<div class="chart-slot">
-			<figure class="chart" aria-label="Run-outs as a share of all dismissals, by season, {minYear} to {maxYear}, on a zero-based scale — {share2008 !== null ? fmt1(share2008) : ''}% in 2008 falling to {share2026 !== null ? fmt1(share2026) : ''}% now">
+			<figure class="chart" aria-label="Run-outs as a share of all wickets, by season, {minYear} to {maxYear}, on a zero-based scale. {share2008 !== null ? fmt1(share2008) : ''}% in 2008 falling to {share2026 !== null ? fmt1(share2026) : ''}% now">
 				<figcaption class="chart-title">Run-outs, share of all wickets</figcaption>
 				<svg viewBox="0 0 {W} {H}" style="font-size:{FONT}px" role="img" aria-hidden="true">
 					{#each [0, 4, 8, 12] as g (g)}
@@ -104,9 +104,9 @@
 		{#if step === 1}
 			<div class="scene-card">
 				<p>
-					When the anchor rotated strike, he took risks between the wickets.
-					<strong>In 2008, run-outs were one dismissal in eight</strong>
-					{#if share2008 !== null}({fmt1(share2008)}%){/if} — the sharp single, the desperate second.
+					The anchor lived on quick singles, and quick singles mean risk between the wickets.
+					<strong>Back in 2008, one wicket in eight was a run-out</strong>
+					{#if share2008 !== null}({fmt1(share2008)}%){/if}. The sharp single, the desperate second.
 				</p>
 			</div>
 		{:else if step === 2}
@@ -114,20 +114,20 @@
 				<p>
 					Watch them drain away.
 					<strong>
-						{share2008 !== null ? fmt1(share2008) : '—'}% of all wickets then,
-						{share2026 !== null ? fmt1(share2026) : '—'}% now.
+						{share2008 !== null ? fmt1(share2008) : '-'}% of all wickets then,
+						{share2026 !== null ? fmt1(share2026) : '-'}% now.
 					</strong>
-					Boundary-or-block replaced the scampered single — the riskiest run in the game is
-					quietly disappearing.
+					Batters stopped scampering singles and started swinging for four. The riskiest run in
+					the game is quietly vanishing.
 				</p>
 			</div>
 		{:else}
 			<div class="scene-card chip">
 				<p>
-					The clearest fossil in the data: <strong>the death of the risky single</strong> — and the
-					game is quicker and <strong>no more reckless</strong> for its passing.
+					The clearest fossil in the data is <strong>the death of the risky single</strong>. The game
+					got <strong>quicker without getting reckless</strong>.
 					<button class="dagger" onclick={() => footnotesOpen.set('runout-extinction')} aria-label="How we counted run-outs">ⓘ</button>
-					The anchor's whole game, and its whole way of getting out, went together.
+					The anchor's whole game, and his whole way of getting out, went together.
 				</p>
 			</div>
 		{/if}

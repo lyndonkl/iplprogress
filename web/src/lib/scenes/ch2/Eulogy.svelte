@@ -29,17 +29,17 @@
 		{:else if step === 2}
 			<div class="scene-card">
 				<p>
-					Every team once had one. When a wicket fell, he walked in and did the unglamorous
-					work — saw off the good balls, kept the score ticking, <strong>held the innings
-						together</strong> while the others swung. The game had a name for him:
-					<strong>the anchor</strong>. Then a revolution in how the game bats — flat out, from
-					the first ball — came looking for him.
+					Every team used to have one. When a wicket fell, he walked in and did the quiet
+					work. He saw off the good balls, kept the score ticking, <strong>held the innings
+						together</strong> while the big hitters swung. Cricket had a name for him.
+					<strong>The anchor</strong>. Then the game learned to bat flat out from ball one,
+					and it came looking for him.
 				</p>
 			</div>
 		{:else}
 			<div class="scene-card">
 				<p>
-					We came to say goodbye — <strong>to the man, not the runs.</strong> The game he built
+					We came to say goodbye. <strong>To the man, not the runs.</strong> The game he built
 					is faster now.
 				</p>
 				<p class="follow">Scroll on.</p>

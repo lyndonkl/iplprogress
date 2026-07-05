@@ -121,7 +121,7 @@
 				{#if tapped}
 					<div class="tap-read">
 						{#each cols as c (c.label)}
-							<p><strong>{c.label}:</strong> the day's rate {fmt2(c.par)}, post-wicket {fmt2(c.actual)} — a {fmt2(c.tax)} RPO stall.</p>
+							<p><strong>{c.label}:</strong> the day's rate {fmt2(c.par)}, and {fmt2(c.actual)} right after a wicket. A stall of {fmt2(c.tax)} runs an over.</p>
 						{/each}
 					</div>
 				{/if}
@@ -133,27 +133,27 @@
 		{#if step === 1}
 			<div class="scene-card">
 				<p>
-					Everything in this chapter is something the revolution <strong>killed.</strong> Here's the
-					one thing it couldn't. When a wicket falls, <strong>the scoring stalls</strong> — the next
+					Everything in this chapter is something the revolution <strong>killed.</strong> Here is the
+					one thing it couldn't. When a wicket falls, <strong>the scoring stalls</strong>. The next
 					ten balls dip below the day's rate.
 				</p>
 			</div>
 		{:else if step === 2}
 			<div class="scene-card">
 				<p>
-					And the dip <strong>didn't shrink — if anything it deepened:</strong>
-					<strong>−{taxEarly !== null ? fmt2(taxEarly) : '—'}</strong> runs an over below the day's
-					going rate in the early seasons, <strong>−{taxModern !== null ? fmt2(taxModern) : '—'}</strong>
-					now. Even though the new man walks in swinging harder than ever, the scoring still stalls
-					the moment he arrives.
+					And the dip <strong>didn't shrink. If anything it got deeper.</strong> It was
+					<strong>−{taxEarly !== null ? fmt2(taxEarly) : '-'}</strong> runs an over below the going
+					rate in the early seasons, and <strong>−{taxModern !== null ? fmt2(taxModern) : '-'}</strong>
+					now. The new man walks in swinging harder than ever, and the scoring still stalls the
+					moment he arrives.
 					<button class="dagger" onclick={() => footnotesOpen.set('new-batter-tax')} aria-label="How we measured the tax">ⓘ</button>
 				</p>
 			</div>
 		{:else}
 			<div class="scene-card chip">
 				<p>
-					The batter changed; the cost didn't budge. <strong>Some costs are built into the game,
-						not the player</strong> — a new man at the crease, a field reset. Structural, not a
+					The batter changed, but the cost didn't budge. <strong>Some costs are baked into the game,
+					not the player.</strong> A new man at the crease, a field reset. Built into the game, not a
 					failure of nerve.
 				</p>
 			</div>
