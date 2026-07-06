@@ -47,8 +47,8 @@
    "bytes_gz": 24489
   },
   "engines/wp_grid.json": {
-   "bytes_raw": 156756,
-   "bytes_gz": 33050
+   "bytes_raw": 157404,
+   "bytes_gz": 33765
   },
   "group_ids.u16": {
    "bytes_raw": 632398,
@@ -93,6 +93,10 @@
   "scenes/coldopen.json": {
    "bytes_raw": 3720,
    "bytes_gz": 779
+  },
+  "scenes/interlude.json": {
+   "bytes_raw": 160905,
+   "bytes_gz": 34491
   },
   "scenes/sandbox.json": {
    "bytes_raw": 3311,
@@ -181,6 +185,15 @@
    "pass": true
   },
   {
+   "name": "interlude (Net Session scene doc)",
+   "files": [
+    "scenes/interlude.json"
+   ],
+   "budget_gz": 2000000,
+   "actual_gz": 34491,
+   "pass": true
+  },
+  {
    "name": "engines (ch2 par/entry + R3b parallel-track re288/wp_grid)",
    "files": [
     "engines/entry.json",
@@ -191,7 +204,7 @@
     "engines/wp_grid.json"
    ],
    "budget_gz": 2000000,
-   "actual_gz": 194753,
+   "actual_gz": 195468,
    "pass": true
   },
   {
@@ -219,13 +232,14 @@
     "scenes/ch3.json",
     "scenes/ch4.json",
     "scenes/coldopen.json",
+    "scenes/interlude.json",
     "scenes/sandbox.json",
     "team.u8",
     "teams.json",
     "wallheat.u8"
    ],
    "budget_gz": 25000000,
-   "actual_gz": 1593077,
+   "actual_gz": 1628283,
    "pass": true
   }
  ],

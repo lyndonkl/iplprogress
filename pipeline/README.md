@@ -17,6 +17,7 @@ python3 pipeline/flatten.py \
   && python3 pipeline/entry.py \
   && python3 pipeline/re288.py \
   && python3 pipeline/wp.py \
+  && python3 pipeline/interlude.py \
   && python3 pipeline/bowlerplane.py \
   && python3 pipeline/payoff_harness.py \
   && python3 pipeline/ledger.py \
@@ -32,7 +33,10 @@ and `entry.py` emit the R2a engine tables under `engines/` (they read only the c
 `canon`, never an R1 artifact); `re288.py` and `wp.py` are the **parallel-track engines
 #2/#3** (RE288 run-expectancy surfaces + the win-probability grids / Leverage Index) —
 they also read only the corpus + `canon`, emit `engines/re288.json` + `engines/wp_grid.json`,
-and are consumed by **R3b** (not by any R2a scene); `bowlerplane.py` (R2b, engine #1
+and are consumed by **R3b** (not by any R2a scene); `interlude.py` (R3b) reads those
+two gate-validated engine JSONs and emits `scenes/interlude.json` — the Net Session
+two-dial widget between Ch 4 and Ch 5 — so it must run **after** `re288.py`/`wp.py`; it
+never edits an engine, only re-projects it; `bowlerplane.py` (R2b, engine #1
 family) emits the **`bowlerplane.u8`** per-point buffer (the Chapter-3 economy x
 strike-rate morph coordinate) and registers it in `meta.json` — it must run **after**
 `flatten`/`scenes` (which write `meta.json`) so the manifest stays byte-deterministic;
@@ -54,6 +58,7 @@ verified by rebuilding and diffing checksums.
 | `entry.py` | **Engine #5 full** (R2a) — entry states / derived batting positions. Emits `engines/entry.json`: one row per batter-innings with entry ball-index, wickets fallen, innings#, derived batting position, chase RRR at entry, and the innings outcome. |
 | `re288.py` | **Engine #2** (parallel track, consumed R3b) — RE288 run-expectancy surfaces. Emits `engines/re288.json`: expected first-innings runs-to-come on the (overs-bowled × wickets-lost) grid, per era band + evidence-masked pooled WPL, weighted-isotonic-smoothed so runs-to-come is monotone in both axes. Gate-tested by `tests/test_engines.py`. |
 | `wp.py` | **Engine #3** (parallel track, consumed R3b) — win-probability lookup grids + Leverage Index. Emits `engines/wp_grid.json`: P(chase win) on the (era × overs-left × wickets-in-hand × required-rate) grid (monotone in rate & wickets), the LI byproduct on the pooled grid, and the first-innings defend curve. Gate-tested by `tests/test_engines.py` (the binding calibration check). |
+| `interlude.py` | **R3b — the Net Session interlude scene.** Consumes the gate-validated `engines/wp_grid.json` (win) + `engines/re288.json` (runs) and emits `scenes/interlude.json`: both dials re-indexed to one widget coordinate `[overs_left-1][wickets_in_hand-1]` (win adds a required-rate bucket), per era band + an all-time pooled default (win from `ipl pooled`; runs **derived** here — RE288 ships no IPL-pooled surface — as the evidence-weighted mean of the five era surfaces, monotone-repaired with the engine's own isotonic step) + the WPL toggle with both evidence masks (win `n<12`, runs `n<15`). Resolves three presets from the grids (**"Dhoni, 2011 final"** read from the corpus as the real chase-of-206 state; **"needing 10 an over at halfway, 2010"** and **"the same chase, 2025"** — one scoreboard, two era surfaces), the validated era anchor, and data-bound footnotes (calibration, wicket-lever-early/rate-lever-late, mask thresholds). Every preset's quoted number is the exact grid readout at its cell, so the copy can never contradict the meter. Reads engines only; never edits them. |
 | `payoff_harness.py` | Payoff-card snapshot harness: emits + asserts the 16 Chapter-1 variants (R1a full spec). |
 | `ledger.py` | Payload ledger vs the §2 budgets; prints the table; writes `ledger.json`. |
 | `tests/` | `unittest` snapshot tests (see below). |
@@ -105,6 +110,7 @@ index, over, delivery index):
 | `engines/entry.json` **(R2a)** | Engine #5 entry states: columnar arrays over 20,488 batter-innings — `{league (0/1), season, match_index, innings, batter (dict-coded), position, entry_ball (legal-ball index), wickets, rrr (chases only, else null), balls_faced, runs, dismissed}` + a `batter` names dict. |
 | `engines/re288.json` **(engine #2, R3b)** | RE288 run-expectancy surfaces. Per surface (5 IPL era bands + pooled evidence-masked WPL) a 20×10 grid `re[o][w]` = expected first-innings runs-to-come from `o` overs bowled, `w` down (runs.total, extras included), first innings only, non-D/L. Weighted-isotonic-smoothed → monotone non-increasing in both wickets and overs; each cell carries its raw `n`; WPL cells with `n < 15` carry `masked=1`. Each surface ships a `calibration` block (pooled predicted == actual). |
 | `engines/wp_grid.json` **(engine #3, R3b)** | Win-probability lookup grids + Leverage Index. `second_innings.surfaces` — per surface (5 era bands + `ipl pooled` + evidence-masked WPL) a 20×10×10 grid `wp[overs_left][wickets_in_hand][rrr_bucket]` = P(chase win), monotone non-increasing in required rate & non-decreasing in wickets; the pooled surface also carries `leverage_index`. `first_innings_defend` — P(bat-first win \| final-total bucket) per era, monotone in total. `calibration` — the binding reliability table + the raw era anchor. Built empirically (a lookup, never a live model), target.overs==20, non-D/L. |
+| `scenes/interlude.json` **(R3b)** | The Net Session two-dial widget. `state_space` + `index` (the widget coordinate: `win[era][overs_left-1][wickets_in_hand-1][rrr_bucket]`, `runs[era][overs_left-1][wickets_in_hand-1]`, with the `rrr_edges`); `surfaces.win` (20×10×10 per era, engine #3 verbatim) + `surfaces.runs` (20×10 per era, engine #2 re-indexed, plus a derived `ipl pooled` default); `wpl` (both evidence masks + evidenced/masked cell counts + the "not enough WPL cricket yet" note); `presets` (Dhoni 2011 final + the same-chase-two-eras pair, each with `win_pct`/`expected_runs` equal to their grid cell and voice-guide copy); `era_anchor` (the validated ~23%→~31% headline + `delta_points`); `meters`/`sliders`/`intro` copy; `footnotes` (calibration, wickets-early/rate-late, mask thresholds). ~120 KB raw / ~23 KB gz. |
 | `scenes/ch3.json` **(R2b)** | Chapter 3 "The Counterrevolution". `frontier` (the Attack-Containment plane: `under7` share per era + season, the per-league-season Pareto `hull`, the Ashwin `ghost_trail`, the refuted econ~SR `correlation`, and the `axis` encoding the buffer shares), `dot_plus` (season dot rate + Dot+ leaderboard + dot-scarcity index), `dismissal_dna` (era shares + per-season `rivers` counts), `death_wide_tax` (per-season death wides/100 + the doubling), `dot_grid` (the 2009 + 2026 Finals as 120-cell outcome grids), `crack_ratio` (middle-overs, per era), `wpl_beat` (the two clocks), `gravity_defiers` (20 franchise True-Economy cards), `footnotes` (True Economy 7.79→9.38, True Wickets/24, Phase Fingerprint, FIB, the refuted correlation, conventions), and `bowlerplane_buffer` (the `bowlerplane.u8` decode spec). |
 | `bowlerplane.u8` **(R2b)** | Per-point buffer, **2 bytes/point** in the field point order (season-blocked, super overs excluded — identical to the other buffers). Byte 0 = the delivery's bowler-season economy, quantized linearly over [4.0, 16.0] RPO → 0..254 (clamped); byte 1 = its bowling strike rate over [8.0, 60.0] legal-balls-per-wicket → 0..254 (clamped), `255` = the "no strike rate" sentinel (the bowler-season took no bowler-credited wicket). Lets the field condense every ball toward its bowler-season's coordinate on the economy × strike-rate plane (Ch 3's controlling morph). Wides/no-balls carry their bowler-season coordinate like any delivery; every delivery has a bowler, so there are no non-bowler deliveries. Decode: `economy = 4 + b0/254*12`; `strike_rate = 8 + b1/254*52` (b1 < 255). |
 | `ledger.json` | the payload audit (build report, excluded from its own budget math) |
@@ -436,6 +442,20 @@ python3 -m unittest discover -s pipeline/tests -q     # 193 tests
   Bumrah-2024); the **engine #1 gate** (Ch 3's batter marginal == `engines/phasepar.json`
   `expected_runs_per_ball` for every (league, season, phase)); and `ch3.json` on-disk ==
   `ch3_doc(build_ch3())` byte-for-byte.
+
+- `test_r3b.py` **(R3b, the Net Session interlude)** — `scenes/interlude.json` as a faithful
+  re-projection of the gate-validated engines (the engine correctness itself is `test_engines.py`'s
+  job): every embedded win surface is engine #3 **verbatim** and every runs surface is engine
+  #2 re-indexed cell-for-cell; the derived `ipl pooled` runs default is monotone and bracketed
+  by the era surfaces; both dials are monotone in the widget coordinate (runs rise with overs +
+  wickets, win falls with rate + rises with wickets). Preset integrity: each preset's `win_pct` /
+  `expected_runs` **equals** its grid cell (copy can't contradict the meter); the Dhoni preset is
+  the real 2011 IPL final rebuilt from the corpus (CSK batted first, Bangalore chased the target,
+  ball-one state); the same-chase pair shares one scoreboard on two era surfaces with win + runs
+  both rising and both cells carrying ≥20 real observations. The era anchor equals the grid's
+  (~0.23 → ~0.31); the WPL win mask flags only `n<12` cells and the runs mask only `n<15` cells,
+  counts consistent, never all / never none; the wicket-lever footnote is true in the emitted grid
+  (early ≫ late). On-disk == a fresh `build_doc()` byte-for-byte, within the 2 MB chapter budget.
 
 Snapshot constants live at the top of each test file; a new Cricsheet drop that changes
 the corpus must update them consciously.

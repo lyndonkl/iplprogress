@@ -87,6 +87,13 @@ K_WPL = 25.0  # WPL cells shrink harder toward IPL-pooled (88 matches)
 # WPL minimum-evidence mask on the WP grid.
 WPL_MASK_MIN_N = 12
 
+# Calibration gate (the BINDING §5 check). A decile is "populated" at >= CALIB_MIN_N
+# states; the gate requires ECE < CALIB_ECE_MAX and every populated decile within
+# CALIB_BIN_MAX of the diagonal. Asserted in tests/test_engines.py.
+CALIB_MIN_N = 500
+CALIB_ECE_MAX = 0.03
+CALIB_BIN_MAX = 0.05
+
 # First-innings defend curve: total buckets [lo, lo+10) with a low/high catch-all.
 DEFEND_LO = 120
 DEFEND_HI = 230
@@ -335,22 +342,63 @@ def _raw_counts(innings_list):
     return cells
 
 
+def _global_rrr_marginal(pooled_cells, glob):
+    """P(win | rrr_bucket) pooled over overs_left and wickets, made
+    NON-INCREASING in rrr by weighted PAV. This is the physical anchor each
+    (overs_left, rrr) marginal shrinks toward, so an EMPTY high-rrr tail cell
+    imputes to a sensible low win prob (grrr[-1] ~ 0.01) instead of the scalar
+    global chase-win rate (~0.52).
+
+    Why this matters (it is the fix for the bin-1 over-prediction): without a
+    per-rrr anchor, an unobserved high-rrr cell inherited the ~0.52 global rate;
+    the non-increasing-in-rrr isotonic step then pooled that fake-high tail back
+    into real, well-populated hard-chase cells (e.g. 17 overs left, 8 in hand,
+    12-15 RPO: raw 0/52, inflated to ~0.21), systematically over-pricing hopeless
+    early chases."""
+    marg = defaultdict(lambda: [0, 0])  # rb -> [wins, n]
+    for (_ol, _wih, rb), (w, n) in pooled_cells.items():
+        m = marg[rb]
+        m[0] += w
+        m[1] += n
+    vals, wts = [], []
+    for rb in range(N_RRR):
+        w, n = marg[rb]
+        vals.append((w + K_POOL * glob) / (n + K_POOL))
+        wts.append(n + 1.0)
+    return _pav(vals, wts, increasing=False)
+
+
 def _coarse_marginal(pooled_cells):
-    """P(win | overs_left, rrr) pooled over wickets, for the shrink prior, and
-    the global chase-win rate it in turn shrinks toward."""
+    """P(win | overs_left, rrr) pooled over wickets — the shrink prior for a thin
+    pooled cell, and the global chase-win rate + per-rrr anchor it builds on.
+
+    Each (overs_left, rrr) cell shrinks toward the per-rrr global anchor grrr[rb]
+    (NOT the scalar global rate), and each overs_left row is then made
+    non-increasing in rrr by weighted PAV. So the prior a consumer cell inherits
+    already obeys the same physics the final surface isotonic enforces — an
+    unobserved high-rrr cell can no longer pull a real hard-chase cell upward.
+    Returns (coarse{(ol, rrr): p}, glob, grrr)."""
     marg = defaultdict(lambda: [0, 0])  # (ol, rrr) -> [wins, n]
     tot_w = tot_n = 0
-    for (ol, wih, rb), (w, n) in pooled_cells.items():
+    for (ol, _wih, rb), (w, n) in pooled_cells.items():
         m = marg[(ol, rb)]
         m[0] += w
         m[1] += n
         tot_w += w
         tot_n += n
     glob = tot_w / tot_n if tot_n else 0.5
+    grrr = _global_rrr_marginal(pooled_cells, glob)
     coarse = {}
-    for k, (w, n) in marg.items():
-        coarse[k] = (w + K_POOL * glob) / (n + K_POOL)
-    return coarse, glob
+    for ol in range(N_OVERS_LEFT):
+        row_vals, row_wts = [], []
+        for rb in range(N_RRR):
+            w, n = marg.get((ol, rb), (0, 0))
+            row_vals.append((w + K_POOL * grrr[rb]) / (n + K_POOL))
+            row_wts.append(n + 1.0)
+        mono = _pav(row_vals, row_wts, increasing=False)
+        for rb in range(N_RRR):
+            coarse[(ol, rb)] = mono[rb]
+    return coarse, glob, grrr
 
 
 def _shrunk_pooled(pooled_cells, coarse, glob):
@@ -489,6 +537,7 @@ def _calibration(innings_list, era_grids):
     rows = []
     wdev = 0.0
     tot = 0
+    worst = 0.0
     for b in range(10):
         s_pred, s_act, n = bins[b]
         if not n:
@@ -496,24 +545,35 @@ def _calibration(innings_list, era_grids):
             continue
         pred = s_pred / n
         act = s_act / n
+        dev = abs(pred - act)
         rows.append({
             "bin": b, "n": n,
             "pred": round(pred, 4),
             "actual": round(act, 4),
-            "abs_dev": round(abs(pred - act), 4),
+            "abs_dev": round(dev, 4),
         })
-        wdev += abs(pred - act) * n
+        wdev += dev * n
         tot += n
+        if n >= CALIB_MIN_N:
+            worst = max(worst, dev)
+    ece = round(wdev / tot, 5) if tot else None
     return {
         "note": (
-            "In-sample reliability: each second-innings legal-ball state scored "
-            "by its own era grid, binned into predicted-WP deciles. A lookup "
-            "grid is calibrated by construction; shrinkage regularizes thin "
-            "cells and the monotone constraint is mild, so the deciles track the "
-            "diagonal."
+            "Reliability table (the interlude's calibration plot): each "
+            "second-innings legal-ball state scored by its own era grid, binned "
+            "into predicted-WP deciles; pred = mean predicted WP, actual = "
+            "observed chase-win frequency, per bin. A lookup grid is calibrated "
+            "by construction; shrinkage regularizes thin cells and the monotone "
+            "constraint is mild, so the deciles track the diagonal."
         ),
         "bins": rows,
-        "weighted_mean_abs_dev": round(wdev / tot, 5) if tot else None,
+        # ECE = evidence-weighted mean |pred - actual| over deciles (the gate's
+        # headline number). weighted_mean_abs_dev is kept as its long-form alias.
+        "ece": ece,
+        "weighted_mean_abs_dev": ece,
+        "worst_populated_bin_abs_dev": round(worst, 5),
+        "worst_populated_bin_min_n": CALIB_MIN_N,
+        "tolerance": {"ece_max": CALIB_ECE_MAX, "bin_abs_dev_max": CALIB_BIN_MAX},
         "n": tot,
     }
 
@@ -597,7 +657,7 @@ def build_doc(data_root: Path = canon.DATA_ROOT) -> dict:
     cells = _raw_counts(innings_list)
 
     pooled_raw = cells.get("pooled", {})
-    coarse, glob = _coarse_marginal(pooled_raw)
+    coarse, glob, grrr = _coarse_marginal(pooled_raw)
     pooled_parent = _shrunk_pooled(pooled_raw, coarse, glob)
     pooled_wp, pooled_n = _grid_from_cells(pooled_raw, pooled_parent, K_POOL)
 
@@ -629,6 +689,12 @@ def build_doc(data_root: Path = canon.DATA_ROOT) -> dict:
                   for ol in range(N_OVERS_LEFT)]
     surfaces["wpl 2023-2026"] = _emit_grid(wpl_wp, wpl_n, masked=wpl_masked)
 
+    n_wpl_cells = N_OVERS_LEFT * N_WKTS_IN_HAND * N_RRR
+    n_wpl_masked = sum(wpl_masked[ol][wih][rb]
+                       for ol in range(N_OVERS_LEFT)
+                       for wih in range(N_WKTS_IN_HAND)
+                       for rb in range(N_RRR))
+
     calibration = _calibration(innings_list, era_grids)
     calibration["era_anchor"] = _era_anchor(data_root)
 
@@ -658,7 +724,29 @@ def build_doc(data_root: Path = canon.DATA_ROOT) -> dict:
                 "Asserted in tests/test_engines.py."
             ),
             "rrr_edges": list(RRR_EDGES),
+            "global_rrr_anchor": (
+                "P(chase win | rrr_bucket) pooled over all overs_left / wickets, "
+                "monotone non-increasing in rrr. The physical prior every thin or "
+                "unobserved (overs_left, rrr) cell shrinks toward, so an empty "
+                "high-rrr tail cell imputes low instead of inheriting the global "
+                "chase-win rate."
+            ),
+            "global_rrr_anchor_values": [round(x, 4) for x in grrr],
             "wpl_mask_min_n": WPL_MASK_MIN_N,
+            "wpl_mask": {
+                "note": (
+                    "Minimum-evidence mask for the WPL win grid (88 matches, not "
+                    "1,331): a WPL cell built from fewer than wpl_mask_min_n "
+                    "second-innings observations carries masked=1 in the "
+                    "'wpl 2023-2026' surface. The interlude renders masked cells "
+                    "hatched ('not enough WPL cricket yet') rather than showing a "
+                    "shrinkage artifact as a finding."
+                ),
+                "min_n": WPL_MASK_MIN_N,
+                "cells_total": n_wpl_cells,
+                "cells_masked": n_wpl_masked,
+                "cells_evidenced": n_wpl_cells - n_wpl_masked,
+            },
             "surfaces": surfaces,
         },
         "leverage_index": {
@@ -692,8 +780,8 @@ def main(out_root: Path = canon.OUT_ROOT) -> dict:
     gz = len(flatten.gz_bytes(raw))
     print(f"  engines/wp_grid.json    raw={len(raw):>9,}  gz={gz:>8,}")
     cal = doc["calibration"]
-    print(f"WP calibration weighted mean |pred-actual| = "
-          f"{cal['weighted_mean_abs_dev']}  (n={cal['n']:,})")
+    print(f"WP calibration: ECE = {cal['ece']}  worst populated decile "
+          f"|pred-actual| = {cal['worst_populated_bin_abs_dev']}  (n={cal['n']:,})")
     anc = cal["era_anchor"]
     print(f"anchor 9+RPO ~60 balls left: 2008-2012 "
           f"{anc['ipl_2008_2012']['win_rate']} -> 2023-2026 "

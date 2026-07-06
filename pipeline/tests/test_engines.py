@@ -115,6 +115,29 @@ class TestRE288EraDrift(unittest.TestCase):
         emitted = ART["re288"]["surfaces"]["ipl 2023-2026"]["re"][10][3]
         self.assertAlmostEqual(emitted, raw, delta=3.0)
 
+    def test_recent_era_exceeds_earliest_across_states(self):
+        """Era-ordered sensibly: the modern era's run-expectancy exceeds the
+        earliest era at every representative live state (the scoring explosion).
+        Asserted only at the endpoints — the middle bands are NOT a strict
+        monotone chain (2011-15 dipped below 2008-10), and enforcing one would
+        be dishonest to the data."""
+        early = ART["re288"]["surfaces"]["ipl 2008-2010"]["re"]
+        recent = ART["re288"]["surfaces"]["ipl 2023-2026"]["re"]
+        for (o, w) in [(0, 0), (5, 1), (10, 3), (15, 5), (18, 7)]:
+            self.assertGreater(
+                recent[o][w], early[o][w],
+                msg=f"recent RE({o},{w})={recent[o][w]} !> early {early[o][w]}")
+
+    def test_corner_is_surface_max(self):
+        # RE is non-increasing in both axes, so (0 overs, 0 down) — the full
+        # innings ahead — is the maximum of every surface (a sanity floor).
+        for key, s in ART["re288"]["surfaces"].items():
+            re = s["re"]
+            mx = max(re[o][w] for o in range(re288.N_OVERS)
+                     for w in range(re288.N_WKTS))
+            self.assertAlmostEqual(re[0][0], mx, delta=1e-6,
+                                   msg=f"{key}: (0,0)={re[0][0]} not the max {mx}")
+
 
 class TestRE288WPLMask(unittest.TestCase):
     def test_wpl_surface_present_and_masked(self):
@@ -209,6 +232,10 @@ class TestWPCalibration(unittest.TestCase):
         cls.era_grids["wpl"] = ART["wp"]["second_innings"]["surfaces"]["wpl 2023-2026"]["wp"]
 
     def test_reliability_within_tolerance(self):
+        """The BINDING gate, recomputed independently from the emitted grids:
+        ECE < CALIB_ECE_MAX and every populated decile within CALIB_BIN_MAX of
+        the diagonal (the per-rrr-anchor fix cleared the bin-1 over-prediction of
+        hopeless early chases from 0.049 to 0.034)."""
         bins = [[0.0, 0.0, 0] for _ in range(10)]
         for rec in self.innings:
             grid = self.era_grids.get(rec.era)
@@ -222,23 +249,63 @@ class TestWPCalibration(unittest.TestCase):
                 bins[b][2] += 1
         wdev = 0.0
         tot = 0
+        worst = 0.0
         for b in range(10):
             s_pred, s_act, n = bins[b]
             if not n:
                 continue
             pred, act = s_pred / n, s_act / n
-            wdev += abs(pred - act) * n
+            dev = abs(pred - act)
+            wdev += dev * n
             tot += n
-            if n >= 500:  # well-populated bins must track the diagonal closely
-                self.assertLess(abs(pred - act), 0.06,
+            if n >= wp.CALIB_MIN_N:  # well-populated deciles track the diagonal
+                worst = max(worst, dev)
+                self.assertLess(dev, wp.CALIB_BIN_MAX,
                                 msg=f"bin {b}: pred={pred:.3f} act={act:.3f} n={n}")
-        weighted = wdev / tot
-        # the gate's headline number
-        self.assertLess(weighted, 0.03, msg=f"weighted mean |pred-actual|={weighted:.4f}")
+        ece = wdev / tot
+        self.assertLess(ece, wp.CALIB_ECE_MAX, msg=f"ECE={ece:.4f}")
+        # the fix must hold real margin, not just clear the line.
+        self.assertLess(ece, 0.02, msg=f"ECE regressed to {ece:.4f}")
+        self.assertLess(worst, 0.045, msg=f"worst populated decile {worst:.4f}")
 
     def test_emitted_calibration_table_agrees(self):
-        # the doc's own calibration table must report the same gate number.
-        self.assertLess(ART["wp"]["calibration"]["weighted_mean_abs_dev"], 0.03)
+        # the doc's own calibration table must report the same gate numbers,
+        # both within the declared tolerance, and expose the ECE alias.
+        cal = ART["wp"]["calibration"]
+        self.assertEqual(cal["ece"], cal["weighted_mean_abs_dev"])
+        self.assertLess(cal["ece"], wp.CALIB_ECE_MAX)
+        self.assertLess(cal["worst_populated_bin_abs_dev"], wp.CALIB_BIN_MAX)
+        self.assertEqual(cal["tolerance"],
+                         {"ece_max": wp.CALIB_ECE_MAX, "bin_abs_dev_max": wp.CALIB_BIN_MAX})
+        # every emitted decile row's abs_dev is under the bin tolerance.
+        for row in cal["bins"]:
+            if row.get("n", 0) >= wp.CALIB_MIN_N:
+                self.assertLess(row["abs_dev"], wp.CALIB_BIN_MAX,
+                                msg=f"emitted bin {row['bin']}")
+
+    def test_global_rrr_anchor_monotone(self):
+        """The fix guard: the per-rrr shrink anchor must be non-increasing, so an
+        empty high-rrr tail cell can never inherit the ~0.52 global rate and be
+        pooled back into a real hard-chase cell (the bin-1 inflation source)."""
+        anchor = ART["wp"]["second_innings"]["global_rrr_anchor_values"]
+        self.assertEqual(len(anchor), wp.N_RRR)
+        for i in range(len(anchor) - 1):
+            self.assertGreaterEqual(anchor[i] + 1e-9, anchor[i + 1],
+                                    msg=f"anchor not non-increasing at rrr {i}")
+        # hopeless chase (>= 20 RPO) anchors near zero; a trivial one near one.
+        self.assertLess(anchor[-1], 0.05)
+        self.assertGreater(anchor[0], 0.9)
+
+    def test_coarse_marginal_monotone_per_over(self):
+        # each overs_left row of the (ol, rrr) shrink prior is non-increasing.
+        innings, _ = wp.build()
+        pooled = wp._raw_counts(innings).get("pooled", {})
+        coarse, _glob, _grrr = wp._coarse_marginal(pooled)
+        for ol in range(wp.N_OVERS_LEFT):
+            row = [coarse[(ol, rb)] for rb in range(wp.N_RRR)]
+            for i in range(len(row) - 1):
+                self.assertGreaterEqual(row[i] + 1e-9, row[i + 1],
+                                        msg=f"coarse ol={ol} rises at rrr {i}")
 
 
 class TestWPEraAnchor(unittest.TestCase):
@@ -301,6 +368,32 @@ class TestLeverageIndex(unittest.TestCase):
         self.assertGreater(max(vals), 3.0)
         # the corpus mean is the normalizer, so the n-weighted average is ~1.
         self.assertGreater(ART["wp"]["leverage_index"]["corpus_mean_abs_dwp"], 0)
+
+
+class TestWPWPLMask(unittest.TestCase):
+    """The WPL minimum-evidence mask on the WIN grid, honest for the interlude."""
+
+    def test_wpl_surface_masked_and_summary_consistent(self):
+        si = ART["wp"]["second_innings"]
+        wpl = si["surfaces"]["wpl 2023-2026"]
+        self.assertIn("masked", wpl)
+        summary = si["wpl_mask"]
+        self.assertEqual(summary["min_n"], wp.WPL_MASK_MIN_N)
+        # a masked win-grid cell must be a thin cell.
+        masked_count = 0
+        for ol in range(wp.N_OVERS_LEFT):
+            for wih in range(wp.N_WKTS_IN_HAND):
+                for rb in range(wp.N_RRR):
+                    if wpl["masked"][ol][wih][rb]:
+                        masked_count += 1
+                        self.assertLess(wpl["n"][ol][wih][rb], wp.WPL_MASK_MIN_N)
+        # 88 matches over 2000 cells: most are masked, but the evidenced core
+        # (the common late-chase states) survives — never all, never none.
+        self.assertEqual(masked_count, summary["cells_masked"])
+        self.assertEqual(summary["cells_masked"] + summary["cells_evidenced"],
+                         summary["cells_total"])
+        self.assertGreater(summary["cells_evidenced"], 0)
+        self.assertGreater(summary["cells_masked"], 0)
 
 
 # ===========================================================================

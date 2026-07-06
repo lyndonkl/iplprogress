@@ -24,7 +24,7 @@
 
 <div class="pin">
 	<div class="scene-card interactive card">
-		<p class="overline">Chapter 4 of 10: The Rising Tide · done</p>
+		<p class="overline">Interlude: The Net Session · done</p>
 
 		<h2>Every ball is still here.</h2>
 		<p class="promise">
@@ -34,8 +34,8 @@
 		</p>
 
 		<p class="next">
-			<strong>Up next: the Interlude, The Net Session.</strong>
-			<em>Before we tell you what a ball is worth, you get to feel it in your own hands.</em>
+			<strong>Up next: Chapter 5, What a Ball Is Worth.</strong>
+			<em>You have felt the two meters by hand. Next we put a price on every ball, in both.</em>
 			<span class="tag">in build · the story grows chapter by chapter</span>
 		</p>
 

@@ -17,7 +17,16 @@ import type { FootnoteId } from './footnotes';
  * See CONTRACT.md in this directory for the full contract and ownership map.
  */
 
-export type ChapterId = 'coldopen' | 'picker' | 'ch1' | 'ch2' | 'ch3' | 'ch4' | 'endcard' | 'bowl';
+export type ChapterId =
+	| 'coldopen'
+	| 'picker'
+	| 'ch1'
+	| 'ch2'
+	| 'ch3'
+	| 'ch4'
+	| 'interlude'
+	| 'endcard'
+	| 'bowl';
 
 /** Uniform-driven subset highlight: lift/tint points matching a class mask. */
 export interface SubsetHighlight {

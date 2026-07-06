@@ -12,6 +12,7 @@
 	import { scenes as ch2Scenes } from '$lib/scenes/ch2';
 	import { scenes as ch3Scenes } from '$lib/scenes/ch3';
 	import { scenes as ch4Scenes } from '$lib/scenes/ch4';
+	import { scenes as interludeScenes } from '$lib/scenes/interlude';
 	import { scenes as endCardScenes } from '$lib/scenes/endcard';
 	import { scenes as sandboxScenes } from '$lib/scenes/sandbox';
 
@@ -27,6 +28,9 @@
 		...ch2Scenes,
 		...ch3Scenes,
 		...ch4Scenes,
+		// The Net Session interlude sits between Ch 4 and Ch 5's slot. Chapter 5
+		// (What a Ball Is Worth) slots in here in R3b-2; the end card follows for now.
+		...interludeScenes,
 		...endCardScenes,
 		...sandboxScenes
 	];
