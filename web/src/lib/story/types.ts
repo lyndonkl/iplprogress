@@ -224,6 +224,15 @@ export interface SceneDef {
 	/** scroll length of the scene's section, in vh */
 	scrollLength: number;
 	/**
+	 * OPTIONAL mobile-only scroll length (vh), used in place of `scrollLength`
+	 * when the read-then-watch gate is active (mobile viewport or
+	 * `?mobilecaptions=1`). Lengthen a scene here so the mobile caption's
+	 * read beat + clear gap feel unhurried without touching desktop (which
+	 * always uses `scrollLength`). Compute it with `readGapScrollLength()` from
+	 * captionReveal.svelte.ts. Omit → mobile uses `scrollLength`. See CONTRACT §17.
+	 */
+	mobileScrollLength?: number;
+	/**
 	 * how much of the leading scroll (vh) drives the morph from the previous
 	 * scene's fieldState to this one; the rest holds. Default min(140, scrollLength).
 	 * Set equal to scrollLength for a whole-scene scrub (the assembly set piece).

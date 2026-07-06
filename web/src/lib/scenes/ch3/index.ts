@@ -1,4 +1,5 @@
 import type { SceneDef } from '$lib/story/types';
+import { readGapScrollLength } from '$lib/story/captionReveal.svelte';
 import { retreatState } from './data';
 import Title from './Title.svelte';
 import Frontier from './Frontier.svelte';
@@ -48,6 +49,10 @@ export const scenes: SceneDef[] = [
 		id: 'ch3-frontier',
 		chapter: 'ch3',
 		scrollLength: 340,
+		// MOBILE read-then-watch (CONTRACT §17.5): the two post-morph axis-teaching
+		// steps (2 and 3) are ~18% of the scroll each; the extra travel keeps their
+		// read beat + clear gap unhurried on a phone. Desktop keeps 340 (byte-identical).
+		mobileScrollLength: readGapScrollLength(340), // ≈442vh, mobile only
 		morphLength: 180, // THE controlling morph: free field → the frontier plane
 		// every ball condenses onto its bowler-season's economy × strike-rate spot,
 		// settling into a low-alpha density haze; the axes + the opening-season edge
@@ -80,6 +85,10 @@ export const scenes: SceneDef[] = [
 		id: 'ch3-rivers',
 		chapter: 'ch3',
 		scrollLength: 300,
+		// MOBILE read-then-watch (CONTRACT §17.5): four number-dense caption steps
+		// (three at ~22% of the scroll); the extra travel keeps each read beat + gap
+		// unhurried on a phone. Desktop keeps 300 (byte-identical).
+		mobileScrollLength: readGapScrollLength(300), // ≈390vh, mobile only
 		morphLength: 40,
 		// the ONE subset-highlight (CONTRACT §16): bowler-credited wickets stream out
 		// of their clouds into a flat-baseline 100%-stacked band. It composes with
@@ -143,6 +152,10 @@ export const scenes: SceneDef[] = [
 		id: 'ch3-wpl',
 		chapter: 'ch3',
 		scrollLength: 220,
+		// MOBILE read-then-watch (CONTRACT §17.5): the caption + panel are gated to
+		// appear together at progress 0.25, which compresses step 1's read window; the
+		// extra travel restores a comfortable read. Desktop keeps 220 (byte-identical).
+		mobileScrollLength: readGapScrollLength(220), // ≈286vh, mobile only
 		morphLength: 60,
 		// two clocks in one beat: WPL clouds brighten to full, IPL takes the mirrored
 		// one-stop dim (0.55 × 1.82 ≈ 1.0), the same colour-state change as Ch 1/Ch 2's

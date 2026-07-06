@@ -1,4 +1,4 @@
-# Story Shell Contract — R1a (+ R1b field capabilities: §11 picking · §12 filtering; + R2a Ch 2: §13 worm-space · §14 run-out cascade; + R2b Ch 3: §15 frontier plane · §16 dismissal rivers)
+# Story Shell Contract — R1a (+ R1b field capabilities: §11 picking · §12 filtering; + R2a Ch 2: §13 worm-space · §14 run-out cascade; + R2b Ch 3: §15 frontier plane · §16 dismissal rivers; + MF §17 mobile "read, then watch" captions)
 
 The scene system every scene builder codes against. The shell (this directory +
 `lib/field/` + `lib/state/`) is owned by the story-shell architect; **scene
@@ -971,3 +971,185 @@ bands flow as one river; the scene draws the WPL split + season axis in SVG.
   `ch3.json` `frontier.axis` / `bowlerplane_buffer`.
 - The frontier haze + the rivers fly-out live in the shared `computeCore()`, so the
   pick pass tracks the flown points and never drifts from the visual field.
+
+---
+
+## 17. Mobile "read, then watch" captions (MF — the mobile caption fix)
+
+**The problem (owner feedback):** on phones the `.caption-slot` sits ON TOP of
+the full-screen field/charts on almost every scene, so a reader can never see
+the visual they are reading about. This piece is mobile-first — most fans open
+it on a phone — so this is a core-experience bug.
+
+**The fix (mobile only):** the visual stays full-screen. Within each caption
+STEP's scroll range the caption fades IN (the reader reads), then fades fully
+OUT to a CLEAR GAP (opacity 0) so the field is unobstructed and the reader
+WATCHES it before the next step's caption fades in. Text and picture take turns;
+the text never sits on the data for more than its read beat.
+
+**Desktop is untouched and byte-identical** — it keeps the persistent corner
+caption. The mechanism is a single shared helper; scenes opt in with two lines.
+
+### 17.1 The helper — `lib/story/captionReveal.svelte.ts`
+
+```ts
+// the scene-facing helper — the opacity for `.caption-slot`
+captionReveal(progress, stepStart, stepEnd, opts?): number
+```
+
+- `progress` — the scene's 0..1 `progress` prop.
+- `stepStart`, `stepEnd` — the `[start, end)` progress boundaries of the CURRENT
+  caption step (the scene already knows these from its step thresholds; see 17.4).
+- `opts: CaptionRevealOpts` — `{ reduced?, fadeIn?, readHold?, fadeOut? }`.
+  **Pass `reduced`** (the scene's `reduced` prop) — it is required for correctness.
+  The curve knobs are fractions of the step and default to the owner spec:
+  `fadeIn 0.06` · `readHold 0.60` · `fadeOut 0.20` (⇒ clear gap = last 0.20).
+
+**Return value:**
+
+- **`1`** on DESKTOP, during SSR/prerender, and under REDUCED MOTION — the
+  caption never fades (persistent, byte-identical, accessible).
+- On a MOBILE viewport (`max-width: 640px`) or with `?mobilecaptions=1`, and
+  normal motion, the read-then-watch curve for the reader's position in the step:
+
+  | local `u = (progress-stepStart)/(stepEnd-stepStart)` | opacity |
+  | --- | --- |
+  | `[0, 0.06)`   | ramp 0 → 1 (fast fade-in) |
+  | `[0.06, 0.60)`| **1** — the READ beat |
+  | `[0.60, 0.80)`| ramp 1 → 0 (fade-out) |
+  | `[0.80, 1.0)` | **0** — the CLEAR GAP (watch beat) |
+
+Opacity follows SCROLL position, so a reader who pauses mid-read keeps the
+caption; it only fades as they scroll into the gap (reader-paced). Apply **no
+CSS transition** to the reveal — it is scrubbed frame-by-frame; a transition
+would lag the scroll (a short ≤200 ms appear-transition on a `.shown` gate is OK).
+
+Also exported:
+
+- `captionRevealActive(): boolean` — reactive; true when the fade is on (mobile
+  or forced). Drives the optional scroll-length bump; scenes rarely need it.
+- `captionRevealCurve(progress, start, end, opts?)` — the PURE curve (ungated),
+  for tests.
+- `MOBILE_READ_GAP_SCALE` (`1.3`) + `readGapScrollLength(baseVh)` — see 17.5.
+
+### 17.2 The debug flag — `?mobilecaptions=1`
+
+Append `?mobilecaptions=1` to the URL (like the existing `?hud=1`) to FORCE the
+read-then-watch behaviour regardless of viewport width — for previewing/testing
+in a desktop automation browser that cannot emulate a 375 px phone. It flips
+`captionRevealActive()` true for the whole page (fades **and** the mobile
+scroll-length bump). Read once at load; add it to the query string, not a toggle.
+
+### 17.3 Accessibility, reduced motion, composition (hard invariants)
+
+- **Opacity only.** Drive the fade with a CSS custom property `--reveal` and
+  `opacity`. Do **not** use `display:none`, `visibility:hidden`, or `aria-hidden`
+  in the gap — the caption must stay in the DOM and the accessibility tree so
+  screen readers still reach it while it is visually faded.
+- **Reduced motion stays visible.** Under `prefers-reduced-motion` scenes
+  jump-cut (no morph to watch), so `captionReveal` returns 1 — the caption never
+  fades. Always pass `reduced`.
+- **Composes with an existing appear-gate.** Scenes that already gate the whole
+  slot (`.caption-slot.shown { opacity: 1 }`, e.g. the Close/WplBeat scenes) must
+  multiply, not clobber: change that rule to `opacity: var(--reveal, 1)`. The
+  `--reveal` fallback of `1` means desktop/SSR/no-JS render exactly as before.
+
+### 17.4 ADOPTION RECIPE (per-scene agents — copy/paste)
+
+**Step A — import + derive the current step's `[start, end)`.** Hoist your step
+thresholds into one ascending array so you can read the current step's bounds.
+Example for a 3-step scene whose thresholds are `< 0.64` → step 1, `< 0.82` →
+step 2, else step 3 (Worms/Frontier shape):
+
+```svelte
+<script lang="ts">
+  import { captionReveal } from '$lib/story/captionReveal.svelte';
+  // …existing props…
+  let { progress, active, field, reduced }: SceneAnnotationProps = $props();
+
+  // ascending step boundaries: step k (1-based) spans [BOUNDS[k-1], BOUNDS[k])
+  const BOUNDS = [0, 0.64, 0.82, 1] as const;
+  const step = $derived(progress < 0.64 ? 1 : progress < 0.82 ? 2 : 3);
+
+  // read-then-watch opacity for the CURRENT step (1 on desktop / reduced motion)
+  const reveal = $derived(
+    captionReveal(progress, BOUNDS[step - 1], BOUNDS[step], { reduced })
+  );
+</script>
+```
+
+**Step B — apply `--reveal` to `.caption-slot`** (nothing else about the slot
+changes):
+
+```svelte
+<div class="caption-slot" style:--reveal={reveal}>
+  {#if step === 1}
+    …
+  {/if}
+</div>
+```
+
+**Step C — one CSS line so the slot honours `--reveal`.**
+
+- Slot with NO existing opacity gate (most scenes — Wall, Worms, Frontier, …):
+
+  ```css
+  .caption-slot {
+    /* …existing position rules… */
+    opacity: var(--reveal, 1); /* read-then-watch (CONTRACT §17); 1 on desktop */
+  }
+  ```
+
+- Slot that ALREADY gates with `.shown` (Close, WplBeat, CloseCh2/3): keep the
+  hidden default, and make the shown state follow `--reveal`:
+
+  ```css
+  .caption-slot { opacity: 0; }
+  .caption-slot.shown { opacity: var(--reveal, 1); } /* was: opacity: 1 */
+  ```
+
+That is the whole change: two lines in markup/script + one CSS line. Desktop
+(`--reveal` resolves to 1) and reduced motion (`captionReveal` returns 1) are
+untouched; do not add any `@media (max-width: 640px)` branch for this — the gate
+lives in the helper.
+
+**Notes for irregular step maps.** If your steps do not start at 0 or you have a
+`step 0` pre-morph beat (e.g. Wall), just build `BOUNDS` from your actual
+thresholds so `BOUNDS[i]`/`BOUNDS[i+1]` bracket the step you are rendering. If a
+scene has a leading morph where you want the first caption held (not gapped)
+until the morph lands, set that step's `start` to the morph-end progress. Scenes
+with NO visual behind the caption (pure-text titles/closes over a static field)
+should NOT adopt — there is nothing to watch in the gap; leave them as-is.
+
+### 17.5 Optional — lengthen the mobile scroll for a comfortable read + gap
+
+The reveal splits each step into ~60% read + ~20% fade + ~20% watch, so a step
+that reads fine as one desktop caption can feel rushed on a phone. If so, give
+the scene a longer **mobile-only** scroll span via the new optional
+`SceneDef.mobileScrollLength` (vh) in your `index.ts`:
+
+```ts
+import { readGapScrollLength } from '$lib/story/captionReveal.svelte';
+
+{
+  id: 'ch2-worms',
+  scrollLength: 340,                                // desktop, unchanged
+  mobileScrollLength: readGapScrollLength(340),     // ≈ 442vh on mobile only
+  // …
+}
+```
+
+Story.svelte uses `mobileScrollLength` **only** when the gate is active (mobile
+or `?mobilecaptions=1`) and calls `ScrollTrigger.refresh()` when the gate flips;
+desktop always uses `scrollLength` (byte-identical). Omit it and mobile keeps
+`scrollLength`. Use it sparingly — only where a step genuinely feels cramped.
+
+### 17.6 Ideal (tuning, not required for v1): align the morph with the gap
+
+Where a scene's timing allows, hold the morph relatively STILL during the read
+beat (`u ∈ [0.06, 0.60]`) and let the interesting movement PLAY during the clear
+gap (`u ∈ [0.80, 1.0]`) so nothing important is missed while the caption is up.
+For `dynamicState`-driven beats (the C1-5 tint, the cascade `sweep`, the rivers
+`engage`), schedule the change to advance across the gap window rather than
+during the read. Align where you can; flag in your report where a scene's fixed
+timing cannot.

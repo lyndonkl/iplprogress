@@ -3,6 +3,7 @@
 	import type { SceneAnnotationProps } from '$lib/story/types';
 	import type { GroupMeta } from '$lib/field/types';
 	import { footnotesOpen } from '$lib/state';
+	import { captionReveal } from '$lib/story/captionReveal.svelte';
 	import { loadSandboxData } from '$lib/scenes/sandbox/data';
 	import {
 		loadCh3Data,
@@ -36,6 +37,10 @@
 		if (progress < 0.78) return 3;
 		return 4;
 	});
+	/* mobile "read, then watch" (CONTRACT §17): ascending step bounds so the caption
+	   fades to a clear gap before the next step. 1 on desktop / reduced. */
+	const BOUNDS = [0, 0.34, 0.56, 0.78, 1] as const;
+	const reveal = $derived(captionReveal(progress, BOUNDS[step - 1], BOUNDS[step], { reduced }));
 	const engaged = $derived(reduced ? 1 : Math.min(1, progress / 0.3));
 
 	let ch3 = $state<Ch3Data | null>(null);
@@ -249,7 +254,7 @@
 		<div class="band-lab caught" style="left:{(geo.right - 4).toFixed(1)}px; top:{geo.caughtLabelY.toFixed(1)}px;">caught</div>
 	{/if}
 
-	<div class="caption-slot">
+	<div class="caption-slot" style:--reveal={reveal}>
 		{#if step === 1}
 			<div class="scene-card">
 				<p>
@@ -392,6 +397,7 @@
 		left: 6vw;
 		top: 3vh;
 		max-width: min(30rem, 84vw);
+		opacity: var(--reveal, 1); /* mobile "read, then watch" (CONTRACT §17); 1 on desktop / reduced */
 	}
 
 	.dagger {

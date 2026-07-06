@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import type { SceneAnnotationProps } from '$lib/story/types';
 	import { footnotesOpen } from '$lib/state';
+	import { captionReveal } from '$lib/story/captionReveal.svelte';
 	import {
 		loadCh3Data,
 		iplHull,
@@ -31,6 +32,11 @@
 
 	const rs = $derived(retreatState(progress));
 	const step = $derived(reduced ? 4 : rs.step);
+	/* mobile "read, then watch" (CONTRACT §17): ascending step bounds (mirroring
+	   retreatState's 0.28/0.6/0.8 thresholds) so the caption fades to a clear gap
+	   before the next step. 1 on desktop / reduced. */
+	const BOUNDS = [0, 0.28, 0.6, 0.8, 1] as const;
+	const reveal = $derived(captionReveal(progress, BOUNDS[step - 1], BOUNDS[step], { reduced }));
 	const sevenOn = $derived(reduced || rs.step >= 1);
 	const liveOn = $derived(reduced || rs.step >= 2);
 	const trailOn = $derived(reduced || rs.step >= 3);
@@ -164,7 +170,7 @@
 		</div>
 	{/if}
 
-	<div class="caption-slot">
+	<div class="caption-slot" style:--reveal={reveal}>
 		{#if step === 1}
 			<div class="scene-card">
 				<p>
@@ -357,6 +363,7 @@
 		left: 6vw;
 		top: 10vh;
 		max-width: min(28rem, 42vw);
+		opacity: var(--reveal, 1); /* mobile "read, then watch" (CONTRACT §17); 1 on desktop / reduced */
 	}
 
 	.dagger {

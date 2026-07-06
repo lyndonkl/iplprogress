@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import type { SceneAnnotationProps } from '$lib/story/types';
 	import { footnotesOpen } from '$lib/state';
+	import { captionReveal } from '$lib/story/captionReveal.svelte';
 	import { loadCh2Data, fmt2, IPL_EARLY, IPL_MODERN, type Ch2Data, type TaxBand } from './data';
 
 	/**
@@ -22,6 +23,12 @@
 		return 3;
 	});
 	const bothOn = $derived(reduced || step >= 2);
+
+	// mobile "read, then watch" (CONTRACT §17): caption fades in for the read beat,
+	// then to a clear gap so the aftershock (post-wicket dip) strip is unobstructed.
+	// Desktop + reduced motion → 1 (persistent caption, byte-identical).
+	const BOUNDS = [0, 0.34, 0.68, 1] as const;
+	const reveal = $derived(captionReveal(progress, BOUNDS[step - 1], BOUNDS[step], { reduced }));
 
 	let ch2 = $state<Ch2Data | null>(null);
 	let narrow = $state(false);
@@ -129,7 +136,7 @@
 		</div>
 	{/if}
 
-	<div class="caption-slot">
+	<div class="caption-slot" style:--reveal={reveal}>
 		{#if step === 1}
 			<div class="scene-card">
 				<p>
@@ -333,6 +340,7 @@
 		left: 8vw;
 		bottom: 10vh;
 		max-width: min(30rem, 84vw);
+		opacity: var(--reveal, 1); /* read-then-watch (CONTRACT §17); 1 on desktop */
 	}
 
 	.dagger {

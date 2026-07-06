@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import type { SceneAnnotationProps } from '$lib/story/types';
 	import { footnotesOpen } from '$lib/state';
+	import { captionReveal } from '$lib/story/captionReveal.svelte';
 	import { loadCh1Data, fmt2, GHOST_BAND, BOLD_BAND, type Ch1Data } from './data';
 
 	/**
@@ -20,6 +21,15 @@
 		if (progress < 0.72) return 2;
 		return 3;
 	});
+
+	// mobile "read, then watch" (CONTRACT §17): step k spans [CAP_BOUNDS[k],
+	// CAP_BOUNDS[k + 1]). Step 0 is the pre-chart morph; step 1 starts at the
+	// morph-end so the first caption holds until the chart appears. Returns 1 on
+	// desktop / reduced motion (the persistent caption is unchanged).
+	const CAP_BOUNDS = [0, 0.28, 0.5, 0.72, 1] as const;
+	const reveal = $derived(
+		captionReveal(progress, CAP_BOUNDS[step], CAP_BOUNDS[step + 1], { reduced })
+	);
 
 	let ch1 = $state<Ch1Data | null>(null);
 	/* mobile legibility (MF2): a narrower viewBox + bigger user-unit type so
@@ -185,7 +195,7 @@
 	{/if}
 
 	<!-- caption steps -->
-	<div class="caption-slot">
+	<div class="caption-slot" style:--reveal={reveal}>
 		{#if step === 1}
 			<div class="scene-card">
 				<p>
@@ -416,6 +426,8 @@
 		left: 8vw;
 		bottom: 10vh;
 		max-width: min(32rem, 84vw);
+		/* mobile read-then-watch (CONTRACT §17); resolves to 1 on desktop / SSR */
+		opacity: var(--reveal, 1);
 	}
 
 	.dagger {

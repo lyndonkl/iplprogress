@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import type { SceneAnnotationProps } from '$lib/story/types';
 	import { footnotesOpen } from '$lib/state';
+	import { captionReveal } from '$lib/story/captionReveal.svelte';
 	import { loadCh3Data, iplHull, type Ch3Data } from './data';
 	import { frontierFrame, frontierPolyline } from './frontiersvg';
 	import FrontierScaffold from './FrontierScaffold.svelte';
@@ -24,6 +25,10 @@
 		if (progress < 0.82) return 2;
 		return 3;
 	});
+	/* mobile "read, then watch" (CONTRACT §17): ascending step bounds so the
+	   caption fades to a clear gap before the next step. 1 on desktop / reduced. */
+	const BOUNDS = [0, 0.64, 0.82, 1] as const;
+	const reveal = $derived(captionReveal(progress, BOUNDS[step - 1], BOUNDS[step], { reduced }));
 	const scaffoldOn = $derived(progress >= 0.08);
 	const yOn = $derived(reduced || step >= 2);
 	const edgeOn = $derived(reduced || step >= 3);
@@ -88,7 +93,7 @@
 		{/if}
 	{/if}
 
-	<div class="caption-slot">
+	<div class="caption-slot" style:--reveal={reveal}>
 		{#if step === 1}
 			<div class="scene-card chip">
 				<p>
@@ -173,6 +178,7 @@
 		left: 5vw;
 		top: 10vh;
 		max-width: min(26rem, 44vw);
+		opacity: var(--reveal, 1); /* mobile "read, then watch" (CONTRACT §17); 1 on desktop / reduced */
 	}
 
 	.dagger {

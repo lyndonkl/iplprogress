@@ -7,6 +7,7 @@ import Fireworks from './Fireworks.svelte';
 import WplBeat from './WplBeat.svelte';
 import PayoffCard from './PayoffCard.svelte';
 import Close from './Close.svelte';
+import { readGapScrollLength } from '$lib/story/captionReveal.svelte';
 import { twoTone, wallHeatMixAt } from './data';
 
 /**
@@ -46,6 +47,10 @@ export const scenes: SceneDef[] = [
 		id: 'ch1-wall',
 		chapter: 'ch1',
 		scrollLength: 300,
+		// four caption steps live in the post-morph HOLD; on mobile the read+gap
+		// split makes them feel cramped, so give a longer mobile-only scroll span
+		// (CONTRACT §17.5). Desktop keeps 300 (byte-identical).
+		mobileScrollLength: readGapScrollLength(300), // ≈ 390vh, mobile only
 		morphLength: 150, // THE controlling morph: free field → ignition wall
 		// Establishing shot (outcome colour) as the points fly in and through
 		// caption steps 1-2 (heat 0). Steps 3-4 are the THESIS beat: dynamicState
@@ -88,6 +93,10 @@ export const scenes: SceneDef[] = [
 		id: 'ch1-sixes',
 		chapter: 'ch1',
 		scrollLength: 170,
+		// three dense caption steps in the post-lift HOLD; the mobile read+gap
+		// split leaves each a touch short, so lengthen the mobile-only scroll span
+		// (CONTRACT §17.5). Desktop keeps 170 (byte-identical).
+		mobileScrollLength: readGapScrollLength(170), // ≈ 221vh, mobile only
 		morphLength: 70,
 		// The chapter's signature subset moment (storyboard C1-5, CONTRACT §7/§9):
 		// every IPL six lifts vertically out of the ignition wall (two-phase — it

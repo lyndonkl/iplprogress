@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import type { SceneAnnotationProps } from '$lib/story/types';
 	import { footnotesOpen } from '$lib/state';
+	import { captionReveal } from '$lib/story/captionReveal.svelte';
 	import {
 		loadCh1Data,
 		srAtBall,
@@ -37,6 +38,22 @@
 		if (progress < WALL_HEAT_RAMP_END) return 3;
 		return 4;
 	});
+
+	// mobile "read, then watch" (CONTRACT §17): ascending step boundaries, so
+	// step k spans [CAP_BOUNDS[k], CAP_BOUNDS[k + 1]). Step 0 renders no caption;
+	// step 1 starts at the morph-end so the first caption is held (not gapped)
+	// until the wall lands. Returns 1 on desktop / reduced motion (unchanged).
+	const CAP_BOUNDS = [
+		0,
+		MORPH_END + 0.02,
+		0.64,
+		WALL_HEAT_RAMP_START,
+		WALL_HEAT_RAMP_END,
+		1
+	] as const;
+	const reveal = $derived(
+		captionReveal(progress, CAP_BOUNDS[step], CAP_BOUNDS[step + 1], { reduced })
+	);
 
 	// the heat beat is live for steps 3-4; under reduced motion the field jump-cuts
 	// straight to the heated end-state, so the legend rides along the whole scene.
@@ -197,7 +214,7 @@
 	{/if}
 
 	<!-- caption steps: one change per step, ≤3 numbers on screen -->
-	<div class="caption-slot">
+	<div class="caption-slot" style:--reveal={reveal}>
 		{#if step === 1}
 			<div class="scene-card">
 				<p>
@@ -444,6 +461,8 @@
 		right: 5vw;
 		bottom: 12vh;
 		max-width: min(26rem, 84vw);
+		/* mobile read-then-watch (CONTRACT §17); resolves to 1 on desktop / SSR */
+		opacity: var(--reveal, 1);
 	}
 
 	.dagger {

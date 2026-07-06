@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import type { SceneAnnotationProps } from '$lib/story/types';
 	import { footnotesOpen } from '$lib/state';
+	import { captionReveal } from '$lib/story/captionReveal.svelte';
 	import { loadCh3Data, fmt1, type Ch3Data, type DotInnings } from './data';
 	import FrontierScaffold from './FrontierScaffold.svelte';
 
@@ -13,13 +14,18 @@
 	 * own dot tally, each chosen at or near its era's mean dot rate; the LEAGUE
 	 * number (37.6 → 33.0) is the evidence, not the eye (storyboard §5.11).
 	 */
-	let { progress, active, field }: SceneAnnotationProps = $props();
+	let { progress, active, field, reduced }: SceneAnnotationProps = $props();
 
 	const step = $derived.by(() => {
 		if (progress < 0.36) return 1;
 		if (progress < 0.66) return 2;
 		return 3;
 	});
+	/* mobile "read, then watch" (CONTRACT §17): ascending step bounds so the caption
+	   fades to a clear gap (the two dot-grids stay up to watch) before the next step.
+	   1 on desktop / reduced. */
+	const BOUNDS = [0, 0.36, 0.66, 1] as const;
+	const reveal = $derived(captionReveal(progress, BOUNDS[step - 1], BOUNDS[step], { reduced }));
 
 	let ch3 = $state<Ch3Data | null>(null);
 	onMount(() => {
@@ -80,7 +86,7 @@
 		</div>
 	{/if}
 
-	<div class="caption-slot">
+	<div class="caption-slot" style:--reveal={reveal}>
 		{#if step === 1}
 			<div class="scene-card">
 				<p>
@@ -232,6 +238,7 @@
 		left: 8vw;
 		bottom: 10vh;
 		max-width: min(32rem, 84vw);
+		opacity: var(--reveal, 1); /* mobile "read, then watch" (CONTRACT §17); 1 on desktop / reduced */
 	}
 
 	.dagger {

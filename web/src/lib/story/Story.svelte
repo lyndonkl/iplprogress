@@ -11,6 +11,7 @@
 		sceneEndState
 	} from './fieldstate';
 	import type { SceneDef } from './types';
+	import { captionRevealActive } from './captionReveal.svelte';
 	import FootnotePanel from './FootnotePanel.svelte';
 
 	/**
@@ -49,6 +50,8 @@
 	let errorMsg = $state('');
 	let reduced = $state(false);
 	let fieldHandle = $state<FieldHandle | null>(null);
+	// ScrollTrigger API, hoisted so the mobile scroll-length effect can refresh it
+	let scrollTriggerApi: { update: () => void; refresh: () => void } | null = null;
 	let hudStats = $state<FieldStats>({ frames: 0, fps: 0, nPoints: 0, progress: 0 });
 	// the scene list is static for the life of the story; sizing the progress
 	// array from its initial value is intentional
@@ -64,6 +67,20 @@
 
 	const activeScene = $derived(scenes[currentIdx]);
 	const activeFootnote = $derived(activeScene.footnote ?? null);
+
+	/* ---- mobile scroll-length bump (read-then-watch, CONTRACT §17) -----------
+	   When the mobile read-then-watch gate is active, a scene MAY use a longer
+	   `mobileScrollLength` so its caption's read beat + clear gap feel unhurried.
+	   Desktop (gate false) always keeps `scrollLength` — sections are byte-
+	   identical. When the gate flips (rotation / device-mode / the preview flag),
+	   the section heights change, so ScrollTrigger must re-measure. */
+	const mobileScroll = $derived(captionRevealActive());
+	const sceneHeight = (scene: SceneDef): number =>
+		mobileScroll && scene.mobileScrollLength != null ? scene.mobileScrollLength : scene.scrollLength;
+	$effect(() => {
+		void mobileScroll; // re-run when the gate flips
+		scrollTriggerApi?.refresh();
+	});
 
 	/* ---- picked team → team id (teams.json), -1 when neutral/unset ---------- */
 	const teamId = $derived.by(() => {
@@ -128,7 +145,6 @@
 		let field: FieldHandle | null = null;
 		let triggers: { kill: () => void; progress: number }[] = [];
 		let hudTimer: ReturnType<typeof setInterval> | null = null;
-		let scrollTriggerApi: { update: () => void; refresh: () => void } | null = null;
 
 		const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
 		reduced = mq.matches;
@@ -267,7 +283,7 @@
 	<div class="scenes" bind:this={scenesEl}>
 		{#each scenes as scene, i (scene.id)}
 			{@const Annotations = scene.annotations}
-			<section class="scene" style:height="{scene.scrollLength}vh">
+			<section class="scene" style:height="{sceneHeight(scene)}vh">
 				<!-- the anchor sits 2px INSIDE the section so a native fragment jump
 				     (and Chrome's on-load fragment re-snap) always lands past the
 				     trigger boundary and the anchored scene owns the field -->

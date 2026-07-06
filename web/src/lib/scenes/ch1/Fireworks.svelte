@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import type { SceneAnnotationProps } from '$lib/story/types';
 	import { footnotesOpen } from '$lib/state';
+	import { captionReveal } from '$lib/story/captionReveal.svelte';
 	import { OUTCOME_SIX, ATTR_TOP10_BIT } from '$lib/field/types';
 	import { loadCh1Data, fmt1, GHOST_BAND, BOLD_BAND, twoTone, type Ch1Data } from './data';
 
@@ -30,6 +31,15 @@
 		if (progress < 0.8) return 2;
 		return 3;
 	});
+
+	// mobile "read, then watch" (CONTRACT §17): step k spans [CAP_BOUNDS[k],
+	// CAP_BOUNDS[k + 1]). Step 0 is the two-phase six-lift + re-sort morph; step 1
+	// starts once the columns have formed, so the first caption holds (not gapped)
+	// until then. Returns 1 on desktop / reduced motion (caption unchanged).
+	const CAP_BOUNDS = [0, 0.44, 0.62, 0.8, 1] as const;
+	const reveal = $derived(
+		captionReveal(progress, CAP_BOUNDS[step], CAP_BOUNDS[step + 1], { reduced })
+	);
 
 	let ch1 = $state<Ch1Data | null>(null);
 	let tick = $state(0); // resize signal for label re-anchoring
@@ -149,7 +159,7 @@
 		</div>
 	{/if}
 
-	<div class="caption-slot">
+	<div class="caption-slot" style:--reveal={reveal}>
 		{#if step === 1}
 			<div class="scene-card">
 				<p>
@@ -249,6 +259,8 @@
 		left: 8vw;
 		bottom: 10vh;
 		max-width: min(32rem, 84vw);
+		/* mobile read-then-watch (CONTRACT §17); resolves to 1 on desktop / SSR */
+		opacity: var(--reveal, 1);
 	}
 
 	.dagger {

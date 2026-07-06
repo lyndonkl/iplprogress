@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import type { SceneAnnotationProps } from '$lib/story/types';
 	import { footnotesOpen } from '$lib/state';
+	import { captionReveal } from '$lib/story/captionReveal.svelte';
 	import { loadCh3Data, fmt1, fmt2, type Ch3Data } from './data';
 	import FrontierScaffold from './FrontierScaffold.svelte';
 
@@ -23,6 +24,12 @@
 		return 3;
 	});
 	const shown = $derived(reduced || progress >= 0.25);
+	/* mobile "read, then watch" (CONTRACT §17): ascending step bounds. Step 1 starts
+	   at 0.25 to match the `shown` gate (the caption + panel appear together there),
+	   so the reveal fades in when the caption actually shows, not before. It composes
+	   with `.caption-slot.shown` via --reveal; 1 on desktop / reduced. */
+	const BOUNDS = [0.25, 0.4, 0.7, 1] as const;
+	const reveal = $derived(captionReveal(progress, BOUNDS[step - 1], BOUNDS[step], { reduced }));
 	/* land ONE gauge per caption step (storyboard working-memory cap): the
 	   containment clock with step 1, the squeeze with step 2, the arms race with
 	   step 3, so their numbers are never disclosed before their beat. */
@@ -149,7 +156,7 @@
 			</div>
 		</div>
 
-		<div class="caption-slot" class:shown>
+		<div class="caption-slot" class:shown style:--reveal={reveal}>
 			<div class="scene-card chip">
 				{#if step === 1}
 					<p>
@@ -407,7 +414,7 @@
 	}
 
 	.caption-slot.shown {
-		opacity: 1;
+		opacity: var(--reveal, 1); /* mobile "read, then watch" (CONTRACT §17); 1 on desktop / reduced */
 	}
 
 	.dagger {

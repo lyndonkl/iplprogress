@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import type { SceneAnnotationProps } from '$lib/story/types';
+	import { captionReveal } from '$lib/story/captionReveal.svelte';
 	import { loadCh1Data, fmt1, GHOST_BAND, BOLD_BAND, WPL_BAND, type Ch1Data } from './data';
 
 	/**
@@ -15,7 +16,15 @@
 	let { progress, active, reduced }: SceneAnnotationProps = $props();
 
 	/* morphLength / scrollLength from index.ts: 60 / 150 */
-	const shown = $derived(progress >= 0.42);
+	// the panel + the single caption appear once the field morph has settled
+	const CAPTION_SHOWN = 0.42;
+	const shown = $derived(progress >= CAPTION_SHOWN);
+
+	// mobile "read, then watch" (CONTRACT §17): this scene has ONE caption step,
+	// spanning [CAPTION_SHOWN, 1). It fades in for the read beat, then clears to a
+	// gap so the reader watches the strike-rate panel + engine bars unobstructed.
+	// Returns 1 on desktop / reduced motion (the persistent caption is unchanged).
+	const reveal = $derived(captionReveal(progress, CAPTION_SHOWN, 1, { reduced }));
 
 	let ch1 = $state<Ch1Data | null>(null);
 	/* mobile legibility (MF2): narrower viewBox + bigger user-unit type so the
@@ -178,7 +187,7 @@
 
 	<!-- the two clocks share one caption card (single step, ~40 words) -->
 	{#if beat}
-		<div class="caption-slot" class:shown>
+		<div class="caption-slot" class:shown style:--reveal={reveal}>
 			<div class="scene-card">
 				<p>
 					<strong>The WPL is going its own way.</strong>
@@ -228,7 +237,8 @@
 	}
 
 	.caption-slot.shown {
-		opacity: 1;
+		/* mobile read-then-watch (CONTRACT §17); resolves to 1 on desktop / SSR */
+		opacity: var(--reveal, 1);
 	}
 
 	/* frame treatment deliberately distinct from the out-rate strip:

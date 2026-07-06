@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import type { SceneAnnotationProps } from '$lib/story/types';
 	import { footnotesOpen } from '$lib/state';
+	import { captionReveal } from '$lib/story/captionReveal.svelte';
 	import { loadCh2Data, fmt1, type Ch2Data } from './data';
 
 	/**
@@ -17,6 +18,13 @@
 	let { progress, active, reduced }: SceneAnnotationProps = $props();
 
 	const shown = $derived(reduced || progress >= 0.4);
+
+	// mobile "read, then watch" (CONTRACT §17): a single-caption beat. Over the
+	// caption's visible window [0.4, 1.0] the caption fades in for the read beat,
+	// then to a clear gap so the two clocks (which the copy points at) are
+	// unobstructed. The dial PANEL is not gated by --reveal — only the caption
+	// takes turns; the dials stay up to be watched. Desktop + reduced motion → 1.
+	const reveal = $derived(captionReveal(progress, 0.4, 1, { reduced }));
 
 	let ch2 = $state<Ch2Data | null>(null);
 	onMount(() => {
@@ -136,7 +144,7 @@
 	{/if}
 
 	{#if b}
-		<div class="caption-slot" class:shown>
+		<div class="caption-slot" class:shown style:--reveal={reveal}>
 			<div class="scene-card">
 				<p>
 					<strong>The WPL never had an anchor era to lose. It was born modern.</strong> On the left
@@ -298,7 +306,7 @@
 	}
 
 	.caption-slot.shown {
-		opacity: 1;
+		opacity: var(--reveal, 1); /* read-then-watch (CONTRACT §17); 1 on desktop */
 	}
 
 	.wpl-ink {

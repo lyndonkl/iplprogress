@@ -18,6 +18,8 @@
 	import { onMount } from 'svelte';
 	import type { SceneAnnotationProps } from '$lib/story/types';
 	import { assemblyVisibleCount } from '$lib/story/fieldstate';
+	import { captionReveal } from '$lib/story/captionReveal.svelte';
+	import { ASSEMBLY_RAIN_WINDOW } from '$lib/field/shaders';
 	import { footnotesOpen } from '$lib/state';
 	import { loadColdOpenData, type ColdOpenData } from './data';
 
@@ -129,6 +131,35 @@
 		for (const s of stops) if (!s.pinned && count >= s.at) cur = s;
 		return cur;
 	});
+
+	/* ---- mobile "read, then watch" caption reveal (CONTRACT §17) --------------
+	   On a phone the caption-col sits over the raining field, so within each
+	   authored stop's span the caption fades IN (read beat) then OUT to a CLEAR
+	   GAP where the rain is unobstructed, before the next stop's caption fades
+	   in. The step a caption owns is bounded in PROGRESS space by inverting the
+	   count→reveal→progress mapping (assemblyVisibleCount uses reveal ×
+	   (1+RAIN_W) × n; reveal = progress / MORPH_FRACTION) — so the fade tracks
+	   exactly the caption the counter is showing. The current step is the
+	   highest stop `count` has reached (matching the display gates above); its
+	   end is the next stop's start, or the title's arrival (TITLE_AT) for the
+	   pinned WPL caption. captionReveal returns 1 on DESKTOP and under REDUCED
+	   MOTION, so the persistent caption is byte-identical there. */
+	const captionStep = $derived.by((): { start: number; end: number } | null => {
+		if (n <= 0 || stops.length === 0) return null;
+		let idx = -1;
+		for (let i = 0; i < stops.length; i++) if (count >= stops[i].at) idx = i;
+		if (idx < 0) return null;
+		const denom = (1 + ASSEMBLY_RAIN_WINDOW) * n;
+		const pAt = (at: number): number => Math.min(1, at / denom) * MORPH_FRACTION;
+		return {
+			start: pAt(stops[idx].at),
+			end: idx + 1 < stops.length ? pAt(stops[idx + 1].at) : TITLE_AT
+		};
+	});
+
+	const captionOpacity = $derived(
+		captionStep ? captionReveal(progress, captionStep.start, captionStep.end, { reduced }) : 1
+	);
 </script>
 
 <div class="pin">
@@ -136,7 +167,7 @@
 		<div class="counter" class:locked aria-hidden="true">{fmt(count)}</div>
 	{/if}
 
-	<div class="caption-col">
+	<div class="caption-col" style:--reveal={captionOpacity}>
 		{#if micro}
 			{#key micro.id}
 				<div class="scene-card micro">
@@ -223,6 +254,8 @@
 		gap: 10px;
 		width: max-content;
 		max-width: 92vw;
+		/* read-then-watch fade (CONTRACT §17); 1 on desktop / reduced motion */
+		opacity: var(--reveal, 1);
 	}
 
 	.caption-col .scene-card {
