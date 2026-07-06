@@ -98,6 +98,33 @@ export function syntheticFieldData(): FieldData {
 		}
 	}
 
+	// Ch 4 tide-skyline y (§18): a synthetic full-innings total per point. Segment
+	// the field into synthetic innings (group change OR batting-team change ≈ a new
+	// innings), and give each a total that rises with the era, so the dev coastline
+	// reads as a rising tide. Encoded like innings_total.u8 (byte = floor(total/2)).
+	const inningsTotal = new Uint8Array(SYNTH_N);
+	{
+		const seasonByGi = groups.map((g) => g.season);
+		const isWplByGi = groups.map((g) => g.league === 'wpl');
+		const assign = (lo: number, hi: number): void => {
+			const gi = groupIds[lo];
+			const isWpl = isWplByGi[gi];
+			const era = isWpl ? (seasonByGi[gi] - 2023) / 3 : (seasonByGi[gi] - 2008) / 18;
+			const base = (isWpl ? 150 : 145) + era * (isWpl ? 22 : 55);
+			const total = Math.max(60, Math.min(290, Math.round(base + (rng() - 0.5) * 70)));
+			const byte = Math.min(254, Math.floor(total / 2));
+			for (let i = lo; i < hi; i++) inningsTotal[i] = byte;
+		};
+		let segStart = 0;
+		for (let i = 1; i < SYNTH_N; i++) {
+			if (groupIds[i] !== groupIds[i - 1] || team[i] !== team[i - 1]) {
+				assign(segStart, i);
+				segStart = i;
+			}
+		}
+		assign(segStart, SYNTH_N);
+	}
+
 	return {
 		nPoints: SYNTH_N,
 		meta: { n_points: SYNTH_N, built_at: 'synthetic', point_order: 'chronological' },
@@ -109,6 +136,7 @@ export function syntheticFieldData(): FieldData {
 		team,
 		wallHeat,
 		cumRuns,
+		inningsTotal,
 		synthetic: true
 	};
 }

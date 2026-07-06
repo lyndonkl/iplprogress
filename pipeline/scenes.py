@@ -46,6 +46,7 @@ flatten.py (updates meta.json's file ledger).
 from __future__ import annotations
 
 import json
+import math
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -2350,6 +2351,925 @@ def ch3_doc(acc3) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Chapter 4 — The Rising Tide (R3a). Engine-light: it REUSES engine #1
+# (par/phasepar) as the era-honest scoring baseline and builds NO new engine.
+# Everything here is a per-season / per-era aggregate of first-innings scoring:
+# the 200 Club (threshold exceedance), the win-half-the-time par total, the
+# powerplay premium at equal wicket cost, venue divergence, the CPI callback,
+# the record ticker, and the waterline-morph column table. Separate corpus pass
+# so R1/R2 scene bytes stay byte-identical.
+# ---------------------------------------------------------------------------
+
+# Milestone ridgeline light beams + the 200 Club. First-innings totals only,
+# under the full-first-innings filter (no D/L, no no-result, chase target not
+# set under 20 overs) — the same filter the cold open uses for avg first
+# innings, stated in every definition (200+ counts shift +-1 with it).
+CH4_THRESHOLDS = (180, 200, 220, 250)
+CH4_DEFENDED_FLOOR = 230        # the "big total" bar for the defended-record beat
+CH4_VENUE_MIN_SEASON = 3        # min first innings at a venue in a season to enter the ANOVA
+CH4_VENUE_MIN_ERA = 6           # min first innings at a venue in an era for a cone / payoff strand
+CH4_PAR_MIN_N = 8               # min decided-full first innings to fit a logistic par
+CH4_HIST_LO, CH4_HIST_HI, CH4_HIST_W = 60, 300, 10  # ridgeline histogram bins
+CH4_PP_LAST_OVER = 5            # powerplay = overs 1-6 -> 0-based over index 0..5
+
+# Franchise home grounds (canonical). The five WPL franchises tour rotating
+# neutral venues (no fixed home ground yet) and get the designed rotating-home
+# payoff instead of a home-tide card — itself the chapter's WPL point.
+FRANCHISE_HOME_GROUND = {
+    "Chennai Super Kings": "MA Chidambaram Stadium, Chennai",
+    "Delhi Capitals": "Arun Jaitley Stadium, Delhi",
+    "Gujarat Titans": "Narendra Modi Stadium, Ahmedabad",
+    "Kolkata Knight Riders": "Eden Gardens, Kolkata",
+    "Lucknow Super Giants": "Ekana Cricket Stadium, Lucknow",
+    "Mumbai Indians": "Wankhede Stadium, Mumbai",
+    "Punjab Kings": "Maharaja Yadavindra Singh Stadium, Mullanpur",
+    "Rajasthan Royals": "Sawai Mansingh Stadium, Jaipur",
+    "Royal Challengers Bengaluru": "M Chinnaswamy Stadium, Bengaluru",
+    "Sunrisers Hyderabad": "Rajiv Gandhi International Stadium, Hyderabad",
+}
+
+# Authored, illustrative "typical reader sketch" of 200+ totals per season — the
+# no-sketch fallback for the cold-open callback (a reader who skipped drawing,
+# arrived by shared link, or returned in a later session sees "here is roughly
+# what most readers drew"). 2008-2012 are the cold open's PRE-DRAWN anchor
+# (the real counts, per the You-Draw-It device); 2013-2026 is a documented
+# gentle ramp off the 2012 anchor (about +1.6 a season), the shape a weak fan
+# intuition produces — deliberately far under the real explosion to 65. Clearly
+# labelled authored; never presented as data about reality.
+AUTHORED_READER_SKETCH_200S = {
+    2008: 11, 2009: 1, 2010: 9, 2011: 5, 2012: 5,
+    2013: 7, 2014: 8, 2015: 10, 2016: 11, 2017: 13, 2018: 15,
+    2019: 16, 2020: 18, 2021: 20, 2022: 21, 2023: 23, 2024: 24,
+    2025: 26, 2026: 27,
+}
+
+
+def build_ch4(data_root: Path = canon.DATA_ROOT) -> dict:
+    """The one corpus pass for Chapter 4's scoring-environment aggregates."""
+    first_full = defaultdict(list)          # (lg, ss) -> [full first-innings totals]
+    first_decided = defaultdict(list)       # (lg, ss) -> [(total, batfirst_win, season)]
+    first_rpo = defaultdict(lambda: [0, 0])  # (lg, ss) -> [first-innings runs, legal balls]
+    any200 = defaultdict(int)               # (lg, ss) -> innings (either) totalling >= 200
+    pp_era = {k: [0, 0, 0] for k in BAND_KEYS}   # era -> [pp runs, pp legal balls, pp wickets]
+    pp_season = defaultdict(lambda: [0, 0, 0])   # (lg, ss) -> [pp runs, pp legal, pp wickets]
+    over_rpo = defaultdict(lambda: [0, 0])  # (lg, ss, over 1..20) -> [runs, legal balls]
+    venue_season = defaultdict(list)        # (lg, venue, ss) -> [full first-innings totals]
+    record_events = {"ipl": [], "wpl": []}  # league -> chronological record dicts
+    running_max = {"ipl": 0, "wpl": 0}
+
+    for _date, _mid, league, path in flatten.sorted_match_files(data_root):
+        with open(path) as fh:
+            match = json.load(fh)
+        info = match["info"]
+        season = canon.canon_season(info)
+        venue = canon.canon_venue(info["venue"])
+        outcome = info.get("outcome", {})
+        winner = outcome.get("winner")
+        winner_canon = canon.canon_team(winner) if winner else None
+        result = outcome.get("result")
+        decided = bool(winner) and result not in ("tie", "no result")
+        teams = [canon.canon_team(t) for t in info["teams"]]
+
+        innings_no = 0
+        first_total = first_bat = None
+        second_target_lt20 = False
+        for innings in match.get("innings", []):
+            if canon.is_super_over(innings):
+                continue
+            innings_no += 1
+            if innings_no == 2:
+                tgt = innings.get("target") or {}
+                ov = tgt.get("overs")
+                if ov is not None and float(ov) < 20:
+                    second_target_lt20 = True
+            bat = canon.canon_team(innings["team"])
+            pp_overs = set()
+            for pp in innings.get("powerplays", []):
+                if pp.get("type") == "mandatory":
+                    pp_overs.update(
+                        range(int(math.floor(pp["from"])), int(math.floor(pp["to"])) + 1)
+                    )
+            runs_total = 0
+            for over in innings["overs"]:
+                ono = over["over"]  # 0-based over index
+                in_pp = (ono in pp_overs) if pp_overs else (ono <= CH4_PP_LAST_OVER)
+                for dl in over["deliveries"]:
+                    ex = dl.get("extras", {})
+                    legal = not ("wides" in ex or "noballs" in ex)
+                    rt = dl["runs"]["total"]
+                    runs_total += rt
+                    n_wkts = sum(
+                        1 for w in dl.get("wickets", []) if w["kind"] not in RETIRED_KINDS
+                    )
+                    if ono < 20:
+                        cell = over_rpo[(league, season, ono + 1)]
+                        cell[0] += rt
+                        if legal:
+                            cell[1] += 1
+                    if innings_no == 1:
+                        first_rpo[(league, season)][0] += rt
+                        if legal:
+                            first_rpo[(league, season)][1] += 1
+                    if in_pp:
+                        e = band_key(league, season)
+                        ps = pp_season[(league, season)]
+                        pp_era[e][0] += rt
+                        ps[0] += rt
+                        if legal:
+                            pp_era[e][1] += 1
+                            ps[1] += 1
+                        pp_era[e][2] += n_wkts
+                        ps[2] += n_wkts
+            if runs_total >= 200:
+                any200[(league, season)] += 1
+            if innings_no == 1:
+                first_total = runs_total
+                first_bat = bat
+
+        full = (
+            not canon.is_dl(info)
+            and result != "no result"
+            and not second_target_lt20
+            and first_total is not None
+        )
+        if full:
+            first_full[(league, season)].append(first_total)
+            venue_season[(league, venue, season)].append(first_total)
+            if decided:
+                first_decided[(league, season)].append(
+                    (first_total, 1 if winner_canon == first_bat else 0, season)
+                )
+            if first_total > running_max[league]:
+                running_max[league] = first_total
+                opponent = next((t for t in teams if t != first_bat), "?")
+                record_events[league].append(
+                    {
+                        "date": str(info["dates"][0]),
+                        "season": season,
+                        "total": first_total,
+                        "team": first_bat,
+                        "opponent": opponent,
+                        "venue": venue,
+                        "city": canon.GROUND_CITY[venue],
+                    }
+                )
+
+    return {
+        "first_full": first_full,
+        "first_decided": first_decided,
+        "first_rpo": first_rpo,
+        "any200": any200,
+        "pp_era": pp_era,
+        "pp_season": pp_season,
+        "over_rpo": over_rpo,
+        "venue_season": venue_season,
+        "record_events": record_events,
+    }
+
+
+# --- Chapter 4 sections ---------------------------------------------------
+
+
+def _exceedance_curve(totals) -> dict:
+    n = len(totals)
+    return {
+        "n": n,
+        "max": max(totals) if totals else None,
+        "exceedance_pct": {
+            str(t): round(100.0 * sum(1 for x in totals if x >= t) / n, 1)
+            for t in CH4_THRESHOLDS
+        }
+        if n
+        else {},
+        "exceedance_count": {
+            str(t): sum(1 for x in totals if x >= t) for t in CH4_THRESHOLDS
+        },
+    }
+
+
+def exceedance_section(first_full) -> dict:
+    by_season = {"ipl": {}, "wpl": {}}
+    for (lg, ss), totals in first_full.items():
+        by_season[lg][str(ss)] = _exceedance_curve(totals)
+    by_era = {}
+    for lg, label, lo, hi in ERA_BANDS:
+        pooled = [x for s in range(lo, hi + 1) for x in first_full.get((lg, s), [])]
+        by_era[f"{lg} {label}"] = _exceedance_curve(pooled)
+    return {
+        "definition": (
+            "P(first innings >= X), full-first-innings filter (no D/L, no "
+            "no-result, chase target not set under 20 overs). The 200 Club is "
+            "X = 200; 180 / 220 / 250 are the ridgeline's other light beams."
+        ),
+        "thresholds": list(CH4_THRESHOLDS),
+        "by_season": by_season,
+        "by_era": by_era,
+        "cliff": {
+            "before": {
+                "season": 2022,
+                "p200": by_season["ipl"]["2022"]["exceedance_pct"]["200"],
+            },
+            "after": {
+                "season": 2023,
+                "p200": by_season["ipl"]["2023"]["exceedance_pct"]["200"],
+            },
+            "era_before": {
+                "era": "ipl 2020-2022",
+                "p200": by_era["ipl 2020-2022"]["exceedance_pct"]["200"],
+            },
+            "era_after": {
+                "era": "ipl 2023-2026",
+                "p200": by_era["ipl 2023-2026"]["exceedance_pct"]["200"],
+            },
+            "note": (
+                "For fifteen years about one first innings in ten passed 200. "
+                "In 2023 it jumped to two in five, and it has stayed there."
+            ),
+        },
+    }
+
+
+def _fit_logistic(rows):
+    """Newton-Raphson fit of P(bat-first win) ~ total, centred. Returns
+    (intercept, slope, mean_total) or None (too few rows, or slope <= 0)."""
+    if len(rows) < CH4_PAR_MIN_N:
+        return None
+    xs = [r[0] for r in rows]
+    ys = [r[1] for r in rows]
+    mx = sum(xs) / len(xs)
+    X = [x - mx for x in xs]
+    a = b = 0.0
+    for _ in range(100):
+        g0 = g1 = h00 = h01 = h11 = 0.0
+        for xi, yi in zip(X, ys):
+            z = max(-30.0, min(30.0, a + b * xi))
+            p = 1.0 / (1.0 + math.exp(-z))
+            w = max(p * (1.0 - p), 1e-9)
+            g0 += p - yi
+            g1 += (p - yi) * xi
+            h00 += w
+            h01 += w * xi
+            h11 += w * xi * xi
+        det = h00 * h11 - h01 * h01
+        if abs(det) < 1e-12:
+            break
+        da = (h11 * g0 - h01 * g1) / det
+        db = (h00 * g1 - h01 * g0) / det
+        a -= da
+        b -= db
+        if abs(da) < 1e-10 and abs(db) < 1e-10:
+            break
+    if b <= 0:
+        return None
+    return (a, b, mx)
+
+
+def _par_at(fit, q):
+    a, b, mx = fit
+    return mx + (math.log(q / (1.0 - q)) - a) / b
+
+
+def par_drift_section(first_decided) -> dict:
+    by_era = {}
+    for lg, label, lo, hi in ERA_BANDS:
+        rows = [r for s in range(lo, hi + 1) for r in first_decided.get((lg, s), [])]
+        fit = _fit_logistic(rows)
+        by_era[f"{lg} {label}"] = {
+            "n": len(rows),
+            "par": r1(_par_at(fit, 0.50)) if fit else None,
+            "safe": r1(_par_at(fit, 0.75)) if fit else None,
+            "dead": r1(_par_at(fit, 0.25)) if fit else None,
+        }
+    # Per-season par for the waterline: a 3-season centred-window logistic (the
+    # honest lookup form of the catalog's season spline; single-season fits are
+    # too noisy). Edge seasons pool the neighbours that exist.
+    by_season_windowed = {"ipl": {}, "wpl": {}}
+    for lg in ("ipl", "wpl"):
+        seasons = canon.IPL_SEASONS if lg == "ipl" else canon.WPL_SEASONS
+        for s in seasons:
+            rows = []
+            for ss in (s - 1, s, s + 1):
+                rows += first_decided.get((lg, ss), [])
+            fit = _fit_logistic(rows)
+            if fit:
+                by_season_windowed[lg][str(s)] = r1(_par_at(fit, 0.50))
+    # The big-total defended record (2023-26). The old "230+ = 11/11" claim is
+    # stale: 230+ is now routine, and even 230+ gets chased. Emit the true
+    # record so the scene never shows a number the pixels contradict.
+    big = [
+        r
+        for s in range(2023, 2027)
+        for r in first_decided.get(("ipl", s), [])
+        if r[0] >= CH4_DEFENDED_FLOOR
+    ]
+    posted = len(big)
+    defended = sum(r[1] for r in big)
+    chased = sorted(
+        ({"season": r[2], "total": r[0]} for r in big if r[1] == 0),
+        key=lambda d: (d["season"], d["total"]),
+    )
+    return {
+        "definition": (
+            "Par = the first-innings total that wins exactly half the time — "
+            "the score a good team would be on. Logistic P(bat-first win) ~ "
+            "total, fit per era on decided full-first-innings matches; par is "
+            "the total at P = 0.5, safe at 0.75, dead at 0.25."
+        ),
+        "by_era": by_era,
+        "by_season_windowed": by_season_windowed,
+        "totals_230plus": {
+            "floor": CH4_DEFENDED_FLOOR,
+            "era": "ipl 2023-2026",
+            "posted": posted,
+            "defended": defended,
+            "chased_down": posted - defended,
+            "defended_pct": round(100.0 * defended / posted, 1) if posted else None,
+            "chased_list": chased,
+            "note": (
+                "A score of 230 used to be almost unheard of. In 2023 to 2026 "
+                "teams posted it {p} times and still lost {c} of them."
+            ).format(p=posted, c=posted - defended),
+        },
+    }
+
+
+def record_halflife_section(record_events) -> dict:
+    from datetime import date
+
+    def progression(events):
+        out = []
+        for i, e in enumerate(events):
+            nxt = events[i + 1]["date"] if i + 1 < len(events) else None
+            span = (
+                (date.fromisoformat(nxt) - date.fromisoformat(e["date"])).days
+                if nxt
+                else None
+            )
+            out.append({**e, "stood_days": span, "standing": span is None})
+        return out
+
+    ipl = progression(record_events["ipl"])
+    wpl = progression(record_events["wpl"])
+    ticker = {"ipl": {}, "wpl": {}}
+    for lg, evs in (("ipl", record_events["ipl"]), ("wpl", record_events["wpl"])):
+        seasons = canon.IPL_SEASONS if lg == "ipl" else canon.WPL_SEASONS
+        for s in seasons:
+            standing = None
+            for e in evs:
+                if e["season"] <= s:
+                    standing = e
+            if standing:
+                ticker[lg][str(s)] = {
+                    "total": standing["total"],
+                    "team": standing["team"],
+                    "since_season": standing["season"],
+                }
+    return {
+        "definition": (
+            "The standing highest first-innings total, replayed match by match; "
+            "each record's lifespan is the days until the next one broke it."
+        ),
+        "ipl_progression": ipl,
+        "wpl_progression": wpl,
+        "ticker": ticker,
+        "stationary_environment_null": (
+            "Records get monotonically harder to break, so in a still, "
+            "unchanging scoring world each new record should stand LONGER than "
+            "the last. The opposite happened: the highest-total record stood "
+            "3,991 days and then fell twice in 19 days. Falling records that "
+            "speed up instead of slowing down are direct evidence the water "
+            "level itself moved."
+        ),
+    }
+
+
+def _pp_rates(rec):
+    runs, legal, wk = rec
+    return {
+        "run_rate": round(6.0 * runs / legal, 2) if legal else None,
+        "wickets_per_36": round(36.0 * wk / legal, 2) if legal else None,
+        "legal_balls": legal,
+    }
+
+
+def powerplay_section(pp_era, pp_season) -> dict:
+    by_era = {k: _pp_rates(v) for k, v in pp_era.items()}
+    by_season = {"ipl": {}, "wpl": {}}
+    for (lg, ss), rec in pp_season.items():
+        by_season[lg][str(ss)] = _pp_rates(rec)
+    early = by_era["ipl 2008-2010"]
+    late = by_era["ipl 2023-2026"]
+    return {
+        "definition": (
+            "The powerplay is the first six overs, when only two fielders may "
+            "stand out deep. Run rate and wickets lost per 36 balls, per "
+            "season and per era."
+        ),
+        "by_era": by_era,
+        "by_season": by_season,
+        "equal_wicket_cost": {
+            "early_rr": early["run_rate"],
+            "late_rr": late["run_rate"],
+            "early_wickets_per_36": early["wickets_per_36"],
+            "late_wickets_per_36": late["wickets_per_36"],
+            "note": (
+                "Powerplay scoring climbed from {er} to {lr} runs an over. "
+                "Teams paid the same in wickets: {ew} then {lw} per 36 balls. "
+                "The extra runs came free."
+            ).format(
+                er=early["run_rate"],
+                lr=late["run_rate"],
+                ew=early["wickets_per_36"],
+                lw=late["wickets_per_36"],
+            ),
+        },
+    }
+
+
+def _venue_era_totals(venue_season):
+    """(league, venue) -> era key -> [full first-innings totals]."""
+    out = defaultdict(lambda: defaultdict(list))
+    for (lg, v, ss), totals in venue_season.items():
+        for lg2, label, lo, hi in ERA_BANDS:
+            if lg2 == lg and lo <= ss <= hi:
+                out[(lg, v)][f"{lg2} {label}"].extend(totals)
+                break
+    return out
+
+
+def venue_section(venue_season) -> dict:
+    # Between-venue variance share: per season, the one-way ANOVA share of
+    # first-innings-total variance explained by which ground it was, then
+    # averaged over the era's seasons (per-season controls for the year's
+    # scoring inflation; pooling a whole era instead lets 2009's South-Africa
+    # exile and neutral seasons masquerade as venue effect).
+    variance = {}
+    for lg, label, lo, hi in IPL_ERA_BANDS:
+        shares = []
+        for s in range(lo, hi + 1):
+            byv = {
+                v: totals
+                for (l, v, ss), totals in venue_season.items()
+                if l == lg and ss == s and len(totals) >= CH4_VENUE_MIN_SEASON
+            }
+            allv = [x for t in byv.values() for x in t]
+            if len(byv) >= 3 and len(allv) >= 2:
+                gm = sum(allv) / len(allv)
+                sst = sum((x - gm) ** 2 for x in allv)
+                if sst > 0:
+                    ssb = sum(
+                        len(t) * ((sum(t) / len(t)) - gm) ** 2 for t in byv.values()
+                    )
+                    shares.append(100.0 * ssb / sst)
+        variance[f"{lg} {label}"] = {
+            "between_venue_share_pct": round(sum(shares) / len(shares), 1)
+            if shares
+            else None,
+            "seasons": len(shares),
+        }
+    # Per-venue typical first-innings total by era: the divergence-cone strands
+    # and the home-ground payoff (Chinnaswamy the flood plain vs Chepauk holding
+    # its character). Only cells with enough matches ship.
+    vet = _venue_era_totals(venue_season)
+    strands = []
+    for (lg, v), eras in vet.items():
+        by_era = {
+            e: {"avg_first_innings": r1(sum(t) / len(t)), "n": len(t)}
+            for e, t in eras.items()
+            if len(t) >= CH4_VENUE_MIN_ERA
+        }
+        if by_era:
+            strands.append(
+                {
+                    "league": lg,
+                    "venue": v,
+                    "city": canon.GROUND_CITY[v],
+                    "by_era": by_era,
+                }
+            )
+    strands.sort(key=lambda d: (d["league"], d["venue"]))
+
+    def latest(vname):
+        cell = vet.get(("ipl", vname), {}).get("ipl 2023-2026", [])
+        return r1(sum(cell) / len(cell)) if cell else None
+
+    return {
+        "definition": (
+            "Between-venue share = how much of a season's spread in first-"
+            "innings totals is explained by which ground it was (one-way "
+            "ANOVA), averaged across the era. A venue's tide = its typical "
+            "first-innings total (mean, full first innings)."
+        ),
+        "between_venue_variance": variance,
+        "strands": strands,
+        "fingerprint_2023_2026": {
+            "chinnaswamy": latest("M Chinnaswamy Stadium, Bengaluru"),
+            "chepauk": latest("MA Chidambaram Stadium, Chennai"),
+            "note": (
+                "The flat-pitch era did not flatten the country. Grounds are "
+                "pulling apart, not together."
+            ),
+        },
+    }
+
+
+def phase_heatmap_section(over_rpo) -> dict:
+    grid = {"ipl": {}, "wpl": {}}
+    for (lg, ss, ovr), (runs, legal) in over_rpo.items():
+        row = grid[lg].setdefault(str(ss), [None] * 20)
+        row[ovr - 1] = round(6.0 * runs / legal, 2) if legal else None
+    # Per-era phase RPO (pp = overs 1-6, middle 7-15, death 16-20) and the
+    # death-minus-powerplay spread (the demoted Phase Economy Map footnote).
+    phase = {}
+    for lg, label, lo, hi in ERA_BANDS:
+        acc = {"pp": [0, 0], "middle": [0, 0], "death": [0, 0]}
+        for (l, ss, ovr), (runs, legal) in over_rpo.items():
+            if l != lg or not (lo <= ss <= hi):
+                continue
+            ph = "pp" if ovr <= 6 else ("middle" if ovr <= 15 else "death")
+            acc[ph][0] += runs
+            acc[ph][1] += legal
+        rr = {
+            ph: round(6.0 * r / b, 2) if b else None for ph, (r, b) in acc.items()
+        }
+        spread = (
+            round(rr["death"] - rr["pp"], 2)
+            if rr["death"] is not None and rr["pp"] is not None
+            else None
+        )
+        phase[f"{lg} {label}"] = {**rr, "death_minus_pp": spread}
+    return {
+        "definition": (
+            "Run rate over by over (1 to 20), per season. Watch the powerplay "
+            "corner, overs 1 to 6, catch fire decade by decade."
+        ),
+        "by_over": grid,
+        "phase_rpo_by_era": phase,
+    }
+
+
+def cpi_section(first_rpo, any200) -> dict:
+    rpo_season = {"ipl": {}, "wpl": {}}
+    for (lg, ss), (runs, legal) in first_rpo.items():
+        rpo_season[lg][str(ss)] = round(6.0 * runs / legal, 2) if legal else None
+
+    def era_rpo(lg, lo, hi):
+        r = b = 0
+        for s in range(lo, hi + 1):
+            rr, bb = first_rpo.get((lg, s), [0, 0])
+            r += rr
+            b += bb
+        return (6.0 * r / b) if b else None
+
+    base = era_rpo("ipl", 2008, 2010)
+    by_era = {}
+    for lg, label, lo, hi in ERA_BANDS:
+        val = era_rpo(lg, lo, hi)
+        by_era[f"{lg} {label}"] = {
+            "first_innings_rpo": round(val, 2) if val else None,
+            "index": round(100.0 * val / base) if val else None,
+        }
+    truth = {str(s): any200.get(("ipl", s), 0) for s in canon.IPL_SEASONS}
+    return {
+        "definition": (
+            "First-innings run rate per season (runs an over, wides and "
+            "no-balls out of the denominator), indexed to a 2008-2010 base "
+            "of 100 — the site-wide deflator that turns 'is 180 good?' into a "
+            "real question."
+        ),
+        "first_innings_rpo_by_season": rpo_season,
+        "by_era": by_era,
+        "index_base": "ipl 2008-2010",
+        "callback_sketch": {
+            "definition": (
+                "The cold open asked you to draw 200-run innings per season. "
+                "This brings your line back. truth = the real count (either "
+                "innings passing 200, the cold-open definition); "
+                "authored_typical = the no-sketch fallback line, an "
+                "illustrative 'here is roughly what most readers drew', not "
+                "data about reality."
+            ),
+            "truth_200s_by_season": truth,
+            "authored_typical_200s_by_season": {
+                str(s): AUTHORED_READER_SKETCH_200S[s] for s in canon.IPL_SEASONS
+            },
+        },
+    }
+
+
+def columns_section(first_full, par_waterline) -> dict:
+    bins = list(range(CH4_HIST_LO, CH4_HIST_HI, CH4_HIST_W))
+    hist = {"ipl": {}, "wpl": {}}
+    dist = {"ipl": {}, "wpl": {}}
+    for (lg, ss), totals in first_full.items():
+        counts = [0] * len(bins)
+        for x in totals:
+            idx = min(max((x - CH4_HIST_LO) // CH4_HIST_W, 0), len(bins) - 1)
+            counts[idx] += 1
+        hist[lg][str(ss)] = counts
+        s = sorted(totals)
+        dist[lg][str(ss)] = {
+            "n": len(s),
+            "mean": r1(sum(s) / len(s)),
+            "median": s[len(s) // 2],
+            "min": s[0],
+            "max": s[-1],
+        }
+    return {
+        "definition": (
+            "The waterline morph: every ball stacks into its innings-total "
+            "column (from innings_total.u8), rows are seasons (group_ids), and "
+            "the par waterline climbs the wall, drowning totals that used to be "
+            "safe. The histogram is the milestone ridgeline; par_waterline is "
+            "the per-season climbing line (3-season-window logistic par)."
+        ),
+        "histogram": {"bin_lo": CH4_HIST_LO, "bin_width": CH4_HIST_W, "bins": bins, "counts": hist},
+        "distribution": dist,
+        "par_waterline": par_waterline,
+    }
+
+
+def wpl_beat_ch4_section(first_full, any200, exceedance) -> dict:
+    avg_first = {}
+    for s in canon.WPL_SEASONS:
+        totals = first_full.get(("wpl", s), [])
+        if totals:
+            avg_first[str(s)] = r1(sum(totals) / len(totals))
+    wpl_200s = {str(s): any200.get(("wpl", s), 0) for s in canon.WPL_SEASONS}
+    # Where the WPL 200 Club sits on the IPL calendar (two-clock beat). The
+    # catalog's anchors are IPL 2008 and 2015 (the early-era band); the WPL's
+    # pooled P(200) lands between them.
+    wpl_p200 = exceedance["by_era"]["wpl 2023-2026"]["exceedance_pct"].get("200")
+    ipl_p200 = {
+        s: exceedance["by_season"]["ipl"][str(s)]["exceedance_pct"]["200"]
+        for s in canon.IPL_SEASONS
+    }
+    reference = {str(s): ipl_p200[s] for s in (2008, 2015)}
+
+    def league_year_avg(lg, founding):
+        out = {}
+        seasons = canon.IPL_SEASONS if lg == "ipl" else canon.WPL_SEASONS
+        for s in seasons:
+            totals = first_full.get((lg, s), [])
+            if totals:
+                out[str(s - founding + 1)] = r1(sum(totals) / len(totals))
+        return out
+
+    return {
+        "framing": (
+            "Beside the path, not behind it. On the calendar clock the WPL's "
+            "200 Club sits between IPL 2008 and 2015. On the league-age clock "
+            "its tide is rising faster than the IPL's did, and rising along "
+            "the ground, four-led, not over the rope."
+        ),
+        "avg_first_innings_by_season": avg_first,
+        "totals_200_by_season": wpl_200s,
+        "exceedance_p200": wpl_p200,
+        "sits_between_ipl_seasons": {
+            "seasons": [2015, 2008],
+            "ipl_p200": reference,
+            "wpl_p200": wpl_p200,
+        },
+        "maturity_clock": {
+            "definition": "Average first innings by league year (season 1 = founding).",
+            "ipl_by_league_year": league_year_avg("ipl", 2008),
+            "wpl_by_league_year": league_year_avg("wpl", 2023),
+        },
+    }
+
+
+def _venue_home_card(team, league, vet, league_era_avg):
+    venue = FRANCHISE_HOME_GROUND[team]
+    eras = vet.get(("ipl", venue), {})
+    by_era = []
+    for lg, label, lo, hi in IPL_ERA_BANDS:
+        totals = eras.get(f"{lg} {label}", [])
+        by_era.append(
+            {
+                "era": label,
+                "avg_first_innings": r1(sum(totals) / len(totals))
+                if len(totals) >= CH4_VENUE_MIN_ERA
+                else None,
+                "n": len(totals),
+            }
+        )
+    available = [row for row in by_era if row["avg_first_innings"] is not None]
+    latest_era = by_era[-1]["avg_first_innings"]  # the 2023-26 tide (or None)
+    league_latest = league_era_avg["ipl 2023-2026"]
+    city = canon.GROUND_CITY[venue]
+    # Fingerprint = did the water rise HERE? Chepauk barely moved (holds its
+    # character); Chinnaswamy, Wankhede, Eden climbed 25-50 runs (flood plains).
+    rise = (
+        available[-1]["avg_first_innings"] - available[0]["avg_first_innings"]
+        if len(available) >= 2
+        else None
+    )
+    if not available:
+        fingerprint = "empty"
+    elif latest_era is None:
+        fingerprint = "gone_quiet"
+    elif len(available) == 1:
+        fingerprint = "new_ground"
+    elif rise >= 15:
+        fingerprint = "flood_plain"
+    elif rise <= 8:
+        fingerprint = "holds_character"
+    else:
+        fingerprint = "in_the_pack"
+    fp_copy = {
+        "flood_plain": "Your home ground is the flood plain. The water rose here more than almost anywhere.",
+        "holds_character": "Your home ground keeps its character while the rest inflate.",
+        "in_the_pack": "Your home ground rode the tide up with the pack.",
+        "new_ground": "A new home, still writing its story. Here is what it reads now.",
+        "gone_quiet": "Your old fortress has gone quiet in the flood era. The team moved on.",
+        "empty": "Not enough games at this ground yet.",
+    }[fingerprint]
+    if latest_era is not None:
+        headline = (
+            "{team} at home in {city}: a typical first innings of {latest} in "
+            "2023 to 2026, against a league average of {lg}."
+        ).format(team=team, city=city, latest=latest_era, lg=league_latest)
+    else:
+        headline = (
+            "{team}'s home in {city} has thin recent data. Here is its tide "
+            "through the eras it did host."
+        ).format(team=team, city=city)
+    return {
+        "team": team,
+        "league": league,
+        "empty_state": latest_era is None,
+        "home_ground": venue,
+        "home_city": city,
+        "par_by_era": by_era,
+        "latest_avg_first_innings": latest_era,
+        "league_latest_avg_first_innings": league_latest,
+        "rise_first_to_latest": r1(rise) if rise is not None else None,
+        "fingerprint": fingerprint,
+        "headline": headline,
+        "fingerprint_copy": fp_copy,
+    }
+
+
+def ch4_payoff_section(venue_season, first_full) -> dict:
+    vet = _venue_era_totals(venue_season)
+    league_era_avg = {}
+    for lg, label, lo, hi in ERA_BANDS:
+        pooled = [x for s in range(lo, hi + 1) for x in first_full.get((lg, s), [])]
+        league_era_avg[f"{lg} {label}"] = r1(sum(pooled) / len(pooled)) if pooled else None
+
+    variants = []
+    for team in canon.CURRENT_IPL_FRANCHISES:
+        variants.append(_venue_home_card(team, "ipl", vet, league_era_avg))
+
+    wpl_avg = {}
+    for s in canon.WPL_SEASONS:
+        totals = first_full.get(("wpl", s), [])
+        if totals:
+            wpl_avg[str(s)] = r1(sum(totals) / len(totals))
+    for team in canon.WPL_FRANCHISES:
+        variants.append(
+            {
+                "team": team,
+                "league": "wpl",
+                "empty_state": True,
+                "home_ground": None,
+                "rotating_home": True,
+                "league_avg_first_innings_by_season": wpl_avg,
+                "headline": (
+                    "The WPL has no home ground yet. It tours. But the tide is "
+                    "already rising under it: your league's first innings went "
+                    "from 157 to 169 in four seasons."
+                ),
+                "fingerprint_copy": (
+                    "A young league, still finding its grounds. Its flood is "
+                    "along the ground, four-led, not over the rope."
+                ),
+            }
+        )
+
+    # Neutral: the all-India map summary — every franchise home ground's current
+    # tide, sorted highest first.
+    india_map = []
+    for team in canon.CURRENT_IPL_FRANCHISES:
+        venue = FRANCHISE_HOME_GROUND[team]
+        cell = vet.get(("ipl", venue), {}).get("ipl 2023-2026", [])
+        india_map.append(
+            {
+                "team": team,
+                "venue": venue,
+                "city": canon.GROUND_CITY[venue],
+                "avg_first_innings": r1(sum(cell) / len(cell)) if cell else None,
+                "n": len(cell),
+            }
+        )
+    india_map.sort(
+        key=lambda d: (-(d["avg_first_innings"] or -1), d["venue"])
+    )
+    variants.append(
+        {
+            "team": "neutral",
+            "league": "neutral",
+            "empty_state": False,
+            "home_ground": None,
+            "india_map": india_map,
+            "headline": (
+                "The whole map of India. Some grounds are flood plains now, "
+                "some hold the line. Tap a ground to feel its tide."
+            ),
+        }
+    )
+    return {
+        "card": "your-home-grounds-tide",
+        "eras": {"ipl": [f"{lo}-{hi}" for _lg, _l, lo, hi in IPL_ERA_BANDS]},
+        "variants": variants,
+    }
+
+
+def footnotes4_section() -> dict:
+    return {
+        "par_model": (
+            "Par is a logistic fit of P(the team batting first wins) against "
+            "their total, on decided matches with a full first innings (no "
+            "D/L, no no-result, chase not curtailed under 20 overs). Par is the "
+            "total at 50%, safe at 75%, dead at 25%. Per-season par uses a "
+            "3-season window so small samples borrow strength."
+        ),
+        "full_first_innings_filter": (
+            "First-innings scoring stats use full innings only. The 200-plus "
+            "count shifts by about one either way depending on exactly where "
+            "you draw that line."
+        ),
+        "venue_canonicalization": (
+            "About sixty raw ground spellings collapse to their real venue "
+            "before any venue stat (Chinnaswamy appears under three spellings; "
+            "Chepauk under three). Rebuilt stadiums keep one identity."
+        ),
+        "record_null": (
+            "Record lifespans need a stationary-environment yardstick because "
+            "records get harder to break over time on their own. See "
+            "record_halflife.stationary_environment_null."
+        ),
+        "phase_economy_map": (
+            "Demoted from the main flow: the innings went phase-agnostic. The "
+            "gap between death-over and powerplay run rates compressed as the "
+            "powerplay caught up. See phase_heatmap.phase_rpo_by_era."
+        ),
+    }
+
+
+def ch4_doc(acc4) -> dict:
+    first_full = acc4["first_full"]
+    first_decided = acc4["first_decided"]
+    exceedance = exceedance_section(first_full)
+    par = par_drift_section(first_decided)
+    columns = columns_section(first_full, par["by_season_windowed"]["ipl"])
+    return {
+        "chapter": 4,
+        "title": "The Rising Tide",
+        "register": "the ground itself moves",
+        "era_bands": band_meta(),
+        "mystery": {
+            "hold": (
+                "Something snapped in 2023. Hold that thought. The answer is "
+                "three chapters away."
+            ),
+            "note": (
+                "The chapter shows the 2023 cliff in full and refuses to "
+                "explain it here. Chapter 7 gives the partial answer, Chapter "
+                "10 the verdict."
+            ),
+        },
+        "exceedance": exceedance,
+        "par_drift": par,
+        "record_halflife": record_halflife_section(acc4["record_events"]),
+        "powerplay": powerplay_section(acc4["pp_era"], acc4["pp_season"]),
+        "venues": venue_section(acc4["venue_season"]),
+        "phase_heatmap": phase_heatmap_section(acc4["over_rpo"]),
+        "cpi": cpi_section(acc4["first_rpo"], acc4["any200"]),
+        "columns": columns,
+        "wpl_beat": wpl_beat_ch4_section(first_full, acc4["any200"], exceedance),
+        "payoff": ch4_payoff_section(acc4["venue_season"], first_full),
+        "footnotes": footnotes4_section(),
+        "innings_total_buffer": {
+            "file": "innings_total.u8",
+            "bytes_per_point": 1,
+            "point_order": flatten.POINT_ORDER,
+            "byte0": "innings total (quantized) of the innings this ball is in",
+            "scale": flatten.INNINGS_TOTAL_SCALE,
+            "decode": "innings_total ~= byte * 2 (floor(total/2); 2-run resolution)",
+            "note": (
+                "Every ball of an innings carries the same byte. Season comes "
+                "from group_ids.u16; the par waterline per season is "
+                "columns.par_waterline. First-innings identification, if a "
+                "subset-highlight needs it, comes from the columnar innings "
+                "array — attrs.u8 is untouched, so R1 and R2 stay byte-"
+                "identical."
+            ),
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
 # Emission
 # ---------------------------------------------------------------------------
 
@@ -2367,6 +3287,9 @@ def main(out_root: Path = canon.OUT_ROOT) -> dict:
     acc3 = build_ch3()
     ch3 = ch3_doc(acc3)
 
+    acc4 = build_ch4()
+    ch4 = ch4_doc(acc4)
+
     scenes_dir = out_root / "scenes"
     scenes_dir.mkdir(parents=True, exist_ok=True)
     sizes = {}
@@ -2376,6 +3299,7 @@ def main(out_root: Path = canon.OUT_ROOT) -> dict:
         ("sandbox.json", sandbox),
         ("ch2.json", ch2),
         ("ch3.json", ch3),
+        ("ch4.json", ch4),
     ):
         raw = flatten.compact_json(doc, sort_keys=True)
         (scenes_dir / name).write_bytes(raw)
@@ -2457,7 +3381,39 @@ def main(out_root: Path = canon.OUT_ROOT) -> dict:
     )
     gd = ch3["gravity_defiers"]["variants"]
     print(f"ch3 gravity-defiers: {len(gd)} franchise cards")
-    return {"coldopen": coldopen, "ch1": ch1, "sandbox": sandbox, "ch2": ch2, "ch3": ch3}
+    ex = ch4["exceedance"]["by_era"]
+    pd = ch4["par_drift"]["by_era"]
+    pp = ch4["powerplay"]["equal_wicket_cost"]
+    vv = ch4["venues"]["between_venue_variance"]
+    d230 = ch4["par_drift"]["totals_230plus"]
+    n_pay = len(ch4["payoff"]["variants"])
+    print(
+        "ch4 P(200+): ipl 2008-2010 "
+        f"{ex['ipl 2008-2010']['exceedance_pct']['200']}% -> ipl 2023-2026 "
+        f"{ex['ipl 2023-2026']['exceedance_pct']['200']}% (2026 "
+        f"{ch4['exceedance']['by_season']['ipl']['2026']['exceedance_pct']['200']}%)"
+    )
+    print(
+        "ch4 par: ipl 2008-2010 "
+        f"{pd['ipl 2008-2010']['par']} -> ipl 2023-2026 {pd['ipl 2023-2026']['par']}"
+    )
+    print(
+        f"ch4 powerplay: RR {pp['early_rr']} -> {pp['late_rr']} at wickets/36 "
+        f"{pp['early_wickets_per_36']} vs {pp['late_wickets_per_36']}"
+    )
+    print(
+        "ch4 between-venue share: ipl 2008-2010 "
+        f"{vv['ipl 2008-2010']['between_venue_share_pct']}% -> ipl 2023-2026 "
+        f"{vv['ipl 2023-2026']['between_venue_share_pct']}%"
+    )
+    print(
+        f"ch4 230+ defended (2023-26): {d230['defended']}/{d230['posted']} "
+        f"({d230['defended_pct']}%); {n_pay} payoff variants"
+    )
+    return {
+        "coldopen": coldopen, "ch1": ch1, "sandbox": sandbox,
+        "ch2": ch2, "ch3": ch3, "ch4": ch4,
+    }
 
 
 if __name__ == "__main__":

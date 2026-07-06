@@ -17,7 +17,7 @@ import type { FootnoteId } from './footnotes';
  * See CONTRACT.md in this directory for the full contract and ownership map.
  */
 
-export type ChapterId = 'coldopen' | 'picker' | 'ch1' | 'ch2' | 'ch3' | 'endcard' | 'bowl';
+export type ChapterId = 'coldopen' | 'picker' | 'ch1' | 'ch2' | 'ch3' | 'ch4' | 'endcard' | 'bowl';
 
 /** Uniform-driven subset highlight: lift/tint points matching a class mask. */
 export interface SubsetHighlight {
@@ -135,6 +135,42 @@ export interface SubsetRivers {
 }
 
 /**
+ * The waterline (§18 capability — the Ch 4 rising going rate). A cross-cutting
+ * LEVEL over the held `tide` layout, declared on a scene's `fieldState`. It
+ * composes with the layout and does NOT spend a second controlling morph (like
+ * `highlight`, `resort`, `cascade` and `rivers`). A first-innings column whose
+ * innings TOTAL sits below `level` (the going rate for the scrubbed season, in
+ * runs) is DROWNED — dimmed toward the reservoir on LUMINANCE only, never a hue
+ * change, so hue stays identity. Drive `level` across the hold from a caption
+ * step via `SceneDef.dynamicState` (a post-morph field change, like the C1-5
+ * tint): as the reader scrubs the season pointer the water RISES. The NEXT scene
+ * declaring no waterline lets `level` fall away (reversible — the reverse leg is
+ * free). The waterline LINE, the fixed 165 ghost line and the 200 / 230 rules are
+ * pure annotation-plane SVG the scene draws itself via `tidePoint` /
+ * `tideTotalToY` + `field.projectToCss`; this capability only drives the column
+ * dim. Reservoir vs first-innings membership is supplied once via
+ * `field.setFirstInnings`. See CONTRACT §18.
+ */
+export interface Waterline {
+	/**
+	 * the going rate for the scrubbed season, in RUNS (e.g. 165 → 206). A
+	 * first-innings column whose innings total is below this drowns. Lerps as the
+	 * scene scrubs (the water rises), and drains to the floor on the reverse leg.
+	 */
+	level: number;
+	/** luminance × for a drowned column, 0..1 (default 0.18 — dims one-plus stop) */
+	drownDim?: number;
+	/** the picked team's columns keep their identity glow even when drowned (default true) */
+	teamKeepLit?: boolean;
+	/**
+	 * OPTIONAL world-y for the fixed 165 ghost line — carried for the scene's
+	 * convenience only; the FIELD does not read it (the ghost line, like the 200 /
+	 * 230 rules, is annotation-plane SVG the scene draws via `tideTotalToY`).
+	 */
+	ghostLevel?: number;
+}
+
+/**
  * A scene's declarative field state — the layout the field ARRIVES at while
  * the scene scrubs in, plus the cross-cutting uniform states. Omitted fields
  * take the defaults in fieldstate.ts (reveal 1 · dim 1 · wplDim 1 · labels 0 ·
@@ -158,6 +194,8 @@ export interface SceneFieldState {
 	cascade?: RunoutCascade | null;
 	/** dismissal wicket-subset stream into the flat-baseline band over the frontier plane, or null/omitted for none (§16) */
 	rivers?: SubsetRivers | null;
+	/** rising going-rate level that drowns first-innings columns below it over the tide skyline, or null/omitted for none (§18) */
+	waterline?: Waterline | null;
 	/** whether the picked team's balls stay ignited (default true — §2 standing rule) */
 	teamIgnite?: boolean;
 	/**

@@ -51,6 +51,19 @@ actual point buffer, so the order in these buffers IS the assembly order).
                     same ball-index (neutral = the 2008-10 batter; wides carry
                     the neutral byte). Scale/legend live in scenes/ch1.json
                     (ignition.wallheat); see wallheat.py.
+  innings_total.u8  per delivery: the FINAL total of the innings this delivery
+                    belongs to (runs.total summed over the whole innings),
+                    quantized to one byte as floor(total / 2) — decode
+                    total ~= byte * 2 (2-run resolution, invisible in a
+                    field morph; 255 == totals >= 510, which never occurs, the
+                    corpus max innings total being 287). Constant within an
+                    innings (every ball of an innings carries the same byte, so
+                    it gzips to almost nothing). Powers the Chapter 4 waterline
+                    morph: each ball stacks into its innings-total column while
+                    the per-season par waterline (scenes/ch4.json) climbs the
+                    wall. A no-op for R1/R2 layouts. Derived from the columnar
+                    match_index/innings/runs_total arrays this same pass builds,
+                    so it needs no extra corpus read; see innings_totals().
   teams.json        the 20-franchise table: [{id, name, short, league,
                     color, active}] (canon.TEAMS verbatim).
   matches.json      R1b sandbox: array indexed by match_index (== point-stream
@@ -390,6 +403,31 @@ def compact_json(obj, *, sort_keys: bool = False) -> bytes:
     ).encode("utf-8")
 
 
+INNINGS_TOTAL_SCALE = 2  # byte = floor(innings_total / 2); decode total ~= byte*2
+
+
+def innings_totals(col: dict) -> bytearray:
+    """Per-point innings-total buffer for the Chapter 4 waterline morph.
+
+    byte[i] = floor(T / INNINGS_TOTAL_SCALE), clamped to 255, where T is the
+    final total (sum of runs.total) of the innings point i belongs to. Derived
+    entirely from the columnar arrays already built this pass — no extra corpus
+    read — keyed by (match_index, innings). Constant within an innings, so the
+    2-run quantization is invisible in the morph and the buffer gzips small.
+    """
+    mi = col["match_index"]
+    inn = col["innings"]
+    rt = col["runs_total"]
+    totals: dict[tuple[int, int], int] = {}
+    for i in range(len(mi)):
+        key = (mi[i], inn[i])
+        totals[key] = totals.get(key, 0) + rt[i]
+    buf = bytearray(len(mi))
+    for i in range(len(mi)):
+        buf[i] = min(totals[(mi[i], inn[i])] // INNINGS_TOTAL_SCALE, 255)
+    return buf
+
+
 def main(out_root: Path = canon.OUT_ROOT) -> dict:
     groups, group_ids, attrs, col, dicts, ballsfaced, cumruns, team_u8, matches = (
         build_stream()
@@ -434,6 +472,11 @@ def main(out_root: Path = canon.OUT_ROOT) -> dict:
     )
     assert len(wallheat_bytes) == n_points
 
+    # Ch 4 waterline morph coordinate: each ball's innings total (quantized).
+    # Built from this pass's columnar arrays; no extra corpus read.
+    innings_total_bytes = innings_totals(col)
+    assert len(innings_total_bytes) == n_points
+
     emit("groups.json", compact_json(groups))
     emit("group_ids.u16", group_ids.tobytes())
     emit("attrs.u8", bytes(attrs))
@@ -441,6 +484,7 @@ def main(out_root: Path = canon.OUT_ROOT) -> dict:
     emit("cumruns.u8", bytes(cumruns))
     emit("team.u8", bytes(team_u8))
     emit("wallheat.u8", bytes(wallheat_bytes))
+    emit("innings_total.u8", bytes(innings_total_bytes))
     emit("teams.json", compact_json(list(canon.TEAMS), sort_keys=True))
     # matches[match_index] -> the exact match a tapped ball belongs to (R1b
     # tooltip). List order IS match_index, so the list is never re-sorted;

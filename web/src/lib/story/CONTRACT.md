@@ -1,4 +1,4 @@
-# Story Shell Contract — R1a (+ R1b field capabilities: §11 picking · §12 filtering; + R2a Ch 2: §13 worm-space · §14 run-out cascade; + R2b Ch 3: §15 frontier plane · §16 dismissal rivers; + MF §17 mobile "read, then watch" captions)
+# Story Shell Contract — R1a (+ R1b field capabilities: §11 picking · §12 filtering; + R2a Ch 2: §13 worm-space · §14 run-out cascade; + R2b Ch 3: §15 frontier plane · §16 dismissal rivers; + MF §17 mobile "read, then watch" captions; + R3a Ch 4: §18 tide skyline + waterline)
 
 The scene system every scene builder codes against. The shell (this directory +
 `lib/field/` + `lib/state/`) is owned by the story-shell architect; **scene
@@ -1153,3 +1153,201 @@ For `dynamicState`-driven beats (the C1-5 tint, the cascade `sweep`, the rivers
 `engage`), schedule the change to advance across the gap window rather than
 during the read. Align where you can; flag in your report where a scene's fixed
 timing cannot.
+
+---
+
+## 18. The tide skyline + the waterline — Ch 4's controlling morph (R3a `tide` layout + `waterline`)
+
+Chapter 4's single controlling morph (free→tide, analogous to Ch 1's free→wall,
+Ch 2's free→worms, Ch 3's free→frontier). Every ball condenses onto its
+**innings-total column**: **x = season block** (2008 on the left → this year on
+the right, then a deliberate gap, then the WPL block) plus a **within-season
+packing slot** (each season's innings ranked SHORT→TALL so the block reads as a
+little skyline; the within-season x carries no meaning and the scene suppresses
+its ticks), and **y = a column filled from the floor up to the innings TOTAL**
+(from `innings_total.u8`), so the taller the column the bigger the score and the
+whole field reads as a coastline rising left→right. Positions are **in-shader**;
+no positions cross the wire. Add nothing yourself — the shell owns the layout.
+
+**No new engine.** The waterline (the going rate) is a per-season lookup from
+`scenes/ch4.json` `columns.par_waterline` (engine #1), interpolated by the scene,
+never client-fit. The field only draws the skyline and dims drowned columns; the
+scene draws the waterline LINE + the reference rules on the annotation plane.
+
+### 18.1 Declaring it
+
+```ts
+fieldState: { layout: 'tide' }   // that's it — free→tide is the morph
+```
+
+The field lands as the dense first-innings skyline automatically (full alpha —
+the skyline is the hero visual, NOT a low-alpha haze like `worms`/`frontier`).
+The reader's **team stays ignited** through the flight (personalization survives
+— C4-11). The morph is the chapter's ONE layout morph; the waterline (§18.4), the
+200-club crest (a §2 `highlight`), the 2023 jump (a `waterline.level` freeze) and
+the WPL brighten (a `wplDim`/luminance state) all **compose** with `tide` and
+spend no second morph. Reduced motion jump-cuts free→tide live (declare
+`reducedMotionEndState: { layout: 'tide' }` or let it default to `fieldState`).
+
+### 18.2 Honesty lock (do not fight it)
+
+The plot's **data aspect ratio is FIXED** (`TIDE_ASPECT`, world width : height)
+and independent of the viewport — the frame **letterboxes** (adds margin) rather
+than stretching, so the coastline geometry and, crucially, the **low-vs-high
+column heights (which ARE the argument)** read consistently on desktop and
+portrait. The total-axis cap is `TIDE_TOTAL_CAP` (**300 runs**), set at/above the
+current record first innings (SRH 287) so the record column tops out honestly and
+is never clipped. The decode scale is fixed (`TIDE_BYTE_SCALE` = 2: runs = byte ×
+2). `TIDE_ASPECT` / `TIDE_FILL` / `TIDE_TOTAL_CAP` live in `lib/field/layout.ts`
+and are the owner-tunable constants flagged for build sign-off; on a very tall
+portrait, if columns read too short the fix is a taller `TIDE_ASPECT` or a
+horizontal season scrub — **never a shorter column** (column height is the
+argument). **The columns never re-sort:** an innings' total and season slot are
+fixed, so the waterline rise (§18.4) is a luminance state over the held skyline —
+real data, never a second layout morph.
+
+### 18.3 Drawing the waterline / 200 / 230 / ghost / axis — `field.getTideLayout()`
+
+The rising waterline, the fixed 165 ghost line, the 200 / 230 reference rules, the
+total-axis ladder (120 / 160 / 200 / 240) and the season-axis labels are the
+**scene's job on the annotation plane** (SVG registered to field coordinates) —
+**never** GL geometry (the cardinality rule). Register them with:
+
+```ts
+import { tidePoint, tideTotalToY } from '$lib/field/layout';
+const t = field.getTideLayout();                 // null before first resize — guard
+if (t) {
+  // a horizontal rule at a total (waterline, 165 ghost, 200, 230, ladder marks):
+  const y = tideTotalToY(t, 195);                // world y for 195 runs (season-independent)
+  const left = field.projectToCss(t.left, y);
+  const right = field.projectToCss(t.left + t.width, y);   // draw the SVG line left→right
+
+  // a season anchor (season chip, scrub pointer, season-axis label) at a gi:
+  const p = tidePoint(t, gi, 195);               // { x: season block centre, y: total→y }
+  const css = field.projectToCss(p.x, p.y);
+}
+```
+
+`getTideLayout()` returns the fixed-aspect letterboxed box + the total cap + the
+per-season block x-centres (rebuilt on resize):
+
+```ts
+{
+  left, width, bottom, height;   // the letterboxed data box (world)
+  totalCap;                      // total-axis display cap in RUNS (300) — mirrors the shader
+  xs: number[];                  // per-season block centre world x, indexed by gi (NaN = none)
+  blockHalfW;                    // half-width of a season block (columns pack within ±)
+  slotW;                         // season slot pitch (season-axis label density)
+  reservoirH;                    // world height of the reservoir haze band
+  iplMidX, wplMidX;              // IPL/WPL block centres (league / axis headings)
+}
+```
+
+`tidePoint(layout, gi, total)` and `tideTotalToY(layout, total)` are the **exact**
+mappings the shader uses (total clamped to the cap), so the SVG waterline / rules
+/ axes and the GL skyline can never drift. `gi` is the season's group index (the
+season block); x is season-block-only, y is total-only.
+
+### 18.4 The waterline — `SceneFieldState.waterline` (the rising going rate)
+
+A cross-cutting LEVEL over the held `tide` layout (like `highlight` / `resort` /
+`cascade` / `rivers` — it composes with the layout and does **NOT** spend a second
+controlling morph). A first-innings column whose innings TOTAL sits below the
+level DROWNS — dimmed toward the reservoir on **LUMINANCE only, never a hue
+change** (hue stays identity; the waterline LINE and the 200/230 rules are the
+only blue on screen and they are annotation-plane SVG, not this uniform).
+
+```ts
+waterline?: {
+  level: number;         // the going rate for the scrubbed season, in RUNS (e.g. 165 → 206).
+                         //   A first-innings column with total < level drowns. Lerps as the
+                         //   scene scrubs (the water RISES); drains to the floor on the
+                         //   reverse leg. Omit / null → inert (nothing drowns).
+  drownDim?: number;     // luminance × for a drowned column, 0..1 (default 0.18 — one-plus stop)
+  teamKeepLit?: boolean; // the picked team's columns keep their glow even when drowned (default true)
+  ghostLevel?: number;   // OPTIONAL, scene-convenience only — the FIELD ignores it; the 165 ghost
+                         //   line (like the 200/230 rules) is annotation-plane SVG via tideTotalToY
+} | null;
+```
+
+**How it animates.** `level` lerps like any scalar. As the reader scrubs the
+season pointer 2008→2026 the going rate genuinely climbs (feed the per-season par
+from `scenes/ch4.json` `columns.par_waterline`), so more columns drop below the
+line and drown. Drive `level` across the HOLD from a caption step via
+`SceneDef.dynamicState(progress, held)` (a post-morph field change, exactly like
+the C1-5 tint / cascade `sweep` / rivers `engage`; use the §12.2 orchestrator-
+caveat pattern so a stray scroll can't revert the scrub). The **next scene
+declaring no waterline** lets `level` drain to the floor (the water recedes; the
+reverse leg is free). Reduced motion resolves to the season's settled `level`
+(render the 2008-vs-2026 small-multiple per the storyboard). Anchor the waterline
+label + the total-axis marks with `getTideLayout()` / `tideTotalToY`.
+
+Example (waterline rising across the hold):
+
+```ts
+{
+  id: 'ch4-waterline',
+  scrollLength: 320, morphLength: 40,
+  fieldState: { layout: 'tide', waterline: { level: 165, drownDim: 0.18 } },
+  reducedMotionEndState: { layout: 'tide', waterline: { level: 206, drownDim: 0.18 } },
+  dynamicState: (progress, held) => ({
+    ...held,
+    waterline: { ...held.waterline!, level: 165 + (206 - 165) * Math.min(1, progress / 0.9) }
+  }),
+  annotations: Waterline,
+  footnote: 'pardrift'
+}
+```
+
+### 18.5 First-innings vs reservoir — `field.setFirstInnings(indices)` (READ THIS)
+
+Only **full first innings** build columns; every other ball (second innings,
+super-over, rain-hit) settles into a **low-alpha reservoir haze** near the floor,
+so "every ball ever is here" (316,199) stays literally true while the lit columns
+carry the argument. `innings_total.u8` carries a total for **every** ball and does
+NOT flag first innings, so the scene supplies membership at runtime — the
+working-today path with **zero pipeline dependency**, exactly like Ch 2's
+`setRunouts` / Ch 3's `setDismissals`:
+
+```ts
+// once, when the scene mounts (before the tide morph engages):
+const firstInn: number[] = [];
+for (let i = 0; i < arrays.innings.length; i++)
+  if (arrays.innings[i] === 1) firstInn.push(i);   // from the columnar `innings` array
+field.setFirstInnings(firstInn);                   // the rest route to the reservoir haze
+// field.setFirstInnings(null) → every ball builds a column (the graceful default)
+```
+
+The field bakes membership ONCE and re-derives the within-season packing (only
+first-innings innings are ranked, so the comb has no gaps), cached — **no
+per-frame cost**, demand mode preserved. Called with `null` (or never called) it
+degrades gracefully to "every ball builds a column", so the layout works out of
+the box for dev / deep-link before the columnar data is read. The waterline drown
+only applies to first-innings columns; reservoir balls are already dim.
+
+### 18.6 What the platform added (for the pipeline / other agents)
+
+- **New `LayoutId` `tide`** (code 6) + **new `FieldRenderState` fields**:
+  `waterLevel` (-1 inert), `waterDrownDim` (1), `waterTeamKeep` (false), set by
+  `resolveRenderState`. All default inert (`waterLevel` -1; `tide` is never a
+  layout in R1/R2) — so **R1a/R1b/R2a/R2b scenes render byte-identically**
+  (verified: free / columns / wall / worms / frontier all render unchanged; the
+  waterline drown is a shader no-op at `waterLevel < 0`).
+- **New OPTIONAL buffer, zero wire cost until it ships:** `innings_total.u8`
+  (`FieldData.inningsTotal`, one byte/point, runs = byte × 2 — binds zeros until
+  present, so the skyline collapses to the floor). Its bytes stay CPU-side and are
+  packed, together with the on-device within-season packing slot and the
+  first-innings flag, into **ONE** GL attribute `aTide` (byte | slot·256 |
+  flag·262144) to stay within `MAX_VERTEX_ATTRIBS` (adding three separate
+  attributes overflowed the ANGLE/Metal budget; one packed attribute keeps the
+  field at 13 of 16). Decoded in the shared `computeCore()` the same way the pick
+  shader decodes its index, so the pick pass tracks tide points and never drifts.
+- **Pipeline asks (integration):** emit `innings_total.u8` (per-point full-innings
+  total, `ballsfaced.u8` point order, runs = byte × 2) — **shipped**; and the
+  per-season going rate + milestone shares in `scenes/ch4.json` (the waterline
+  reads `columns.par_waterline`). No engine and no first-innings buffer required:
+  first-innings membership comes from the columnar `innings` array via
+  `setFirstInnings`. Keep `TIDE_TOTAL_CAP` / `TIDE_BYTE_SCALE` in `layout.ts` in
+  lock-step with the `innings_total.u8` encoding.
+- The tide position + the waterline drown live in the shared `computeCore()` /
+  visual shader, so the pick pass is registered to the visible skyline.

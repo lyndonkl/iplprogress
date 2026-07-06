@@ -58,13 +58,17 @@
    "bytes_raw": 1206,
    "bytes_gz": 263
   },
+  "innings_total.u8": {
+   "bytes_raw": 316199,
+   "bytes_gz": 6055
+  },
   "matches.json": {
    "bytes_raw": 305768,
    "bytes_gz": 20686
   },
   "meta.json": {
-   "bytes_raw": 1046,
-   "bytes_gz": 400
+   "bytes_raw": 1157,
+   "bytes_gz": 428
   },
   "payoff/ch1.json": {
    "bytes_raw": 20655,
@@ -81,6 +85,10 @@
   "scenes/ch3.json": {
    "bytes_raw": 39145,
    "bytes_gz": 9501
+  },
+  "scenes/ch4.json": {
+   "bytes_raw": 43409,
+   "bytes_gz": 10274
   },
   "scenes/coldopen.json": {
    "bytes_raw": 3720,
@@ -118,7 +126,7 @@
     "scenes/coldopen.json"
    ],
    "budget_gz": 3000000,
-   "actual_gz": 405936,
+   "actual_gz": 405964,
    "pass": true
   },
   {
@@ -163,6 +171,16 @@
    "pass": true
   },
   {
+   "name": "chapter ch4 (scene + innings_total buffer)",
+   "files": [
+    "scenes/ch4.json",
+    "innings_total.u8"
+   ],
+   "budget_gz": 2000000,
+   "actual_gz": 16329,
+   "pass": true
+  },
+  {
    "name": "engines (ch2 par/entry + R3b parallel-track re288/wp_grid)",
    "files": [
     "engines/entry.json",
@@ -192,12 +210,14 @@
     "engines/wp_grid.json",
     "group_ids.u16",
     "groups.json",
+    "innings_total.u8",
     "matches.json",
     "meta.json",
     "payoff/ch1.json",
     "scenes/ch1.json",
     "scenes/ch2.json",
     "scenes/ch3.json",
+    "scenes/ch4.json",
     "scenes/coldopen.json",
     "scenes/sandbox.json",
     "team.u8",
@@ -205,7 +225,7 @@
     "wallheat.u8"
    ],
    "budget_gz": 25000000,
-   "actual_gz": 1576720,
+   "actual_gz": 1593077,
    "pass": true
   }
  ],

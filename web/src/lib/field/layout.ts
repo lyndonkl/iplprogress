@@ -450,6 +450,160 @@ export interface RiversLayout {
 	height: number;
 }
 
+/* ---------------------------------------------------------------------------
+ * The tide skyline (Ch 4 controlling morph, CONTRACT §18). Every ball condenses
+ * onto its INNINGS-TOTAL COLUMN:
+ *   x = season block (2008 left → this year right; the WPL block after a gap) +
+ *       a within-season packing slot (innings ranked short→tall, so each season
+ *       reads as a little skyline — the within-season x carries NO meaning and
+ *       its ticks are suppressed by the scene)
+ *   y = a column filled from the baseline up to the innings TOTAL (from
+ *       innings_total.u8), so the taller the column the bigger the score.
+ * The whole field reads as a coastline rising left→right as scoring climbs. Only
+ * first-innings balls build columns; the rest settle into a low-alpha reservoir
+ * haze near the floor (see field.setFirstInnings — the scene supplies membership
+ * so "every ball ever is here" stays literally true). Positions are in-shader
+ * from innings_total.u8 + the season group id + the baked within-season packing
+ * index (packed into the single aTide attribute); no positions cross the wire.
+ *
+ * HONESTY LOCK (storyboard §0.1 / §6, mirroring worm-space + frontier): the box
+ * holds a FIXED data aspect ratio independent of the viewport and LETTERBOXES on
+ * portrait, so the coastline geometry (and the low-vs-high column heights, which
+ * ARE the argument) survives mobile. TIDE_ASPECT / TIDE_FILL below are the
+ * owner-tunable constants flagged for build sign-off; on a tall portrait the
+ * letterbox keeps aspect, so if columns read too short the fix is a taller
+ * TIDE_ASPECT or a horizontal season scrub — never a shorter column.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Total-axis display cap (runs) — the top of the tide frame. y = 0 at the
+ * baseline, y = TIDE_TOTAL_CAP at the frame top. Set at/above the current record
+ * first innings (SRH 287) so the record column tops out honestly and is never
+ * clipped (the storyboard's earlier 265 predates the 287 record; artifact wins).
+ * The labeled ladder marks (120 / 160 / 200 / 240) sit inside it. Owner-tunable.
+ */
+export const TIDE_TOTAL_CAP = 300;
+/** innings_total.u8 decode scale: decoded total (runs) = byte × TIDE_BYTE_SCALE. */
+export const TIDE_BYTE_SCALE = 2;
+/** Fixed world width : world height for the coastline box (viewport-independent). */
+export const TIDE_ASPECT = 1.5;
+/** Fraction of the frame the fixed-aspect box fills (letterbox margin + label room). */
+export const TIDE_FILL = 0.9;
+/** Season-block gap (in slot units) between the IPL block and the WPL block. */
+export const TIDE_LEAGUE_GAP_SLOTS = 1.4;
+/** Fraction of a season slot a season block's columns fill (jitter/packing bound). */
+export const TIDE_BLOCK_FILL = 0.44;
+/** Reservoir haze band height as a fraction of the box (non-first-innings balls). */
+export const TIDE_RESERVOIR_FRAC = 0.15;
+
+export interface TideLayout {
+	/** world x at the box left edge */
+	left: number;
+	/** world width of the coastline box */
+	width: number;
+	/** world y at innings total = 0 (the baseline the columns rise from) */
+	bottom: number;
+	/** world height spanning total 0 → TIDE_TOTAL_CAP */
+	height: number;
+	/** total-axis display cap (runs) — mirrors the buffer decode */
+	totalCap: number;
+	/** world x of each season block's centre, indexed by gi (NaN = no block) */
+	xs: number[];
+	/** half-width of one season block, world units (columns pack within ±this) */
+	blockHalfW: number;
+	/** slot pitch in world units (season-axis label density decisions) */
+	slotW: number;
+	/** world height of the reservoir haze band (non-first-innings balls sit here) */
+	reservoirH: number;
+	/** centre x of the IPL block and the WPL block (for league / axis headings) */
+	iplMidX: number;
+	wplMidX: number;
+}
+
+/**
+ * Fixed-aspect, letterboxed tide box for the current frame — the largest box of
+ * the locked data aspect that fits, then centred; season blocks are laid across
+ * its width (IPL block, a deliberate gap, then the WPL block, each season-sorted
+ * oldest→newest). Scenes map the waterline / 200 / 230 / ghost / ladder marks
+ * into it via `tidePoint` / `tideTotalToY`.
+ */
+export function computeTide(groups: GroupMeta[], halfW: number, halfH: number): TideLayout {
+	const frameW = 2 * halfW * TIDE_FILL;
+	const frameH = 2 * halfH * TIDE_FILL;
+	let width = frameH * TIDE_ASPECT;
+	if (width > frameW) width = frameW;
+	const height = width / TIDE_ASPECT;
+	const left = -width / 2;
+	const bottom = -height / 2;
+
+	const ipl = groups.filter((g) => g.league === 'ipl').sort((a, b) => a.season - b.season);
+	const wpl = groups.filter((g) => g.league === 'wpl').sort((a, b) => a.season - b.season);
+	const nIpl = ipl.length;
+	const nWpl = wpl.length;
+	const gapSlots = nWpl > 0 ? TIDE_LEAGUE_GAP_SLOTS : 0;
+	const slots = nIpl + nWpl + gapSlots;
+	const slotW = width / Math.max(1, slots);
+
+	const xs: number[] = new Array(groups.length).fill(NaN);
+	let iplSum = 0;
+	let wplSum = 0;
+	// IPL block: 2008 (left) → this year, then the gap, then the WPL block.
+	ipl.forEach((g, i) => {
+		const x = left + (i + 0.5) * slotW;
+		xs[g.gi] = x;
+		iplSum += x;
+	});
+	wpl.forEach((g, j) => {
+		const x = left + (nIpl + gapSlots + j + 0.5) * slotW;
+		xs[g.gi] = x;
+		wplSum += x;
+	});
+
+	return {
+		left,
+		width,
+		bottom,
+		height,
+		totalCap: TIDE_TOTAL_CAP,
+		xs,
+		blockHalfW: slotW * TIDE_BLOCK_FILL,
+		slotW,
+		reservoirH: height * TIDE_RESERVOIR_FRAC,
+		iplMidX: nIpl > 0 ? iplSum / nIpl : 0,
+		wplMidX: nWpl > 0 ? wplSum / nWpl : 0
+	};
+}
+
+/**
+ * World y for an innings TOTAL (runs) in the given tide box — the season-
+ * independent height mapping the shader uses (clamped to the display cap). The
+ * scene draws the rising waterline, the fixed 165 ghost line, the 200 / 230
+ * reference rules and the total-axis ladder marks as SVG at this y, spanning the
+ * coastline, registered to the GL skyline via `field.projectToCss`.
+ */
+export function tideTotalToY(layout: TideLayout, total: number): number {
+	const tn = Math.min(Math.max(total, 0), layout.totalCap) / layout.totalCap;
+	return layout.bottom + tn * layout.height;
+}
+
+/**
+ * World coordinate for a (season block, innings total) pair — the EXACT mapping
+ * the shader uses for a first-innings column TOP. `gi` is the season's group
+ * index (the season block); `total` is the innings total in runs. x is the
+ * season block centre, y is the column top for that total. Scenes call this to
+ * anchor the season chip / scrub pointer / season-axis labels (x) and the
+ * waterline + reference lines (y) to the GL skyline. For a pure horizontal rule
+ * spanning all seasons, `tideTotalToY` is the y-only convenience.
+ */
+export function tidePoint(
+	layout: TideLayout,
+	gi: number,
+	total: number
+): { x: number; y: number } {
+	const x = Number.isNaN(layout.xs[gi]) ? 0 : layout.xs[gi];
+	return { x, y: tideTotalToY(layout, total) };
+}
+
 /**
  * Contiguous per-season strips across the full width (IPL block then WPL block,
  * each season-sorted), filling a centred band box. No league gap — the bands

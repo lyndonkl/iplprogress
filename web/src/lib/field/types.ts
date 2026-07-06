@@ -87,6 +87,18 @@ export interface FieldData {
 	 * interleaved buffer — no copy, no positions on the wire.
 	 */
 	bowlerPlane?: Uint8Array;
+	/**
+	 * per-delivery full-innings-total byte (innings_total.u8), length nPoints —
+	 * OPTIONAL, drives the Ch 4 `tide` layout's y axis (CONTRACT §18). One raw
+	 * byte per point in field point order: decoded innings total (runs) = byte ×
+	 * 2 (2-run resolution; every ball of an innings carries the same byte, so it
+	 * gzips tiny). Present only when the pipeline ships innings_total.u8; absent
+	 * until then, so the tide skyline collapses to the floor (graceful — R1/R2
+	 * never use `tide`). Packed (with the within-season slot + first-innings flag)
+	 * into the single `aTide` GL attribute on-device, to stay within the vertex-
+	 * attribute budget (MAX_VERTEX_ATTRIBS).
+	 */
+	inningsTotal?: Uint8Array;
 	/** true when this is the dev-only synthetic fallback, not pipeline output */
 	synthetic: boolean;
 }
@@ -105,7 +117,7 @@ export const OUTCOME_OTHER = 5;
  * position buffers ever cross the wire (blueprint §2).
  * ------------------------------------------------------------------------- */
 
-export type LayoutId = 'free' | 'columns' | 'wall' | 'assembly' | 'worms' | 'frontier';
+export type LayoutId = 'free' | 'columns' | 'wall' | 'assembly' | 'worms' | 'frontier' | 'tide';
 
 /** Shader-side layout codes (uLayoutA / uLayoutB). */
 export const LAYOUT_CODE: Record<LayoutId, number> = {
@@ -122,7 +134,14 @@ export const LAYOUT_CODE: Record<LayoutId, number> = {
 	// dense bowler-season clouds. In-shader from the interleaved bowlerplane.u8
 	// (byte 0 economy, byte 1 strike rate). Fixed data aspect, letterboxed
 	// (never stretched), like `worms`. See CONTRACT §15.
-	frontier: 5
+	frontier: 5,
+	// Ch 4 controlling morph (free→tide): x = season block + within-season packing
+	// (innings ranked short→tall), y = a column filled to the innings TOTAL (from
+	// innings_total.u8). A dense first-innings skyline; non-first-innings balls
+	// settle into a low-alpha reservoir haze. The innings total, the packing slot
+	// and the first-innings flag are packed into ONE attribute (aTide). Fixed data
+	// aspect, letterboxed like `worms`/`frontier`. See CONTRACT §18.
+	tide: 6
 };
 
 /**
@@ -386,6 +405,24 @@ export interface FieldRenderState {
 	riversMute: number;
 	/** band stack order bottom→top (drives the per-point stacked y — discrete config) */
 	riversKinds: readonly DismissalKind[];
+
+	/* ---- waterline (§18 capability — the Ch 4 rising going rate) --------------
+	 * A cross-cutting LEVEL over the held `tide` layout (like the highlight /
+	 * re-sort / cascade / rivers, it spends NO second controlling morph): the
+	 * going rate for the scrubbed season, a horizontal line the SCENE draws on the
+	 * annotation plane. A first-innings column whose innings TOTAL sits below the
+	 * level is DROWNED (dimmed toward the reservoir — LUMINANCE only, never a hue
+	 * change, so hue stays identity). `waterLevel` lerps as the season pointer
+	 * scrubs (the water rises); an inactive side contributes -1, so the drown is
+	 * a shader no-op and R1/R2 render byte-identically. The waterline / 165 ghost
+	 * / 200 / 230 lines are pure annotation-plane rules the scene anchors via
+	 * `tidePoint` / `tideTotalToY` — this capability only drives the column dim. */
+	/** going-rate level in RUNS; a first-innings column below it drowns. -1 = inactive */
+	waterLevel: number;
+	/** luminance × for a drowned column (default 1 = no dimming when inactive) */
+	waterDrownDim: number;
+	/** the picked team's columns keep their identity glow even when drowned */
+	waterTeamKeep: boolean;
 }
 
 export const DEFAULT_RENDER_STATE: FieldRenderState = {
@@ -427,5 +464,8 @@ export const DEFAULT_RENDER_STATE: FieldRenderState = {
 	riversTint: 0,
 	riversOthersDim: 1,
 	riversMute: 0,
-	riversKinds: DEFAULT_RIVERS_KINDS
+	riversKinds: DEFAULT_RIVERS_KINDS,
+	waterLevel: -1,
+	waterDrownDim: 1,
+	waterTeamKeep: false
 };

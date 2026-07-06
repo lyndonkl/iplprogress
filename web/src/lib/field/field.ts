@@ -18,14 +18,17 @@ import {
 	computeWorms,
 	computeFrontier,
 	computeRivers,
+	computeTide,
 	basePointPx,
 	WORM_X_CAP,
 	WORM_RUNS_CAP,
+	TIDE_TOTAL_CAP,
 	type ColumnLayout,
 	type WallLayout,
 	type WormLayout,
 	type FrontierLayout,
-	type RiversLayout
+	type RiversLayout,
+	type TideLayout
 } from './layout';
 import { makeVertexShader, fragmentShader, makePickVertexShader, pickFragmentShader } from './shaders';
 
@@ -150,6 +153,30 @@ export interface FieldHandle {
 	 */
 	getRiversLayout(): RiversLayoutInfo | null;
 	/**
+	 * current tide-skyline geometry (§18 — Ch 4's controlling morph): the
+	 * fixed-aspect, letterboxed box + the total-axis cap + per-season block
+	 * x-centres + the reservoir band height. Scenes register the rising waterline,
+	 * the 165 ghost / 200 / 230 reference rules and the season-axis labels to the
+	 * GL skyline by mapping through `tidePoint(layout, gi, total)` /
+	 * `tideTotalToY(layout, total)` then `projectToCss`. null before the first
+	 * resize. Rebuilt on resize.
+	 */
+	getTideLayout(): TideLayout | null;
+	/**
+	 * Set first-innings membership for the Ch 4 `tide` skyline (§18). Pass the
+	 * point indices whose delivery is part of a FULL FIRST innings (the scene
+	 * derives them from the columnar `innings` array); those balls build the
+	 * innings-total columns, and every OTHER ball settles into the low-alpha
+	 * reservoir haze behind the skyline (so "every ball ever is here" stays
+	 * literally true). The field bakes the membership ONCE and re-derives the
+	 * within-season column packing into the packed `aTide` attribute (no per-frame
+	 * cost — demand mode preserved), then renders. Pass `null` to reset to "every
+	 * ball builds a column" (the graceful default before the scene supplies
+	 * membership; innings_total.u8 carries a total for every ball, so the layout
+	 * works out of the box). See CONTRACT §18.
+	 */
+	setFirstInnings(indices: Iterable<number> | null): void;
+	/**
 	 * Set run-out membership for the C2-4 cascade (§14). Pass the point indices
 	 * whose delivery is a run-out (the scene derives them from the columnar
 	 * `wicket_kind == 'run out'`); the field bakes them into the per-point
@@ -270,6 +297,8 @@ export function createField(opts: FieldOptions): FieldHandle {
 	const resortX = new Float32Array(groupCount);
 	// per-group dismissal-rivers strip centre x (filled on resize, §16)
 	const riverX = new Float32Array(groupCount);
+	// per-group tide season-block centre x (filled on resize, §18)
+	const tideX = new Float32Array(groupCount);
 
 	const uniforms: Record<string, THREE.IUniform> = {
 		uProgress: { value: 0 },
@@ -349,7 +378,21 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uRiverBottom: { value: 0 },
 		uRiverHeight: { value: 1 },
 		uRiverHalfW: { value: 0.01 },
-		uRiverX: { value: riverX }
+		uRiverX: { value: riverX },
+		// tide skyline (§18) — geometry set on every resize (letterboxed box); the
+		// packed per-point record (aTide) is baked on demand when tide first engages
+		uTideBottom: { value: -0.5 },
+		uTideHeight: { value: 1 },
+		uTideInvCap: { value: 1 / TIDE_TOTAL_CAP },
+		uTideBlockHalfW: { value: 0.02 },
+		uTideCellHalfW: { value: 0.002 },
+		uTideReservoirH: { value: 0.15 },
+		uTideX: { value: tideX },
+		// waterline (§18) — inactive by default (uWaterLevel < 0), so R1/R2 render
+		// byte-identically (the drown branch is a shader no-op)
+		uWaterLevel: { value: -1 },
+		uWaterDrownDim: { value: 1 },
+		uWaterTeamKeep: { value: 0 }
 	};
 
 	const geometry = new THREE.BufferGeometry();
@@ -399,6 +442,20 @@ export function createField(opts: FieldOptions): FieldHandle {
 	const riverPos = new Float32Array(n);
 	geometry.setAttribute('aRiverPos', new THREE.BufferAttribute(riverPos, 1, false));
 	const riverPosAttr = geometry.getAttribute('aRiverPos') as THREE.BufferAttribute;
+	// tide skyline (§18): ONE packed per-point attribute (to stay within the GPU's
+	// vertex-attribute budget — MAX_VERTEX_ATTRIBS). It packs the innings-total byte
+	// (tide y; runs = byte×2), the within-season packing slot quantized to 0..1023
+	// (tide x), and the first-innings flag (0 = reservoir haze), baked on demand in
+	// ensureTideData. innings_total.u8 is OPTIONAL — its bytes stay CPU-side here and
+	// are baked into aTide; until it ships they are zero, so the skyline collapses to
+	// the floor (graceful; R1/R2 never use tide). firstInnFlag is CPU-only membership
+	// (default 1 = every ball builds a column), set via setFirstInnings.
+	const inningsTotalBuf =
+		data.inningsTotal && data.inningsTotal.length === n ? data.inningsTotal : new Uint8Array(n);
+	const firstInnFlag = new Uint8Array(n).fill(1);
+	const tidePack = new Float32Array(n);
+	geometry.setAttribute('aTide', new THREE.BufferAttribute(tidePack, 1, false));
+	const tideAttr = geometry.getAttribute('aTide') as THREE.BufferAttribute;
 	// OPTIONAL match index (u16 → non-normalized float attr); gates the match facet
 	if (hasMatchAttr)
 		geometry.setAttribute('aMatchIndex', new THREE.BufferAttribute(data.matchIndex!, 1, false));
@@ -455,8 +512,117 @@ export function createField(opts: FieldOptions): FieldHandle {
 	let wormLayout: WormLayout | null = null;
 	let frontierLayout: FrontierLayout | null = null;
 	let riversLayout: RiversLayout | null = null;
+	let tideLayout: TideLayout | null = null;
 	let cssW = 1;
 	let cssH = 1;
+
+	/* ---- tide skyline state (§18 — the Ch 4 waterline morph) ---------------- */
+	// The packed per-point tide record (aTide) is derived on-device the first time
+	// the tide layout engages (or after setFirstInnings changes membership), then
+	// cached — keyed by a first-innings version, so a scroll scrub never recomputes.
+	// tideMaxCols (the busiest season's first-innings count) sizes the per-column x
+	// jitter so the densest comb never overlaps.
+	let tideVersion = 0; // bumped by setFirstInnings — invalidates the packing cache
+	let tideKey = ''; // the version currently baked into aTide
+	let tideMaxCols = 1; // max first-innings innings in any one season
+	let tideActive = false; // whether the last applied state engaged the tide layout
+
+	// Rebuild the tide geometry uniforms from the current box + packing density.
+	function applyTideGeometry(): void {
+		if (!tideLayout) return;
+		uniforms.uTideBottom.value = tideLayout.bottom;
+		uniforms.uTideHeight.value = tideLayout.height;
+		uniforms.uTideInvCap.value = 1 / tideLayout.totalCap;
+		uniforms.uTideBlockHalfW.value = tideLayout.blockHalfW;
+		uniforms.uTideReservoirH.value = tideLayout.reservoirH;
+		// per-column x jitter < the column pitch (2·blockHalfW / nCols) so the
+		// densest season's thin columns stay separated, sparser seasons a touch more.
+		uniforms.uTideCellHalfW.value = (tideLayout.blockHalfW / Math.max(1, tideMaxCols)) * 0.7;
+		for (let gi = 0; gi < groupCount; gi++) {
+			const x = tideLayout.xs[gi];
+			tideX[gi] = Number.isNaN(x) ? 0 : x;
+		}
+		uniforms.uTideX.value = tideX;
+	}
+
+	// Identify first-innings innings as maximal contiguous runs of equal
+	// (season, innings-total byte) among the first-innings points (deliveries of a
+	// match are contiguous in point order, and first→second innings alternate, so
+	// runs separate cleanly), rank each season's innings SHORT→TALL, and bake the
+	// packed per-point record (aTide = innings byte + 256·packing-slot + first flag).
+	// Reservoir points get the first flag cleared. Cached by the first-innings
+	// version — O(n) + a per-season sort of ~70 innings, no per-frame cost.
+	function ensureTideData(): void {
+		const key = `${tideVersion}`;
+		if (tideKey === key) return;
+		tideKey = key;
+
+		const inningsId = new Int32Array(n).fill(-1);
+		const innTotal: number[] = [];
+		const innGi: number[] = [];
+		const innStart: number[] = [];
+		let prevFirst = false;
+		let prevGid = -1;
+		let prevByte = -1;
+		for (let i = 0; i < n; i++) {
+			if (firstInnFlag[i] === 0) {
+				prevFirst = false;
+				continue;
+			}
+			const gid = data.groupIds[i];
+			const byte = inningsTotalBuf[i];
+			if (!prevFirst || gid !== prevGid || byte !== prevByte) {
+				innTotal.push(byte * 2); // decode: byte → runs (innings_total.u8 scale 2)
+				innGi.push(gid);
+				innStart.push(i);
+			}
+			inningsId[i] = innTotal.length - 1;
+			prevFirst = true;
+			prevGid = gid;
+			prevByte = byte;
+		}
+
+		const byGroup: number[][] = Array.from({ length: groupCount }, () => []);
+		for (let k = 0; k < innTotal.length; k++) byGroup[innGi[k]].push(k);
+		const innFrac = new Float32Array(innTotal.length);
+		let maxCols = 1;
+		for (let g = 0; g < groupCount; g++) {
+			const arr = byGroup[g];
+			// short→tall; tie-break on first point index so the packing is deterministic
+			arr.sort((a, b) => innTotal[a] - innTotal[b] || innStart[a] - innStart[b]);
+			const k = arr.length;
+			if (k > maxCols) maxCols = k;
+			for (let r = 0; r < k; r++) innFrac[arr[r]] = ((r + 0.5) / k) * 2 - 1;
+		}
+
+		// bake the packed record: byte + 256·colQuant(0..1023) + 262144·firstFlag
+		const pack = tideAttr.array as Float32Array;
+		for (let i = 0; i < n; i++) {
+			const id = inningsId[i];
+			const colFrac = id >= 0 ? innFrac[id] : 0;
+			const colQuant = Math.round(((colFrac + 1) / 2) * 1023);
+			pack[i] = inningsTotalBuf[i] + 256 * colQuant + (id >= 0 ? 262144 : 0);
+		}
+		tideAttr.needsUpdate = true;
+		tideMaxCols = maxCols;
+		applyTideGeometry();
+	}
+
+	// Bake first-innings membership (CPU-only) and re-derive the packed within-season
+	// tide record if the tide layout is live. No per-frame cost — demand mode holds.
+	function setFirstInnings(indices: Iterable<number> | null): void {
+		if (disposed) return;
+		if (indices === null) {
+			firstInnFlag.fill(1); // graceful default: every ball builds a column
+		} else {
+			firstInnFlag.fill(0);
+			for (const i of indices) if (i >= 0 && i < n) firstInnFlag[i] = 1;
+		}
+		tideVersion++;
+		tideKey = ''; // invalidate the packing cache
+		if (tideActive) ensureTideData();
+		invalidate();
+	}
 
 	/* ---- run-out cascade membership (§14) ---------------------------------- */
 	// Bake a CPU-supplied index set (or the pipeline seed) into the aRunOut flag
@@ -752,7 +918,10 @@ export function createField(opts: FieldOptions): FieldHandle {
 			a.riversTint === b.riversTint &&
 			a.riversOthersDim === b.riversOthersDim &&
 			a.riversMute === b.riversMute &&
-			sameKinds(a.riversKinds, b.riversKinds)
+			sameKinds(a.riversKinds, b.riversKinds) &&
+			a.waterLevel === b.waterLevel &&
+			a.waterDrownDim === b.waterDrownDim &&
+			a.waterTeamKeep === b.waterTeamKeep
 		);
 	}
 
@@ -846,6 +1015,21 @@ export function createField(opts: FieldOptions): FieldHandle {
 				'[every-ball-ever] invariant: the dismissal rivers (C3-4) and a re-sort/cascade',
 				'are both engaged — cross-cutting position modifiers must be staged apart.'
 			);
+
+		// tide skyline (§18): bake the within-season packing the first time the tide
+		// layout engages (cached by the first-innings version). The waterline is a
+		// LUMINANCE-only level over the held skyline — no position change, no second
+		// controlling morph — so it just sets its uniforms; inactive at level < 0, so
+		// R1/R2 render byte-identically.
+		if (s.layoutA === 'tide' || s.layoutB === 'tide') {
+			ensureTideData();
+			tideActive = true;
+		} else {
+			tideActive = false;
+		}
+		uniforms.uWaterLevel.value = s.waterLevel;
+		uniforms.uWaterDrownDim.value = s.waterDrownDim;
+		uniforms.uWaterTeamKeep.value = s.waterTeamKeep ? 1 : 0;
 
 		// label plane opacity is scene-state-driven, never animated on its own
 		const o = Math.min(1, Math.max(0, s.labels));
@@ -1001,6 +1185,7 @@ export function createField(opts: FieldOptions): FieldHandle {
 		wormLayout = computeWorms(halfW, halfH);
 		frontierLayout = computeFrontier(halfW, halfH);
 		riversLayout = computeRivers(data.groups, halfW, halfH);
+		tideLayout = computeTide(data.groups, halfW, halfH);
 		uniforms.uHalfW.value = halfW;
 		uniforms.uHalfH.value = halfH;
 		uniforms.uWormLeft.value = wormLayout.left;
@@ -1025,6 +1210,8 @@ export function createField(opts: FieldOptions): FieldHandle {
 			riverX[gi] = Number.isNaN(rx) ? 0 : rx;
 		}
 		uniforms.uRiverX.value = riverX;
+		// tide skyline (§18): the fixed-aspect letterboxed box + season-block x's
+		applyTideGeometry();
 		uniforms.uPointScale.value = basePointPx(w, h, n) * dpr;
 		uniforms.uColHalfWidth.value = columnLayout.colHalfWidth;
 		uniforms.uColBottom.value = columnLayout.bottom;
@@ -1085,6 +1272,8 @@ export function createField(opts: FieldOptions): FieldHandle {
 		getWormLayout: () => wormLayout,
 		getFrontierLayout: () => frontierLayout,
 		getRiversLayout,
+		getTideLayout: () => tideLayout,
+		setFirstInnings,
 		setRunouts,
 		setDismissals,
 		dispose(): void {

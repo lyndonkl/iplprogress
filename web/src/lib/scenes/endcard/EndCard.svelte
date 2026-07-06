@@ -24,7 +24,7 @@
 
 <div class="pin">
 	<div class="scene-card interactive card">
-		<p class="overline">Chapter 3 of 10: The Counterrevolution · done</p>
+		<p class="overline">Chapter 4 of 10: The Rising Tide · done</p>
 
 		<h2>Every ball is still here.</h2>
 		<p class="promise">
@@ -34,8 +34,8 @@
 		</p>
 
 		<p class="next">
-			<strong>Up next: Chapter 4, The Rising Tide.</strong>
-			<em>While batters and bowlers fought, the water level rose.</em>
+			<strong>Up next: the Interlude, The Net Session.</strong>
+			<em>Before we tell you what a ball is worth, you get to feel it in your own hands.</em>
 			<span class="tag">in build · the story grows chapter by chapter</span>
 		</p>
 

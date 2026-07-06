@@ -14,8 +14,12 @@ import type {
 	SceneFieldState,
 	SubsetHighlight,
 	SubsetResort,
-	SubsetRivers
+	SubsetRivers,
+	Waterline
 } from './types';
+
+/** Default drowned-column luminance × (storyboard §6: dims one-plus stop). */
+const WATERLINE_DEFAULT_DROWN = 0.18;
 
 /** The six filter uniform fields resolved from a scene's declarative facets. */
 interface ResolvedFilter {
@@ -65,6 +69,7 @@ interface ResolvedSceneState {
 	resort: SubsetResort | null;
 	cascade: RunoutCascade | null;
 	rivers: SubsetRivers | null;
+	waterline: Waterline | null;
 	teamIgnite: boolean;
 	wallHeatMix: number;
 }
@@ -80,6 +85,7 @@ export function withDefaults(s: SceneFieldState): ResolvedSceneState {
 		resort: s.resort ?? null,
 		cascade: s.cascade ?? null,
 		rivers: s.rivers ?? null,
+		waterline: s.waterline ?? null,
 		teamIgnite: s.teamIgnite ?? true,
 		wallHeatMix: s.wallHeatMix ?? 0
 	};
@@ -139,6 +145,16 @@ export function resolveRenderState(
 	const toRiv = g.rivers;
 	const riv = toRiv ?? fromRiv;
 	const rivClass = riv ? RIVERS_CLASS[riv.class] : RIVERS_CLASS.none;
+
+	// Waterline resolves like the cascade/rivers: the active descriptor (preferring
+	// `to`) fixes the discrete config (drownDim / teamKeepLit), while `level` LERPS
+	// — so the water RISES as the scene scrubs, and DRAINS to the floor (an inactive
+	// side contributes level 0) when the next scene declares none. With NO waterline
+	// on either side `level` is -1, an inert sentinel, so the drown branch is a
+	// shader no-op and R1/R2 render byte-identically.
+	const fromWl = f.waterline;
+	const toWl = g.waterline;
+	const wl = toWl ?? fromWl;
 
 	// Facet filter resolves like the highlight: the discrete facets come from
 	// whichever side declares an active filter (preferring `to`), while filterDim
@@ -205,7 +221,13 @@ export function resolveRenderState(
 		riversTint: riv ? riv.tint ?? 1 : 0,
 		riversOthersDim: riv ? riv.othersDim ?? 0.12 : 1,
 		riversMute: riv ? riv.muteIdentity ?? 1 : 0,
-		riversKinds: (toRiv ?? fromRiv)?.kinds ?? DEFAULT_RIVERS_KINDS
+		riversKinds: (toRiv ?? fromRiv)?.kinds ?? DEFAULT_RIVERS_KINDS,
+		// waterline: level lerps (rises on the way in, drains to 0 on the reverse
+		// leg); the drown config comes from the active descriptor. Inert at -1 when
+		// no waterline is declared, so a non-tide scene equals DEFAULT_RENDER_STATE.
+		waterLevel: wl ? lerp(fromWl?.level ?? 0, toWl?.level ?? 0, clampedT) : -1,
+		waterDrownDim: wl ? wl.drownDim ?? WATERLINE_DEFAULT_DROWN : 1,
+		waterTeamKeep: wl ? wl.teamKeepLit ?? true : false
 	};
 }
 

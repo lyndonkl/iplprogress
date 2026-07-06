@@ -58,6 +58,12 @@ export async function loadFieldData(baseUrl: string): Promise<FieldData> {
 		// rendering; the frontier plane collapses to the corner until it arrives.
 		const bowlerPlane = await fetchOptionalU8(`${baseUrl}/data/bowlerplane.u8`, n * 2);
 
+		// OPTIONAL per-point full-innings total (Ch 4 §18 tide skyline y). One raw
+		// byte per point (runs = byte × 2). Absent until the pipeline ships
+		// innings_total.u8 — fetch non-fatally so R1/R2 keep rendering; the tide
+		// skyline collapses to the floor until it arrives.
+		const inningsTotal = await fetchOptionalU8(`${baseUrl}/data/innings_total.u8`, n);
+
 		return {
 			nPoints: n,
 			meta,
@@ -71,6 +77,7 @@ export async function loadFieldData(baseUrl: string): Promise<FieldData> {
 			matchIndex,
 			cumRuns,
 			bowlerPlane,
+			inningsTotal,
 			synthetic: false
 		};
 	} catch (err) {

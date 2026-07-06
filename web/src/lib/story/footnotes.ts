@@ -271,6 +271,78 @@ export const FOOTNOTES = {
 			'A bowler-season needs at least 90 legal balls to qualify. The WPL five carry a designed short-sample state by choice: four seasons is not a long enough tide to crown a gravity-defier against yet, so the card names who is closest so far and says to ask again in a few years. That honest short sample is itself the point. A couple of IPL cards rest on a thin spell too and say so.',
 			'The wicket-taking mirror of this idea is True Wickets per 24: actual minus expected wickets per 24 balls, expected from the same league-season baseline. It answers who really took more wickets than their era should have, and it lives here in the deep layer.'
 		]
+	},
+	'par-drift': {
+		title: 'The going rate, and how we find it',
+		paragraphs: [
+			'The going rate we call par is the first-innings total that wins exactly half the time. We fit it with a logistic model: the chance the team batting first wins, read against the total it posted, on decided matches with a full first innings (no rain-shortened chases, no no-results). Par is the total at 50%, a safe score is the total at 75%, and a dead one is the total at 25%.',
+			'Pooled by era, par climbed from about 165 runs in 2008-2010 to about 195 in 2023-2026, and a safe score from 191 to 230. The rising blue waterline uses a per-season version, fit on a three-season window so a single small season borrows strength from its neighbours; that per-season line reaches about 206 by 2026.',
+			'Par is a batting-first idea on purpose: it answers "was that enough?". It is the same going-rate family the bowling chapter used, just read from the batting end.'
+		]
+	},
+	'full-first-innings': {
+		title: 'What counts as a 200 innings',
+		paragraphs: [
+			'The 200 Club counts first innings that reached 200 or more, using full innings only: no Duckworth-Lewis rain jobs, no no-results, and no innings cut short below twenty overs. Chases are left out because a team chasing 170 stops at 170, so its total is not a free swing at a big score.',
+			'Where you draw that full-innings line moves the 200-plus count by about one either way, which is why the artifact wins over any single quoted figure. Pooled by era, the share of first innings passing 200 went from 7.7% in 2008-2010 to 42.0% in 2023-2026, and to 52.1% in 2026 alone.',
+			'The 180, 220 and 250 lines are counted the same way; they are the other beams of the same ridgeline.'
+		]
+	},
+	'record-null': {
+		title: 'Why a faster-falling record is the tell',
+		paragraphs: [
+			'Records get harder to break as they climb, purely by arithmetic: each new high is a taller bar to clear. So in a still, unchanging scoring world, each record should stand LONGER than the last one did, not shorter.',
+			'The opposite happened. The highest first-innings total, RCB’s 263 from 2013, stood 3,991 days. Then it fell twice in 19 days in 2024, to SRH’s 277 and then 287. A record speeding up instead of slowing down is direct evidence the water level itself moved, not that one team got lucky on one night.',
+			'We track first-innings totals only, and a lifespan is the number of calendar days between the day a record was set and the day it was beaten.'
+		]
+	},
+	'phase-economy': {
+		title: 'The innings went phase-agnostic',
+		paragraphs: [
+			'Demoted from the main flow, but a lovely nugget: the innings flattened out across its phases. The gap between the death-overs run rate and the powerplay run rate compressed from about 1.9 runs an over in 2008-2010 to about 1.4 in 2023-2026.',
+			'By 2023-2026 the powerplay ran at about 9.5 an over and the death overs at about 10.9. The start of the innings now nearly keeps up with the end. Teams stopped saving themselves for later, because there is less "later" premium left to save for.',
+			'Powerplay wicket cost is wickets lost per 36 legal balls; the run rates here are legal-ball run rates by over, pooled within each era.'
+		]
+	},
+	'venue-canon': {
+		title: 'Counting a ground’s tide',
+		paragraphs: [
+			'A ground’s tide is its typical first innings: the mean full first-innings total at that venue in an era. Before any of it, about sixty raw ground spellings collapse to their real venue. Chinnaswamy shows up under three spellings, Chepauk under three, and a rebuilt stadium keeps one identity.',
+			'The share of scoring you can pin on which ground it was is a one-way analysis of variance, run within each season and then averaged across the era, so a season played mostly at neutral away grounds (South Africa in 2009, the UAE in 2020-21) cannot fake a spread. Measured that way it went from about 10% in 2008-2010 to about 24% in 2023-2026: grounds pulling apart, not together.',
+			'A team’s home-ground card uses the same venue means, split by era, for the ground that team plays most of its home games at now. Punjab, for instance, is priced against Mullanpur, its current home, not the largely abandoned Mohali.'
+		]
+	},
+	'tide-reservoir': {
+		title: 'How the tide skyline is built',
+		paragraphs: [
+			'Every column is one full first innings, and the taller it stands the bigger the score. Full means the same clean cut used all through the chapter: no rain-shortened games, no no-results, and no innings cut short below twenty overs. Chasing innings aren’t columns, because a team chasing 170 stops at 170.',
+			'Each season’s innings are sorted short to tall, so a block reads as a little skyline. Seasons run left to right, 2008 to now, with the WPL on its own block. The rising waterline, the going rate, is drawn on the very same scale, so a column that drops below it has literally been overtaken.',
+			'Every OTHER ball ever bowled is still here too, settled into the low-alpha haze along the floor, so “every ball ever is here” stays literally true. The whole skyline is built on your device from one per-ball flag (was this a first innings), never downloaded as positions.'
+		]
+	},
+	'cpi-callback': {
+		title: 'Your sketch, and the two ways to count 200',
+		paragraphs: [
+			'At the cold open we asked you to draw how often teams pass 200 each season. We keep that sketch on your own device, in the browser’s local storage, and here we draw it back over the truth. If you skipped it or arrived by a shared link, we show the line a typical reader drew instead.',
+			'Two honest counts of 2026 sit in this chapter and they are not the same number. The blue truth line here counts EVERY innings that passed 200 in a season, batting first or chasing: that is 65 in 2026. The 200 Club scene earlier counted the SHARE of FIRST innings that reached 200, which was 52.1% in 2026. So in 2026 teams cleared 200 sixty-five times either way, and more than half of all first innings got there. One is a count of innings, the other is a share of first innings. Neither is the other.',
+			'Told as a run rate, it is the same story: the first-innings going rate rose from 8.03 an over in 2008-2010 to 9.55 in 2023-2026. The technical name is the T20 Consumer Price Index, a scoring price level. Set 2008-2010 to 100 and 2023-2026 reads 119, about 19% more runs for the same over. Every score you remember has quietly been repriced.'
+		]
+	},
+	'measured-jump': {
+		title: 'How we know 2023 really bent',
+		paragraphs: [
+			'The cliff is not one number acting up. The share of first innings passing 200 jumped from 17.6% in 2022 to 32.4% in 2023, and it is not alone: the going rate, the powerplay run rate and the highest-total record all step up at the same seam, not on a gentle slope.',
+			'That simultaneity is what makes it a measured jump and not noise. When one number spikes you suspect a fluke. When several unrelated ones all hinge on the same off-season, something in the environment moved.',
+			'What moved it is deliberately not named here. That is the whole point of the beat: the chapter shows the jump and refuses the reason. Chapter 7 names a suspect, and Chapter 10 gives the verdict.'
+		]
+	},
+	'wpl-two-clocks-ch4': {
+		title: 'The WPL, on two clocks',
+		paragraphs: [
+			'Reading a four-season league against a nineteen-season timeline needs two clocks at once. On the calendar clock the WPL’s 200 Club (11.4% of first innings) sits between the young IPL’s 2008 (13.0%) and 2015 (11.3%). On the league-age clock, wind both leagues back to season one, and its typical first innings rose 156.6 to 169.1 across its first four years, faster than the IPL climbed at the same age.',
+			'It is not a smaller version of the men’s game, it is a different engine. About 46.8% of WPL runs come in fours against 33.9% in the modern IPL, and only 15.5% come in sixes against 29.0%. The flood is built along the ground, four-led, not over the rope.',
+			'Sample honesty: four seasons is young. The WPL’s 200-plus totals by season run 4, then 0, then 5, then 5 across 2023 to 2026, small counts that will move as the league plays. A 200 there is still a real event, where in the modern IPL more than half of first innings clear it.'
+		]
 	}
 } as const satisfies Record<string, FootnoteEntry>;
 

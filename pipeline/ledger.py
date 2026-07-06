@@ -67,6 +67,15 @@ CH2_SET_FILES = ("scenes/ch2.json", "cumruns.u8")
 # strike-rate per-point buffer bowlerplane.u8 (the controlling-morph coordinate,
 # 2 bytes/point). Lazy-loaded at Ch 3 entry; held to the per-chapter budget.
 CH3_SET_FILES = ("scenes/ch3.json", "bowlerplane.u8")
+# R3a Chapter 4 "The Rising Tide": the whole chapter — the 200 Club threshold
+# exceedance, the win-half-the-time par drift, the record ticker, the powerplay
+# premium at equal wicket cost, venue divergence + the 16 home-ground-tide
+# payoff variants, the CPI callback, the WPL two-clock beat, and the ridgeline /
+# waterline column tables — ships in one scene doc (scenes/ch4.json), plus the
+# waterline-morph per-point buffer innings_total.u8 (1 byte/point, each ball's
+# quantized innings total). Engine-light: it reuses engine #1 (par/phasepar) and
+# adds no engine. Lazy-loaded at Ch 4 entry; held to the per-chapter budget.
+CH4_SET_FILES = ("scenes/ch4.json", "innings_total.u8")
 # Engine tables under engines/: R2a's engine #1 (par/SR+) + engine #5 (entry
 # states) consumed by Chapter 2, plus the parallel-track engine #2 (re288) +
 # engine #3 (wp_grid) built during R2/R3a and consumed in R3b. All lazy-loaded
@@ -111,6 +120,7 @@ def build_ledger(out_root: Path = canon.OUT_ROOT) -> dict:
     sandbox_files = [n for n in SANDBOX_SET if n in artifacts]
     ch2_files = [n for n in CH2_SET_FILES if n in artifacts]
     ch3_files = [n for n in CH3_SET_FILES if n in artifacts]
+    ch4_files = [n for n in CH4_SET_FILES if n in artifacts]
     engine_files = sorted(n for n in artifacts if n.startswith(ENGINES_PREFIXES))
 
     checks = [
@@ -149,6 +159,13 @@ def build_ledger(out_root: Path = canon.OUT_ROOT) -> dict:
             "budget_gz": BUDGET_CHAPTER_GZ,
             "actual_gz": gz_sum(ch3_files),
             "pass": bool(ch3_files) and gz_sum(ch3_files) <= BUDGET_CHAPTER_GZ,
+        },
+        {
+            "name": "chapter ch4 (scene + innings_total buffer)",
+            "files": ch4_files,
+            "budget_gz": BUDGET_CHAPTER_GZ,
+            "actual_gz": gz_sum(ch4_files),
+            "pass": bool(ch4_files) and gz_sum(ch4_files) <= BUDGET_CHAPTER_GZ,
         },
         {
             "name": "engines (ch2 par/entry + R3b parallel-track re288/wp_grid)",

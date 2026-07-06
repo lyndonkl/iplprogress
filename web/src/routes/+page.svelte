@@ -11,6 +11,7 @@
 	import { scenes as ch1Scenes } from '$lib/scenes/ch1';
 	import { scenes as ch2Scenes } from '$lib/scenes/ch2';
 	import { scenes as ch3Scenes } from '$lib/scenes/ch3';
+	import { scenes as ch4Scenes } from '$lib/scenes/ch4';
 	import { scenes as endCardScenes } from '$lib/scenes/endcard';
 	import { scenes as sandboxScenes } from '$lib/scenes/sandbox';
 
@@ -25,6 +26,7 @@
 		...ch1Scenes,
 		...ch2Scenes,
 		...ch3Scenes,
+		...ch4Scenes,
 		...endCardScenes,
 		...sandboxScenes
 	];

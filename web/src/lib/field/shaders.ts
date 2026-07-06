@@ -76,6 +76,15 @@ export const ASSEMBLY_RAIN_WINDOW = 0.045;
 export const WORM_HAZE_ALPHA = 0.3;
 
 /**
+ * Base alpha multiplier for the Ch 4 tide reservoir (§18): non-first-innings
+ * balls (second innings, super-over, rain-hit) that settle into the low haze
+ * behind and below the skyline, so "every ball ever is here" stays literally
+ * true while the lit first-innings columns carry the argument. First-innings
+ * columns keep full alpha; only the reservoir is damped. Baked as TIDE_RESERVOIR_A.
+ */
+export const TIDE_RESERVOIR_ALPHA = 0.16;
+
+/**
  * Sweep-distance (in `cascadeSweep` units) a single season's run-out cohort
  * spends flashing + falling — sized near the season pitch (~1/18 over 2008-26)
  * so each season reads as ONE discrete synchronized pulse (Gestalt common fate,
@@ -190,6 +199,26 @@ uniform float uRiverBottom;     // world y at 0% share (the flat baseline)
 uniform float uRiverHeight;     // world height spanning 0 → 100% share
 uniform float uRiverHalfW;      // in-strip x jitter half-width (fills the strip)
 uniform float uRiverX[GROUP_COUNT]; // per-group season strip centre x (world)
+
+// ---- Tide skyline (Ch 4, §18). Fixed-aspect, letterboxed box; x = season block
+//      (uTideX[gi]) + within-season packing, y = a column filled to the innings
+//      TOTAL. All three are packed into ONE attribute (aTide). First-innings balls
+//      build columns; the rest settle into a low-alpha reservoir haze. In-shader.
+uniform float uTideBottom;      // world y at innings total 0 (the coastline floor)
+uniform float uTideHeight;      // world height spanning total 0 → TIDE_TOTAL_CAP
+uniform float uTideInvCap;      // 1 / TIDE_TOTAL_CAP (decoded-total → 0..1)
+uniform float uTideBlockHalfW;  // half-width of a season block (columns pack within ±)
+uniform float uTideCellHalfW;   // per-column x jitter half-width (< the column pitch)
+uniform float uTideReservoirH;  // world height of the reservoir haze band (non-first-inn)
+uniform float uTideX[GROUP_COUNT]; // per-group season block centre x (world)
+
+// ---- Waterline (Ch 4, §18). A LEVEL over the held tide layout: a first-innings
+//      column whose innings total (runs) is below uWaterLevel drowns (LUMINANCE
+//      only). Composes with the tide layout, spends NO extra controlling morph.
+//      Inactive at uWaterLevel < 0, so R1/R2 render byte-identically.
+uniform float uWaterLevel;      // going-rate level in RUNS; column total < this drowns. -1 = inactive
+uniform float uWaterDrownDim;   // luminance × for a drowned column (1 = no dimming)
+uniform float uWaterTeamKeep;   // 1 = the picked team's columns stay lit even when drowned
 `;
 
 /** Core per-point attributes (both shaders read these). */
@@ -205,6 +234,11 @@ in float aBowlEcon; // bowler-season economy byte 0..254 (frontier x); raw, non-
 in float aBowlSr;   // bowler-season strike-rate byte 0..254, 255 = no-wicket sentinel (frontier y)
 in float aDismissal;// dismissal-kind flag -1 none / 0 bowled / 1 lbw / 2 caught / 3 stumped (rivers)
 in float aRiverPos; // stacked 0..1 share-position within the season strip (rivers y); baked on-device
+in float aTide;     // packed tide record (§18), baked on-device to stay within the
+                    // vertex-attribute budget: innings-total byte (bits 0-7; runs =
+                    // byte×2, tide y), within-season packing slot quantized 0..1023
+                    // (bits 8-17; tide x, innings ranked short→tall), first-innings
+                    // flag (bit 18; 0 routes the ball to the reservoir haze)
 ${hasMatch ? 'in float aMatchIndex; // per-delivery match index (u16)' : ''}
 `;
 }
@@ -220,11 +254,12 @@ uint pcg(uint v) {
 }
 const float INV32 = 1.0 / 4294967296.0;
 
-vec3 pickLayout(int id, vec3 pFree, vec3 pCols, vec3 pWall, vec3 pWorms, vec3 pFrontier) {
+vec3 pickLayout(int id, vec3 pFree, vec3 pCols, vec3 pWall, vec3 pWorms, vec3 pFrontier, vec3 pTide) {
 	if (id == 1) return pCols;
 	if (id == 2) return pWall;
 	if (id == 4) return pWorms;
 	if (id == 5) return pFrontier;
+	if (id == 6) return pTide;
 	return pFree; // 0 free · 3 assembly share the free-field scatter
 }
 
@@ -266,6 +301,9 @@ struct Core {
 	float cascadeFlash;  // 0..1 red-flash intensity as the season wave crosses
 	bool riverMember;    // bowler-credited wicket (aDismissal >= 0) — rivers subset
 	float riverEngage;   // 0..1 rivers engage weight (recolor / others-dim strength)
+	float tideWeight;    // 0..1 amount of the tide layout in the A/B mix (drown / reservoir gate)
+	bool tideFirst;      // builds a tide column (aTide bit 18) — vs the reservoir haze
+	float tideTotal;     // decoded innings total in RUNS (byte × 2) — the waterline drown test
 };
 
 Core computeCore() {
@@ -360,19 +398,53 @@ Core computeCore() {
 		(h3 - 0.5) * 0.25
 	);
 
+	// tide skyline (Ch 4, §18): x = season block (uTideX[gi]) + within-season
+	// packing slot, y = a column filled from the floor up to the innings TOTAL. The
+	// per-point record is packed into ONE attribute (aTide) to stay within the GPU
+	// vertex-attribute budget; decode it the same way the pick shader decodes its
+	// index (exact integers < 2^23 in highp): byte (runs = byte×2, the
+	// innings_total.u8 scale) + 256·colQuant(0..1023) + 262144·firstFlag.
+	float tideByte = mod(aTide, 256.0);
+	float tideRest = floor(aTide / 256.0);
+	float tideColQ = mod(tideRest, 1024.0);
+	o.tideFirst = floor(tideRest / 1024.0) > 0.5;
+	o.tideTotal = tideByte * 2.0;
+	float tideColPos = (tideColQ / 1023.0) * 2.0 - 1.0; // within-season slot -1..1
+	float tideNorm = clamp(o.tideTotal * uTideInvCap, 0.0, 1.0);
+	vec3 posTide;
+	if (o.tideFirst) {
+		// h1 fills the column uniformly from the floor to the total (the top ≈ total)
+		posTide = vec3(
+			uTideX[gi] + tideColPos * uTideBlockHalfW + (h4 * 2.0 - 1.0) * uTideCellHalfW,
+			uTideBottom + h1 * tideNorm * uTideHeight,
+			(h3 - 0.5) * 0.25
+		);
+	} else {
+		// reservoir haze: spread across the season block, low near the floor
+		posTide = vec3(
+			uTideX[gi] + (h4 * 2.0 - 1.0) * uTideBlockHalfW,
+			uTideBottom + h1 * uTideReservoirH,
+			(h3 - 0.5) * 0.25
+		);
+	}
+
 	// morph with per-point stagger so the field streams, not teleports
 	float delay = h3 * 0.55;
 	float t = clamp(uProgress * 1.55 - delay, 0.0, 1.0);
 	t = t * t * (3.0 - 2.0 * t);
 	vec3 pos = mix(
-		pickLayout(uLayoutA, posFree, posCols, posWall, posWorms, posFrontier),
-		pickLayout(uLayoutB, posFree, posCols, posWall, posWorms, posFrontier),
+		pickLayout(uLayoutA, posFree, posCols, posWall, posWorms, posFrontier, posTide),
+		pickLayout(uLayoutB, posFree, posCols, posWall, posWorms, posFrontier, posTide),
 		t
 	);
 
 	// how much of a density-haze layout (worm-space 4 or frontier 5) is in the
 	// current mix — drives the low-alpha haze (no-op for R1 layouts, never 4/5).
 	o.wormWeight = (isHazeLayout(uLayoutA) ? (1.0 - t) : 0.0) + (isHazeLayout(uLayoutB) ? t : 0.0);
+
+	// how much of the tide layout (code 6) is in the mix — gates the waterline
+	// drown + the reservoir alpha (no-op for every R1/R2 layout, never 6).
+	o.tideWeight = (uLayoutA == 6 ? (1.0 - t) : 0.0) + (uLayoutB == 6 ? t : 0.0);
 
 	// subset re-sort flight — matching points arc into their season's column
 	if (o.matchResort) {
@@ -475,6 +547,7 @@ export function makeVertexShader(groupCount: number, hasMatch = false): string {
 #define WALLHEAT_NEUTRAL ${(WALLHEAT_NEUTRAL_BYTE / 255).toFixed(6)}
 #define CASCADE_FLASH_W ${CASCADE_FLASH_WINDOW.toFixed(6)}
 #define WORM_HAZE_ALPHA ${WORM_HAZE_ALPHA.toFixed(6)}
+#define TIDE_RESERVOIR_A ${TIDE_RESERVOIR_ALPHA.toFixed(6)}
 ${hasMatch ? '#define HAS_MATCH' : ''}
 
 ${UNIFORMS_GLSL}
@@ -600,6 +673,24 @@ void main() {
 	//      overlapping balls read as texture/density, not a solid fill. No-op
 	//      outside worm-space (wormWeight is 0 for every R1 layout).
 	alphaMul *= mix(1.0, WORM_HAZE_ALPHA, core.wormWeight);
+
+	// ---- Tide reservoir + waterline drown (§18). No-op unless the tide layout is
+	//      in the mix (tideWeight > 0), so R1/R2 render byte-identically. First-
+	//      innings columns carry full alpha; non-first-innings balls damp to the
+	//      reservoir haze; a first-innings column whose innings total sits below
+	//      the going rate (uWaterLevel, runs) DROWNS on LUMINANCE only (never hue).
+	if (core.tideWeight > 0.0) {
+		bool tideTeam = uPickedTeam >= 0.0 && abs(aTeam - uPickedTeam) < 0.5;
+		if (!core.tideFirst) {
+			alphaMul *= mix(1.0, TIDE_RESERVOIR_A, core.tideWeight);
+			c *= mix(1.0, 0.7, core.tideWeight);
+		} else if (uWaterLevel >= 0.0 && core.tideTotal < uWaterLevel &&
+		           !(tideTeam && uWaterTeamKeep > 0.5)) {
+			float drown = mix(1.0, uWaterDrownDim, core.tideWeight);
+			alphaMul *= drown;
+			c *= mix(0.55, 1.0, drown);
+		}
+	}
 
 	// ---- Run-out cascade (§14): fade the fallen cohort, then the beat-gated red
 	//      flash overrides the haze so the danger/loss signal reads on luminance.
