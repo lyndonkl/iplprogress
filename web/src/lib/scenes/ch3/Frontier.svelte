@@ -170,9 +170,9 @@
 
 	.caption-slot {
 		position: absolute;
-		left: 8vw;
-		bottom: 12vh;
-		max-width: min(30rem, 84vw);
+		left: 5vw;
+		top: 10vh;
+		max-width: min(26rem, 44vw);
 	}
 
 	.dagger {
@@ -202,7 +202,7 @@
 			transform: translateX(-50%);
 			width: 92vw;
 			max-width: 92vw;
-			bottom: max(10vh, calc(env(safe-area-inset-bottom) + 8vh));
+			top: max(10vh, calc(env(safe-area-inset-top) + 56px));
 		}
 	}
 </style>

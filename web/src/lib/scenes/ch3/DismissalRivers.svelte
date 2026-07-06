@@ -253,9 +253,9 @@
 		{#if step === 1}
 			<div class="scene-card">
 				<p>
-					Now just the wickets. Every ball that took one <strong>lifts off the map and sorts itself by
-						how the batter went:</strong> bowled, leg before, caught, stumped. Each colored band is one
-					way out, and its thickness is its share of all wickets.
+					Now just the wickets, split by how the batter got out: bowled, caught, trapped in front
+					(lbw), or stumped, where the keeper whips off the bails. <strong>Each coloured band's height is
+					that way's share of the season's wickets,</strong> read left to right across the years.
 				</p>
 			</div>
 		{:else if step === 2}
@@ -389,9 +389,9 @@
 
 	.caption-slot {
 		position: absolute;
-		left: 8vw;
-		bottom: 10vh;
-		max-width: min(32rem, 84vw);
+		left: 6vw;
+		top: 3vh;
+		max-width: min(30rem, 84vw);
 	}
 
 	.dagger {
@@ -425,7 +425,7 @@
 			transform: translateX(-50%);
 			width: 92vw;
 			max-width: 92vw;
-			bottom: max(72px, calc(env(safe-area-inset-bottom) + 60px));
+			top: max(10vh, calc(env(safe-area-inset-top) + 56px));
 		}
 	}
 </style>
