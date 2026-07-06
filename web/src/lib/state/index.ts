@@ -4,6 +4,7 @@
  * Everything degrades gracefully: null means "no state yet", and no scene may
  * gate content on any of these existing (deep links must always work).
  */
+import { writable } from 'svelte/store';
 import { persisted, isRecord, isFiniteNumber } from './persisted';
 
 /* ---- ebe.sketch.v1 — the cold-open You-Draw-It ---------------------------- */
@@ -31,8 +32,16 @@ function isSketch(v: unknown): v is SketchState | null {
 	return true;
 }
 
-/** The reader's drawn 200+ curve (or their skip). Written by the cold-open scenes. */
-export const sketch = persisted<SketchState | null>('ebe.sketch.v1', null, isSketch);
+/**
+ * The reader's drawn 200+ curve (or their skip). Written by the cold-open scenes,
+ * read again by the Ch4 CPI callback. Deliberately SESSION-ONLY (in-memory, not
+ * localStorage): a persisted sketch used to restore on every visit, so a line
+ * drawn in a past session froze on load and looked static / unfamiliar. Now every
+ * page load starts the draw fresh; within a session the value still flows from the
+ * cold open to the Ch4 callback. Team pick stays persisted; only the sketch resets.
+ */
+export const sketch = writable<SketchState | null>(null);
+void isSketch; // kept for the schema record; the store no longer validates on hydrate
 
 /* ---- ebe.team.v1 — the team pick ------------------------------------------ */
 

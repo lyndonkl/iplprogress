@@ -148,6 +148,9 @@
 
 	/* ---- pointer drawing ------------------------------------------------------ */
 	let drawing = false;
+	// true once the reader has drawn or asked to draw again — suppresses the
+	// scroll-past auto-resolve so "Draw it again" can't be instantly re-skipped.
+	let engaged = $state(false);
 	let last: { idx: number; v: number } | null = null;
 
 	function samplePoint(e: PointerEvent): { idx: number; v: number } {
@@ -179,6 +182,7 @@
 			return;
 		}
 		if (phase !== 'draw' || !svgEl) return;
+		engaged = true;
 		svgEl.setPointerCapture(e.pointerId);
 		drawing = true;
 		last = null; // re-touching continues from any column (no join-up line)
@@ -247,6 +251,19 @@
 		phase = 'done';
 	}
 
+	// wipe the sketch and go back to a blank draw. A stored sketch restores on
+	// every visit (returning readers keep their line), so without this a stale
+	// sketch from a past session looks frozen; this is the escape hatch to redraw.
+	function resetDraw(): void {
+		for (let i = 0; i < DRAW_SEASONS; i++) values[i] = null;
+		branch = null;
+		skipped = false;
+		truthT = 0;
+		engaged = true; // they want to draw, so don't let the scroll-past auto-resolve fire
+		sketch.set(null);
+		phase = 'draw';
+	}
+
 	function startReveal(): void {
 		if (reduced) {
 			// reduced motion: the end state, instantly (storyboard CO-2)
@@ -287,7 +304,7 @@
 	// interaction adds depth, never carries a beat). The buttons stay the
 	// primary path; this only fires once the reader has clearly scrolled on.
 	$effect(() => {
-		if (phase === 'draw' && progress > 0.85) onJustShow();
+		if (phase === 'draw' && progress > 0.85 && !engaged) onJustShow();
 	});
 
 	onMount(() => {
@@ -453,6 +470,7 @@
 		{:else if phase === 'done'}
 			<div class="bridge">
 				<p><strong>Nineteen seasons. {matchesFmt} matches. Here comes every ball of it.</strong></p>
+				<button class="redraw interactive" onclick={resetDraw}>Draw it again</button>
 				<div class="cue" aria-hidden="true">↓</div>
 			</div>
 		{/if}
@@ -750,6 +768,24 @@
 		margin: 0;
 		font-size: clamp(1.05rem, 2.8vw, 1.3rem);
 		font-variant-numeric: tabular-nums;
+	}
+
+	.redraw {
+		margin-top: 0.6rem;
+		background: none;
+		border: none;
+		color: var(--ink-dim);
+		font: inherit;
+		font-size: 0.85rem;
+		text-decoration: underline;
+		text-underline-offset: 3px;
+		cursor: pointer;
+		padding: 0.4rem 0.6rem;
+		min-height: 44px;
+	}
+	.redraw:hover,
+	.redraw:focus-visible {
+		color: var(--ink);
 	}
 
 	.cue {

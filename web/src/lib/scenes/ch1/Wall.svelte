@@ -91,9 +91,9 @@
 	const neutralPct = $derived(heat ? (heat.neutral_byte / 255) * 100 : (73 / 255) * 100);
 	const legendLabels = $derived(
 		heat?.legend_labels ?? [
-			'Hit softer than a 2008 batter',
+			'Slower than a 2008 batter',
 			'About the same',
-			'Hit harder than a 2008 batter'
+			'Faster than a 2008 batter'
 		]
 	);
 
@@ -233,9 +233,10 @@
 		{:else if step === 3}
 			<div class="scene-card">
 				<p>
-					Now the colours change what they mean. The hotter a ball glows, the harder it was
-					hit than a 2008 batter managed at the same point. <strong>Watch the bottom-left corner
-					catch fire.</strong> The opening balls, once played quietly, now blaze.
+					Now the colours change what they mean. The hotter a ball glows, the faster batters
+					were scoring off it than a 2008 batter did at the same stage. <strong>Watch the
+					top-left corner catch fire.</strong> Those are the opening balls of recent seasons,
+					once played quietly, now blazing.
 				</p>
 			</div>
 		{:else if step === 4}
