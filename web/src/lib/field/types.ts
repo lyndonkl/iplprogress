@@ -146,7 +146,17 @@ export type LayoutId =
 	| 'worms'
 	| 'frontier'
 	| 'tide'
-	| 'worth';
+	| 'worth'
+	| 'constellation';
+
+/**
+ * Which per-innings-phase star map is active in the Ch 6 constellation
+ * (CONTRACT §22). The `phase` state selects one of the four precomputed,
+ * Procrustes-aligned tables fed via `field.setStarTables`, and lerps the 23
+ * star centres between two of them (the phase toggle — a coherent star-table
+ * swap over the HELD constellation, not a re-sort and not a second morph).
+ */
+export type ConstellationPhase = 'all' | 'powerplay' | 'middle' | 'death';
 
 /** Shader-side layout codes (uLayoutA / uLayoutB). */
 export const LAYOUT_CODE: Record<LayoutId, number> = {
@@ -179,7 +189,15 @@ export const LAYOUT_CODE: Record<LayoutId, number> = {
 	// (a 200-entry table the scene feeds — CONTRACT §19), density-normalized so
 	// integrated cell brightness tracks the price, never the crowd. Fixed data
 	// aspect, letterboxed like `worms`/`frontier`/`tide`. See CONTRACT §19.
-	worth: 7
+	worth: 7,
+	// Ch 6 controlling morph (free→constellation): every ball condenses to its
+	// SEASON-GROUP STAR centre — position = the per-phase star table (23 × (x,y),
+	// fed via setStarTables) indexed in-shader by the ball's group id (position.y
+	// = group_ids.u16) + a small radial jitter so a star reads as a glowing disc.
+	// The phase toggle lerps the 23 star centres between two precomputed tables
+	// (uStarMix), never a re-embed. Fixed data aspect (square), letterboxed like
+	// `worms`/`frontier`/`tide`/`worth`. No new per-point buffer. See CONTRACT §22.
+	constellation: 8
 };
 
 /**
@@ -519,6 +537,23 @@ export interface FieldRenderState {
 	railScale: number;
 	/** world-units peak of the flight arc */
 	railLift: number;
+
+	/* ---- constellation phase (§22 capability — the Ch 6 phase toggle) ---------
+	 * A cross-cutting POSITION state over the held `constellation` layout (the
+	 * exact analog of the pricelens color state over `worth`, except the table is
+	 * star POSITIONS, not colours): the 23 star centres lerp from phase table A
+	 * (source/`from`) to phase table B (target/`table`) by `phaseMix`. The
+	 * point-to-star assignment never changes — only the centres move, minimally
+	 * and Procrustes-locked, so the WPL never crosses the men's worm. Tables are
+	 * fed once via `field.setStarTables`; a null id resolves to 'all'. Read only
+	 * while the `constellation` layout is in the mix, so every prior scene renders
+	 * byte-identically regardless of these values. NEVER a live re-embed. */
+	/** phase table A (the lerp SOURCE / `from`), or null → 'all' */
+	phaseTableA: ConstellationPhase | null;
+	/** phase table B (the lerp TARGET / `table`), or null → 'all' */
+	phaseTableB: ConstellationPhase | null;
+	/** 0 = pure table A · 1 = pure table B (the star-centre lerp) */
+	phaseMix: number;
 }
 
 export const DEFAULT_RENDER_STATE: FieldRenderState = {
@@ -573,5 +608,8 @@ export const DEFAULT_RENDER_STATE: FieldRenderState = {
 	railProgress: 0,
 	railDim: 1,
 	railScale: 7,
-	railLift: 0.35
+	railLift: 0.35,
+	phaseTableA: null,
+	phaseTableB: null,
+	phaseMix: 0
 };

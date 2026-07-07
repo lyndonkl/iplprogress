@@ -432,6 +432,72 @@ export const FOOTNOTES = {
 			'WPL cards are priced on the evidenced WPL and pooled tables, and four seasons is a short list. The card says so on its face: a young history is a promise, not a deficit.',
 			'The replay’s worm reads YOUR team’s win chance, which may be the defending side. The canonical over earlier in the chapter reads the chasing side. Same method, different referent, which is why the two worms can quote different numbers for similar spots.'
 		]
+	},
+
+	/* ---- Chapter 6 — Two Dialects (r4a) ------------------------------------
+	 * Prose numbers below are documented constants that trace to ch6.json exactly
+	 * (the house convention: the "how we computed this" layer carries verified
+	 * figures as text; every MAIN-FLOW number is data-bound to ch6.json). Where a
+	 * blueprint teaser and the artifact diverge, these track the ARTIFACT. */
+	'ch6-constellation': {
+		title: 'How the season map is built',
+		paragraphs: [
+			'Every one of the 23 stars is one season of one league, placed by how differently it played, ball by ball. For each season we take the mix of what happened on a delivery, split into seven shares that add up to one: dot, single, two or three, four, six, wicket, or extra. A wicket ball counts as a wicket whatever else happened on it.',
+			'The distance between two seasons is how different those two mixes are. The technical name is the Jensen-Shannon distance, a standard, symmetric way to measure the gap between two distributions. We build the full 23-by-23 table of those distances, then find the flat map of 23 points whose straight-line gaps best reproduce it. The technical name is classical (Torgerson) multidimensional scaling. It is computed once, in the pipeline, and never re-fitted in your browser.',
+			'Read only the CLOSENESS. This map has no up, down, left or right that means anything: you can spin it or flip it like a photograph and every distance between stars stays the same, so the directions carry no information at all. How faithfully the flat map reproduces the true distances (the technical name is stress) is 0.13 for the all-overs map, low enough to trust how close two stars sit.',
+			'And the headline the geometry earns: every WPL season’s nearest men’s neighbour by shot mix is IPL 2008, while at the same time it scores at IPL 2022’s run rate. Two honest comparisons that usually agree, here disagreeing. That is why the WPL sits beside the men’s path, not on it. A different dialect, not an earlier version.'
+		]
+	},
+	'ch6-phase': {
+		title: 'Why the phase maps line up',
+		paragraphs: [
+			'The same map is built four times over: once with every over pooled, and once each for the first six overs, the middle overs (7 to 15) and the death overs (16 to 20). Each is a fresh Jensen-Shannon distance table and a fresh flat map.',
+			'Because the map has no meaningful directions, each phase’s map could come out spun or mirrored from the others by pure chance, and a mirror would throw the WPL to the wrong side of the men’s path. So each phase map is rotated, scaled and if needed flipped to sit as closely as possible on top of the all-overs master. The technical name is Procrustes alignment. That lock is exactly why the browser looks the positions up and never re-fits them: a fresh fit could legally mirror the WPL across the path and wreck the chapter’s whole picture.',
+			'The alignment does real work. It cuts the mismatch between a phase map and the master by more than twenty times over. After it, the WPL’s nearest men’s twin is an early IPL season in every phase: 2008 in the first six overs and at the death, about 2011 through the middle. It never once lands among the recent years, whichever overs you ask about.'
+		]
+	},
+	'ch6-maturity': {
+		title: 'The maturity clock, and two demoted exhibits',
+		paragraphs: [
+			'League year N is simply a league’s Nth season: IPL year 1 is 2008, WPL year 1 is 2023. Run rate is all the runs, extras included, per six legal balls. Wides and no-balls are left out of the deliveries counted, the same convention as the rest of the piece.',
+			'The match is exact: the WPL’s fourth-year run rate is 8.54, and the IPL’s fifteenth season, 2022, also ran at 8.54. But both leagues opened near 8 an over: the IPL’s first four years went 8.31, 7.48, 8.13, 7.73, the WPL’s 8.08, 7.86, 8.37, 8.54. So the men’s fifteen seasons to 8.5 is a long flat plateau that finally edged over the line, not a long climb from a low base. And the WPL launched in 2023 into a mature T20 world, inheriting fifteen years of the men’s know-how and importing established stars rather than climbing from scratch. Four seasons against fifteen is a threshold-crossing coincidence, not a steeper development curve: reaching the same rate sooner is not the same as developing faster.',
+			'A demoted exhibit, the powerplay’s share of scoring: the WPL’s first six overs score at 0.92 times its overall rate in 2026, exactly where the IPL sat for years before it crossed 1.0 (reaching 1.02 by 2026). The open question a young league raises is whether it needs a shock of its own to break that equilibrium.',
+			'A second demoted exhibit, batting depth: in 2025 the WPL’s number sevens and lower scored 15.3% of all runs, the highest single season in either league. Read it as opportunity, not a skill claim. More collapses force the lower order to bat. The WPL’s pooled figure (12.1%) sits close to the modern IPL’s (11.6%).'
+		]
+	},
+	'ch6-dna': {
+		title: 'How the runs are split, and the twos question',
+		paragraphs: [
+			'Each column splits a league’s runs by how they were scored: a four is four runs times the balls hit for four, a six is six times the sixes, and singles, twos and threes likewise. The shares are of all runs off the bat; the small remainder on top of each bar is extras and the rare five. Modern IPL here means 2023-2026, matched to the WPL’s four seasons.',
+			'The gap is real and large: 46.8% of WPL runs come in fours against the modern IPL’s 33.9%, and only 15.5% in sixes against 29.0%. A flood built along the ground, not over the rope. A different engine, not a smaller one.',
+			'A demoted exhibit that cuts the other way. You might expect a ground-based game to run harder for twos, but the WPL’s twos rate (9.8% of its one-two-three balls) sits below the modern IPL’s (13.5%). Smaller boundaries turn would-be twos into fours, so the running game is thinner for a geometric reason, not a fitness one. Meanwhile the IPL’s three is quietly dying, 0.85 to 0.46 per match, as boundary hitting replaces hard running.'
+		]
+	},
+	'ch6-stumping': {
+		title: 'Counting stumpings, and the spin proxy',
+		paragraphs: [
+			'The share is stumpings as a fraction of all of a season’s dismissals, run-outs included; only retirements are set aside. The data also carries the bowled-plus-lbw and caught shares beside it.',
+			'A stumping nearly always means a spinner was bowling, so its share is a proxy for how spin-heavy a league is. We say proxy on purpose, because the data carries no bowler-type field. We never state "a spinner’s league" as a measured fact, only as what a stumping share three-to-five times the men’s strongly implies.',
+			'Every WPL season runs 5.2 to 7.9% (7.0, 7.9, 5.2, 5.3 across 2023 to 2026). The IPL last topped 5% back in 2010 and reached just 1.4% in 2026.',
+			'Sample honesty: the WPL is four seasons and a few hundred dismissals a year, so the season-to-season figures will move. The size of the gap, not the decimals, is the point.'
+		]
+	},
+	'ch6-photofinish': {
+		title: 'What counts as a photo finish, and the balance exhibits',
+		paragraphs: [
+			'A photo-finish is a first-innings defence won by five runs or fewer, or a chase completed with three balls or fewer to spare. The denominator is decided matches only: ties (which go to a super over), rain-rule results and no-results are left out. Balls to spare is 120 minus the legal balls bowled when the target was passed.',
+			'The WPL’s 24.1% (21 of 87 decided games) is the highest of any league-era in the data; the IPL’s five eras run from 16 to 23%.',
+			'A demoted exhibit on the title race. The WPL launched more top-heavy than even the chaotic early IPL. Its win concentration reads about 0.043 against the early IPL’s 0.016 on a normalised win-share measure. Yet the trophy is a genuine duopoly: two different champions in four years, Mumbai and Bengaluru twice each, against the early IPL’s three in four.',
+			'And the star-dependence scare, defused. Batter-run concentration (a Gini coefficient) reads star-heavy for the WPL unfiltered, around 0.54 to 0.59, but that is a small-pool illusion. Among batters with at least 30 balls faced the WPL’s concentration is 0.34 to 0.38, at or below the IPL’s. Matched fairly, the WPL is not a one-woman league.'
+		]
+	},
+	'ch6-payoff': {
+		title: 'How your two dialects are paired',
+		paragraphs: [
+			'IPL sides are matched to their shared-city WPL sister where one exists: Mumbai, Bengaluru and Delhi each field a team in both leagues, and Gujarat’s IPL Titans pair with the WPL’s Gujarat Giants. Six IPL sides and the WPL’s UP Warriorz have no sister yet, and get an authored empty state rather than a blank card or a fabricated match. The missing side is itself the point about a young second league.',
+			'A WPL side’s "nearest men’s season-star by style" is the IPL season whose ball-by-ball shot mix sits closest to that team’s, measured by the same Jensen-Shannon distance the map uses. For all four WPL sisters and UP Warriorz it comes out as IPL 2008, the same early-IPL dialect the whole chapter has been tracing.',
+			'Five grounds have hosted both leagues: Arun Jaitley in Delhi, Brabourne and DY Patil across Mumbai and Navi Mumbai, Ekana in Lucknow, and Chinnaswamy in Bengaluru. Every card is built by the pipeline from one 16-variant table, snapshot-tested, never typed by hand.'
+		]
 	}
 } as const satisfies Record<string, FootnoteEntry>;
 

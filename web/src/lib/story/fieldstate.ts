@@ -9,6 +9,7 @@ import {
 } from '$lib/field/types';
 import { ASSEMBLY_RAIN_WINDOW } from '$lib/field/shaders';
 import type {
+	ConstellationPhaseState,
 	OverRail,
 	PriceLens,
 	RunoutCascade,
@@ -104,6 +105,7 @@ interface ResolvedSceneState {
 	waterline: Waterline | null;
 	pricelens: PriceLens | null;
 	overrail: OverRail | null;
+	phase: ConstellationPhaseState | null;
 	teamIgnite: boolean;
 	wallHeatMix: number;
 }
@@ -122,6 +124,7 @@ export function withDefaults(s: SceneFieldState): ResolvedSceneState {
 		waterline: s.waterline ?? null,
 		pricelens: s.pricelens ?? null,
 		overrail: s.overrail ?? null,
+		phase: s.phase ?? null,
 		teamIgnite: s.teamIgnite ?? true,
 		wallHeatMix: s.wallHeatMix ?? 0
 	};
@@ -220,6 +223,24 @@ export function resolveRenderState(
 	const toRail = g.overrail;
 	const rail = toRail ?? fromRail;
 
+	// Constellation phase (§22) resolves EXACTLY like the pricelens: the active
+	// descriptor (preferring `to`) fixes the DISCRETE table pair (from / table),
+	// while `mix` LERPS between the sides' declared mixes (a side with no phase
+	// contributes the active phase's own mix, so nothing jumps when only one side
+	// declares it — the star lerp is already gated on the constellation layout's
+	// share of the morph in-shader, so it rides free→constellation for free). The
+	// C6-5 phase glide (a cross-TABLE change, e.g. all → powerplay) is the scene's
+	// job via dynamicState, exactly like the pricelens era flip. With NO phase on
+	// either side both ids resolve null → the field defaults them to 'all' (inert;
+	// every prior scene byte-identical since the shader only reads uStar on
+	// the constellation layout). NEVER a live re-embed.
+	const fromPh = f.phase;
+	const toPh = g.phase;
+	const ph = toPh ?? fromPh;
+	const phMix = ph
+		? lerp(fromPh?.mix ?? ph.mix ?? 1, toPh?.mix ?? ph.mix ?? 1, clampedT)
+		: 0;
+
 	// Facet filter resolves like the highlight: the discrete facets come from
 	// whichever side declares an active filter (preferring `to`), while filterDim
 	// lerps — an inactive side contributes dim 1, so a filter fades in/out cleanly.
@@ -310,7 +331,13 @@ export function resolveRenderState(
 			: 0,
 		railDim: rail ? rail.dimRest ?? RAIL_DEFAULT_DIM : 1,
 		railScale: rail ? rail.scale ?? RAIL_DEFAULT_SCALE : RAIL_DEFAULT_SCALE,
-		railLift: rail ? rail.lift ?? RAIL_DEFAULT_LIFT : RAIL_DEFAULT_LIFT
+		railLift: rail ? rail.lift ?? RAIL_DEFAULT_LIFT : RAIL_DEFAULT_LIFT,
+		// constellation phase (§22): the table pair is discrete from the active
+		// descriptor (A = from ?? table, B = table); mix lerps. No phase → both null
+		// (the field defaults them to 'all' — inert). Positions lerp, never re-fit.
+		phaseTableA: ph ? (ph.from ?? ph.table) : null,
+		phaseTableB: ph ? ph.table : null,
+		phaseMix: phMix
 	};
 }
 

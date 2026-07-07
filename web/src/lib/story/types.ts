@@ -2,6 +2,7 @@ import type { Component } from 'svelte';
 import type { FieldHandle } from '$lib/field/field';
 import type {
 	CascadeClass,
+	ConstellationPhase,
 	DismissalKind,
 	FilterMode,
 	HighlightClass,
@@ -27,6 +28,7 @@ export type ChapterId =
 	| 'ch4'
 	| 'interlude'
 	| 'ch5'
+	| 'ch6'
 	| 'endcard'
 	| 'bowl';
 
@@ -274,6 +276,39 @@ export interface OverRail {
 }
 
 /**
+ * The constellation phase toggle (§22 capability — the Ch 6 hero map). A
+ * cross-cutting POSITION state over the held `constellation` layout, declared on
+ * a scene's `fieldState`. It is the exact analog of the Ch 5 `pricelens` (a
+ * table swap over a held grid), except the table is star POSITIONS: the 23 star
+ * centres lerp from phase table `from` to phase table `table` by `mix`. The
+ * point-to-star assignment never changes — only the centres move, minimally and
+ * Procrustes-locked (the whole season-cohort glides together), so the WPL never
+ * crosses the men's worm. It is NOT a re-sort and NOT a second controlling
+ * morph. The four tables are fed ONCE via `field.setStarTables`. Drive the C6-5
+ * glide by setting `{ from, table, mix }` and lerping `mix` 0→1 from
+ * `SceneDef.dynamicState` (a post-morph field change, like the pricelens `mix`);
+ * per the orchestrator caveat also surface the active table through
+ * `dynamicState` so a stray scroll re-application cannot revert the toggle. A
+ * phase-less constellation scene (C6-2..C6-4) omits this → the 'all' map. NEVER a
+ * live re-embed (a browser re-fit could mirror-flip the WPL, §0.1). See CONTRACT §22.
+ */
+export interface ConstellationPhaseState {
+	/** the active/target phase map: 'all' | 'powerplay' | 'middle' | 'death' */
+	table: ConstellationPhase;
+	/**
+	 * optional lerp SOURCE map: when set, the stars glide mix(from, table, mix) —
+	 * the C6-5 phase glide. Omitted → the stars sit at `table` (no movement).
+	 */
+	from?: ConstellationPhase | null;
+	/**
+	 * 0 = pure `from` · 1 = pure `table` (default 1). Drive it across the hold via
+	 * `dynamicState` for the C6-5 glide; it lerps like any scalar between scenes
+	 * that declare the same pair.
+	 */
+	mix?: number;
+}
+
+/**
  * A scene's declarative field state — the layout the field ARRIVES at while
  * the scene scrubs in, plus the cross-cutting uniform states. Omitted fields
  * take the defaults in fieldstate.ts (reveal 1 · dim 1 · wplDim 1 · labels 0 ·
@@ -303,6 +338,8 @@ export interface SceneFieldState {
 	pricelens?: PriceLens | null;
 	/** the set-piece six-ball lift to viewport-anchored rail slots, or null/omitted for none (§20) */
 	overrail?: OverRail | null;
+	/** the constellation phase toggle over the held season map, or null/omitted → the 'all' map (§22) */
+	phase?: ConstellationPhaseState | null;
 	/** whether the picked team's balls stay ignited (default true — §2 standing rule) */
 	teamIgnite?: boolean;
 	/**

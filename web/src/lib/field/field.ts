@@ -5,6 +5,7 @@ import {
 	FILTER_DIM,
 	LAYOUT_CODE,
 	NO_FILTER,
+	type ConstellationPhase,
 	type DismissalKind,
 	type FieldData,
 	type FieldFilter,
@@ -20,6 +21,9 @@ import {
 	computeRivers,
 	computeTide,
 	computeWorth,
+	computeConstellation,
+	constellationPoint,
+	CONSTELLATION_PHASES,
 	basePointPx,
 	WORM_X_CAP,
 	WORM_RUNS_CAP,
@@ -34,7 +38,8 @@ import {
 	type FrontierLayout,
 	type RiversLayout,
 	type TideLayout,
-	type WorthLayout
+	type WorthLayout,
+	type ConstellationLayout
 } from './layout';
 import { makeVertexShader, fragmentShader, makePickVertexShader, pickFragmentShader } from './shaders';
 
@@ -178,6 +183,31 @@ export interface FieldHandle {
 	 */
 	getWorthLayout(): WorthLayout | null;
 	/**
+	 * Feed the per-phase star tables for the Ch 6 constellation (§22). `tables`
+	 * maps each phase id ('all' | 'powerplay' | 'middle' | 'death') to its 23
+	 * normalized (x,y) star centres (indexed by gi 0-22 — the `group_ids.u16`
+	 * value), straight from `scenes/ch6.json` `constellation.stars`. Fed ONCE by
+	 * the scene before the constellation engages; the field copies them into the
+	 * `uStar` uniform (both phase slots) on demand and re-resolves the currently
+	 * applied phase, so a scene may feed tables before OR after its fieldState
+	 * first declares the layout / phase. Any subset of phases may be supplied;
+	 * an unfed phase renders as the origin (a graceful collapse — R1..R5 never use
+	 * the constellation). No positions cross the wire per point: the render reads
+	 * `uStar[gi]` off the ball's group id. Re-calling replaces the whole set.
+	 */
+	setStarTables(tables: Partial<Record<ConstellationPhase, StarTable>>): void;
+	/**
+	 * current constellation geometry (§22 — Ch 6's controlling morph): the
+	 * fixed-aspect (square) letterboxed box + the per-gi star WORLD coordinates
+	 * for the live applied phase table + mix. Scenes register the men's worm
+	 * polyline, the WPL dotted threads, the star labels, the persistent legend
+	 * and the payoff sister-thread to the GL star centres via `stars[gi]` +
+	 * `field.projectToCss`; arbitrary normalized coords (thread endpoints, the
+	 * WPL cluster hull) map through `constellationPoint(layout, nx, ny)`. null
+	 * before the first resize. Rebuilt on resize; star coords re-derived per read.
+	 */
+	getConstellationLayout(): ConstellationLayoutInfo | null;
+	/**
 	 * Feed the pricelens tables for the Ch 5 worth grid (§19). `tables` maps a
 	 * table id (e.g. 'early' | 'recent' | 'rise' | 'wpl') to a 200-entry
 	 * per-cell LUMINANCE array (0..1, cell index = over×10 + wicketsDown — the
@@ -248,6 +278,33 @@ export interface RiversBand {
 export interface RiversLayoutInfo extends RiversLayout {
 	/** the four bands bottom→top, with pooled-share label anchors */
 	bands: RiversBand[];
+}
+
+/**
+ * One phase's star table for `field.setStarTables` (§22): 23 normalized (x,y)
+ * star centres in the common [-1,1] frame, indexed by group id (gi 0-22, the
+ * `group_ids.u16` value) — straight from `scenes/ch6.json` `constellation.stars`.
+ */
+export type StarTable = ReadonlyArray<readonly [number, number]>;
+
+/**
+ * Constellation geometry exposed to scenes (§22 — the Ch 6 season map). The
+ * fixed-aspect (square), letterboxed box + the per-gi star world coordinates for
+ * the CURRENTLY APPLIED phase table + mix (so the scene's SVG worm, dotted
+ * threads, star labels, legend and the payoff sister-thread register exactly to
+ * the live GL star centres, tracking the phase-toggle glide). For an arbitrary
+ * normalized coordinate (a thread endpoint or a WPL cluster-hull vertex from
+ * `ch6.json`) map it through `constellationPoint(layout, nx, ny)` then
+ * `field.projectToCss`. Rebuilt on resize; the star coords are re-derived from
+ * the live applied phase on every read.
+ */
+export interface ConstellationLayoutInfo extends ConstellationLayout {
+	/** per-gi star world coordinates for the live applied phase table + mix (length groupCount) */
+	stars: { x: number; y: number }[];
+	/** the resolved active phase pair (null ids resolve to 'all') + lerp position */
+	phaseA: ConstellationPhase;
+	phaseB: ConstellationPhase;
+	mix: number;
 }
 
 /** Subset re-sort column geometry exposed to scenes (§7 — the C1-5 fireworks). */
@@ -332,6 +389,20 @@ export function createField(opts: FieldOptions): FieldHandle {
 	const riverX = new Float32Array(groupCount);
 	// per-group tide season-block centre x (filled on resize, §18)
 	const tideX = new Float32Array(groupCount);
+
+	/* ---- constellation star tables (§22 — the Ch 6 season map) --------------
+	 * The per-phase 23×(x,y) NORMALIZED star tables, fed once via setStarTables.
+	 * uStar[gi] packs BOTH the active lerp endpoints (xy = phase A, zw = phase B);
+	 * the shader lerps them by uStarMix. No per-point position ever crosses the
+	 * wire — the render reads uStar off the ball's group id (position.y). */
+	const starTables = new Map<ConstellationPhase, Float32Array>();
+	const starVectors: THREE.Vector4[] = data.groups.map(() => new THREE.Vector4());
+	// which (phaseA, phaseB) pair is currently copied into starVectors — so a
+	// phase LERP (A/B fixed, mix moving) only touches uStarMix, never re-copies.
+	let appliedStarKey = '';
+	let appliedPhaseA: ConstellationPhase = 'all';
+	let appliedPhaseB: ConstellationPhase = 'all';
+	let appliedPhaseMix = 0;
 
 	/* ---- worth-grid pricelens texture (§19) ---------------------------------
 	 * 200 cells × 8 rows, RG float: R = the cell's price LUMINANCE (0..1, fed by
@@ -434,6 +505,83 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uniforms.uWorthRowA.value = worthRow(applied.worthTableA);
 		uniforms.uWorthRowB.value = worthRow(applied.worthTableB);
 		invalidate();
+	}
+
+	/* ---- constellation star tables (§22 — the Ch 6 season map) -------------- */
+	/**
+	 * Store / replace the per-phase star tables (§22). Each table is 23 normalized
+	 * (x,y) pairs indexed by gi. Any subset of phases may be fed; an unfed phase
+	 * stays absent → its stars collapse to the origin (graceful). Re-copies the
+	 * live phase into uStar and re-renders, so a scene may feed tables before OR
+	 * after its fieldState first declares the layout/phase (like setWorthTables).
+	 */
+	function setStarTables(tables: Partial<Record<ConstellationPhase, StarTable>>): void {
+		if (disposed) return;
+		starTables.clear();
+		for (const phase of CONSTELLATION_PHASES) {
+			const table = tables[phase];
+			if (!table) continue;
+			if (table.length !== groupCount) {
+				if (import.meta.env.DEV)
+					console.warn(
+						`[every-ball-ever] setStarTables: phase '${phase}' has ${table.length} stars,`,
+						`expected ${groupCount} — ignoring it.`
+					);
+				continue;
+			}
+			const buf = new Float32Array(groupCount * 2);
+			for (let gi = 0; gi < groupCount; gi++) {
+				buf[gi * 2] = Number(table[gi][0]) || 0;
+				buf[gi * 2 + 1] = Number(table[gi][1]) || 0;
+			}
+			starTables.set(phase, buf);
+		}
+		// force a re-copy on the next apply, and refresh now if a phase is applied
+		appliedStarKey = '';
+		applyStarArrays(appliedPhaseA, appliedPhaseB, appliedPhaseMix);
+		invalidate();
+	}
+
+	// Copy the (phaseA, phaseB) tables into the packed uStar vec4 array (xy = A,
+	// zw = B) and set the lerp. The copy runs only when the phase PAIR changes;
+	// a pure phase glide (A/B fixed, mix moving) only updates uStarMix, so the
+	// toggle is a minimal per-frame touch (demand mode preserved).
+	function applyStarArrays(a: ConstellationPhase, b: ConstellationPhase, mix: number): void {
+		const key = `${a}>${b}`;
+		if (key !== appliedStarKey) {
+			appliedStarKey = key;
+			const ta = starTables.get(a);
+			const tb = starTables.get(b);
+			for (let gi = 0; gi < groupCount; gi++) {
+				starVectors[gi].set(
+					ta ? ta[gi * 2] : 0,
+					ta ? ta[gi * 2 + 1] : 0,
+					tb ? tb[gi * 2] : 0,
+					tb ? tb[gi * 2 + 1] : 0
+				);
+			}
+			uniforms.uStar.value = starVectors;
+		}
+		uniforms.uStarMix.value = mix;
+		appliedPhaseA = a;
+		appliedPhaseB = b;
+		appliedPhaseMix = mix;
+	}
+
+	function getConstellationLayout(): ConstellationLayoutInfo | null {
+		if (!constellationLayout) return null;
+		const ta = starTables.get(appliedPhaseA);
+		const tb = starTables.get(appliedPhaseB);
+		const mix = appliedPhaseMix;
+		const stars: { x: number; y: number }[] = new Array(groupCount);
+		for (let gi = 0; gi < groupCount; gi++) {
+			const ax = ta ? ta[gi * 2] : 0;
+			const ay = ta ? ta[gi * 2 + 1] : 0;
+			const bx = tb ? tb[gi * 2] : 0;
+			const by = tb ? tb[gi * 2 + 1] : 0;
+			stars[gi] = constellationPoint(constellationLayout, ax + (bx - ax) * mix, ay + (by - ay) * mix);
+		}
+		return { ...constellationLayout, stars, phaseA: appliedPhaseA, phaseB: appliedPhaseB, mix };
 	}
 
 	/* ---- over-rail uniform arrays (§20) — sized to RAIL_MAX_SLOTS ----------- */
@@ -557,7 +705,15 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uRailProgress: { value: 0 },
 		uRailDim: { value: 1 },
 		uRailScale: { value: 7 },
-		uRailLift: { value: 0.35 }
+		uRailLift: { value: 0.35 },
+		// constellation (§22) — the per-gi star table (xy = phase A, zw = phase B)
+		// + the phase-toggle lerp + the letterboxed box geometry (set on resize).
+		// Zero until setStarTables is fed, so the map collapses to the origin
+		// (graceful; R1..R5 never use the constellation layout — byte-identical).
+		uStar: { value: starVectors },
+		uStarMix: { value: 0 },
+		uConstHalfExtent: { value: 0.82 },
+		uConstStarR: { value: 0.045 }
 	};
 
 	const geometry = new THREE.BufferGeometry();
@@ -720,6 +876,7 @@ export function createField(opts: FieldOptions): FieldHandle {
 	let riversLayout: RiversLayout | null = null;
 	let tideLayout: TideLayout | null = null;
 	let worthLayout: WorthLayout | null = null;
+	let constellationLayout: ConstellationLayout | null = null;
 	let cssW = 1;
 	let cssH = 1;
 
@@ -1147,7 +1304,10 @@ export function createField(opts: FieldOptions): FieldHandle {
 			a.railProgress === b.railProgress &&
 			a.railDim === b.railDim &&
 			a.railScale === b.railScale &&
-			a.railLift === b.railLift
+			a.railLift === b.railLift &&
+			a.phaseTableA === b.phaseTableA &&
+			a.phaseTableB === b.phaseTableB &&
+			a.phaseMix === b.phaseMix
 		);
 	}
 
@@ -1300,6 +1460,15 @@ export function createField(opts: FieldOptions): FieldHandle {
 				'[every-ball-ever] invariant: the over rail (C5-2/3) and a re-sort/cascade/rivers',
 				'are both engaged — cross-cutting position modifiers must be staged apart.'
 			);
+
+		// constellation phase (§22): resolve the (A, B, mix) star-table lerp for
+		// the held constellation. A null id resolves to 'all' (so a phase-less
+		// constellation scene shows the all-innings map, and every non-constellation
+		// scene keeps uStar on 'all' — harmless, since the shader only reads uStar
+		// while the constellation layout is in the mix, so R1..R5 are byte-identical).
+		// The copy runs only when the phase PAIR changes (applyStarArrays), so a
+		// phase glide is a minimal per-frame touch. NEVER a live re-embed.
+		applyStarArrays(s.phaseTableA ?? 'all', s.phaseTableB ?? 'all', s.phaseMix);
 
 		// label plane opacity is scene-state-driven, never animated on its own
 		const o = Math.min(1, Math.max(0, s.labels));
@@ -1457,6 +1626,7 @@ export function createField(opts: FieldOptions): FieldHandle {
 		riversLayout = computeRivers(data.groups, halfW, halfH);
 		tideLayout = computeTide(data.groups, halfW, halfH);
 		worthLayout = computeWorth(halfW, halfH);
+		constellationLayout = computeConstellation(halfW, halfH);
 		uniforms.uHalfW.value = halfW;
 		uniforms.uHalfH.value = halfH;
 		uniforms.uWormLeft.value = wormLayout.left;
@@ -1488,6 +1658,11 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uniforms.uWorthWidth.value = worthLayout.width;
 		uniforms.uWorthBottom.value = worthLayout.bottom;
 		uniforms.uWorthHeight.value = worthLayout.height;
+		// constellation (§22): the fixed-aspect (square) letterboxed star box. The
+		// star tables are resolution-independent normalized coords, so only the box
+		// world-scale (halfExtent) + the jitter-disc radius change on resize.
+		uniforms.uConstHalfExtent.value = constellationLayout.halfExtent;
+		uniforms.uConstStarR.value = constellationLayout.starRadius;
 		uniforms.uPointScale.value = basePointPx(w, h, n) * dpr;
 		uniforms.uColHalfWidth.value = columnLayout.colHalfWidth;
 		uniforms.uColBottom.value = columnLayout.bottom;
@@ -1556,6 +1731,8 @@ export function createField(opts: FieldOptions): FieldHandle {
 		getRiversLayout,
 		getTideLayout: () => tideLayout,
 		getWorthLayout: () => worthLayout,
+		getConstellationLayout,
+		setStarTables,
 		setWorthTables,
 		hasStateAttr,
 		hasWpaAttr,

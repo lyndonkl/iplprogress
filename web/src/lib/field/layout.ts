@@ -1,4 +1,4 @@
-import type { GroupMeta } from './types';
+import type { ConstellationPhase, GroupMeta } from './types';
 
 /**
  * Season-columns layout geometry, derived client-side from groups.json
@@ -711,6 +711,111 @@ export function worthCell(
 		x: w.left + ((o + 0.5) / w.overs) * w.width,
 		y: w.bottom + (1 - (k + 0.5) / w.wkts) * w.height
 	};
+}
+
+/* ---------------------------------------------------------------------------
+ * The season constellation (Ch 6 controlling morph, CONTRACT §22). Every ball
+ * condenses onto its SEASON-GROUP STAR: a per-phase table of 23 (x,y) star
+ * centres (all / powerplay / middle / death), indexed in-shader by the ball's
+ * group id (`group_ids.u16` = position.y). Each ball sits at its star centre +
+ * a small radial jitter, so a star reads as a GLOWING DISC of its own balls,
+ * not an abstract dot. No new per-point buffer (the map reuses group_ids.u16);
+ * the only new data is the tiny star table fed once via field.setStarTables.
+ *
+ * The star coordinates arrive PRE-NORMALIZED by the pipeline into ONE common
+ * [-1, 1] frame with a SINGLE global scale factor across all four phases (so
+ * distances are comparable both within a phase and between phases, and the
+ * Procrustes-aligned WPL never flips sides). Because that normalization is
+ * aspect-PRESERVING, the frame is a true SQUARE in data space: 1 unit of x =
+ * 1 unit of y. So the box aspect is fixed at 1 and this layout maps the whole
+ * [-1, 1] frame (centred at the origin) into the largest square that fits,
+ * LETTERBOXING on portrait (the Ch 2/3/4/5 honesty lock) — the WPL sits beside
+ * the men's path identically on desktop and phone. NEVER a live re-embed: the
+ * positions are a lookup (a browser re-fit could mirror-flip the WPL, §0.1).
+ *
+ * CONSTELLATION_ASPECT / CONSTELLATION_FILL / CONSTELLATION_STAR_RADIUS are the
+ * owner-tunable constants flagged for build sign-off (storyboard §0.1); changing
+ * them keeps the fixed-aspect + letterbox invariant intact.
+ * ------------------------------------------------------------------------- */
+
+/** All four phase ids, in canonical order (feed / iteration order). */
+export const CONSTELLATION_PHASES: readonly ConstellationPhase[] = [
+	'all',
+	'powerplay',
+	'middle',
+	'death'
+];
+
+/**
+ * Fixed world width : world height for the star box. 1 (square), because the
+ * star coordinates are already aspect-preserved in a common [-1,1] frame — the
+ * box must map that frame 1:1 in both axes or it would distort the distances,
+ * which ARE the whole meaning of the map (storyboard §0.1). Owner-tunable.
+ */
+export const CONSTELLATION_ASPECT = 1;
+/** Fraction of the frame the fixed-aspect box fills (letterbox + legend/label room). */
+export const CONSTELLATION_FILL = 0.82;
+/**
+ * A star's jitter-disc radius as a fraction of the box half-extent — sets how
+ * fat each season's glowing cluster reads. Small enough that neighbouring stars
+ * stay distinct, large enough that a star looks like a disc of deliveries.
+ * Owner-tunable; mirrored into the shader's uConstStarR each resize.
+ */
+export const CONSTELLATION_STAR_RADIUS = 0.055;
+
+export interface ConstellationLayout {
+	/** world x of the box's left edge (normalized x = -1) */
+	left: number;
+	/** world width of the box (normalized x span -1 → 1) */
+	width: number;
+	/** world y of the box's bottom edge (normalized y = -1) */
+	bottom: number;
+	/** world height of the box (== width; the data box aspect is 1) */
+	height: number;
+	/** world half-size of the [-1,1] normalized frame (== width/2 == height/2) */
+	halfExtent: number;
+	/** world radius of a star's jitter disc (mirrors the shader's uConstStarR) */
+	starRadius: number;
+}
+
+/**
+ * Fixed-aspect (square), letterboxed constellation box for the current frame —
+ * the largest square that fits, centred at the origin. The star tables' [-1,1]
+ * frame maps into it via `constellationPoint`. Rebuilt on resize.
+ */
+export function computeConstellation(halfW: number, halfH: number): ConstellationLayout {
+	const frameW = 2 * halfW * CONSTELLATION_FILL;
+	const frameH = 2 * halfH * CONSTELLATION_FILL;
+	let width = frameH * CONSTELLATION_ASPECT;
+	if (width > frameW) width = frameW;
+	const height = width / CONSTELLATION_ASPECT;
+	const halfExtent = width / 2;
+	return {
+		left: -width / 2,
+		width,
+		bottom: -height / 2,
+		height,
+		halfExtent,
+		starRadius: halfExtent * CONSTELLATION_STAR_RADIUS
+	};
+}
+
+/**
+ * World coordinate for a NORMALIZED star position (nx, ny each in [-1,1], from
+ * `scenes/ch6.json`) in the given constellation box — the EXACT centre mapping
+ * the shader uses (the frame is centred at the origin, so world = n × halfExtent
+ * with no jitter). Scenes call this to register the men's worm polyline, the WPL
+ * dotted threads, the star labels, the persistent legend and the payoff
+ * sister-thread to the GL star centres via `field.projectToCss`, and to place a
+ * caption clear of the emitted WPL cluster hull (§0.4a). For a per-gi star that
+ * tracks the LIVE phase lerp, read `field.getConstellationLayout().stars[gi]`.
+ */
+export function constellationPoint(
+	layout: ConstellationLayout,
+	nx: number,
+	ny: number
+): { x: number; y: number } {
+	return { x: nx * layout.halfExtent, y: ny * layout.halfExtent };
 }
 
 /* ---------------------------------------------------------------------------

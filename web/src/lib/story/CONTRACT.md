@@ -1,4 +1,4 @@
-# Story Shell Contract — R1a (+ R1b field capabilities: §11 picking · §12 filtering; + R2a Ch 2: §13 worm-space · §14 run-out cascade; + R2b Ch 3: §15 frontier plane · §16 dismissal rivers; + MF §17 mobile "read, then watch" captions; + R3a Ch 4: §18 tide skyline + waterline; + R3b-2 Ch 5: §19 worth grid + pricelens · §20 over rail · §21 WPA highlight)
+# Story Shell Contract — R1a (+ R1b field capabilities: §11 picking · §12 filtering; + R2a Ch 2: §13 worm-space · §14 run-out cascade; + R2b Ch 3: §15 frontier plane · §16 dismissal rivers; + MF §17 mobile "read, then watch" captions; + R3a Ch 4: §18 tide skyline + waterline; + R3b-2 Ch 5: §19 worth grid + pricelens · §20 over rail · §21 WPA highlight; + R4a Ch 6: §22 constellation + phase toggle)
 
 The scene system every scene builder codes against. The shell (this directory +
 `lib/field/` + `lib/state/`) is owned by the story-shell architect; **scene
@@ -1614,3 +1614,144 @@ fieldState: {
   (§19.6).
 - The highlight class is position-affecting only via its lift (shared
   `computeCore()`), so the pick pass tracks lifted swings exactly.
+
+---
+
+## 22. The season constellation + the phase toggle — Ch 6's controlling morph (R4a `constellation` layout + `phase` state)
+
+Chapter 6's single controlling morph (free→constellation, analogous to Ch 1's
+free→wall … Ch 5's free→worth). Every ball condenses onto its **season-group
+STAR**: the field of 316,199 deliveries becomes **23 glowing star-discs**, one
+per season-group (19 IPL seasons gi 0-18, 4 WPL seasons gi 19-22), placed so
+seasons that play alike ball-for-ball sit close. Positions are **in-shader** off
+a tiny per-phase star table indexed by the ball's group id — **no new per-point
+buffer** (the map reuses `group_ids.u16`, already on the wire; `position.y` =
+gi), and **no positions cross per point**. Add nothing yourself — the shell owns
+the layout.
+
+### 22.1 Declaring it
+
+```ts
+fieldState: { layout: 'constellation' }   // that's it — free→constellation is the morph
+```
+
+Each ball flies to its star centre + a small **radial jitter** (deterministic,
+in-shader), so a star reads as a bright DISC of its own deliveries, not a dot.
+Hue stays identity (outcome colours, the WPL teal shift, the picked team lit on
+top — personalization survives the most abstract layout in the piece). The
+reader's **team stays ignited** through the flight. The morph is the chapter's
+ONE layout morph; the phase toggle (§22.3) is a coherent star-table swap over
+the HELD map, spending no second morph.
+
+### 22.2 Feeding the star tables — `field.setStarTables({ all, powerplay, middle, death })` (READ THIS)
+
+The star positions are a **precomputed, Procrustes-aligned lookup**, emitted in
+`scenes/ch6.json` (`constellation.stars`). Feed them ONCE (like
+`setWorthTables`), before the constellation engages:
+
+```ts
+const stars = ch6.constellation.stars;           // { all|powerplay|middle|death: [[x,y]] × 23 }
+field.setStarTables(stars);                       // indexed by gi 0-22
+```
+
+- Each table is **23 normalized (x,y)** star centres in ONE common `[-1, 1]`
+  frame, indexed by gi — straight from the JSON, no transform. Any subset of
+  phases may be fed; an unfed phase collapses its stars to the origin (graceful,
+  R1-R5 never use the layout). Re-calling replaces the whole set.
+- **NEVER a live re-embed in the browser.** The frame is aspect-PRESERVED with a
+  single global scale across all four phases (so the Procrustes-aligned WPL never
+  flips sides), so the shell maps it 1:1 into a fixed-aspect (square),
+  **letterboxed** box (`CONSTELLATION_ASPECT` 1 / `CONSTELLATION_FILL` in
+  `field/layout.ts`, owner-tunable) — the WPL sits beside the men's path
+  identically on desktop and phone. A client re-fit could legally mirror-flip the
+  WPL to the wrong side (the map of distances reads the same under a mirror);
+  QA greps the Ch 6 scenes for any MDS/eigensolver/re-embed call and fails on one.
+
+### 22.3 The phase toggle — `SceneFieldState.phase` (a star-table swap, NOT a re-sort, NOT a second morph)
+
+The powerplay / middle / death / all toggle swaps the active star table over the
+HELD constellation. It is the **exact analog of the Ch 5 `pricelens`** (a table
+swap over a held grid), except the table is star POSITIONS: the 23 star centres
+lerp from phase `from` to phase `table` by `mix`. The **point-to-star assignment
+never changes** — only the 23 centres move, minimally and Procrustes-locked, so
+the WPL never crosses the men's worm. The whole season-cohort glides TOGETHER
+(every ball of a season shares gi → shares the star centre + a fixed jitter
+offset → the disc translates rigidly, Gestalt common fate).
+
+```ts
+export interface ConstellationPhaseState {
+  table: 'all' | 'powerplay' | 'middle' | 'death'; // the active/target map
+  from?: 'all' | 'powerplay' | 'middle' | 'death' | null; // the lerp SOURCE (C6-5 glide)
+  mix?: number;   // 0 = from · 1 = table (default 1)
+}
+```
+
+- A **phase-less** constellation scene (C6-2..C6-4) omits `phase` → the **'all'**
+  map (both A and B resolve to 'all'; the stars don't move).
+- The **C6-5 glide** (e.g. all → powerplay) is `{ from: 'all', table: 'powerplay',
+  mix }` with `mix` driven 0→1 from `SceneDef.dynamicState` (a post-morph field
+  change, like the pricelens `mix` / the cascade `sweep`). Per the §12.2
+  orchestrator caveat, ALSO surface the active table through `dynamicState` so a
+  stray scroll re-application cannot revert the toggle.
+- Reduced motion renders the four phase presets as instant jump-cut states (no
+  glide); each is a `{ phase: { table } }` end state.
+- The lerp is a minimal per-frame touch: the field re-copies the 23-vec table
+  only when the phase PAIR changes; a pure glide only updates the mix uniform
+  (demand mode preserved).
+
+### 22.4 Drawing the worm / threads / labels / legend — `field.getConstellationLayout()` + `constellationPoint`
+
+The men's chronological **worm** (18 SVG segments joining the IPL stars in
+season order), the WPL **dotted threads** (each WPL star → its nearest men's
+lookalike), the **star labels**, the persistent **legend**, and the payoff
+**sister-thread** are the SCENE's job on the annotation plane (SVG registered to
+the GL star centres) — **never** GL geometry (the cardinality rule). Register
+them with:
+
+```ts
+import { constellationPoint } from '$lib/field/layout';
+const cl = field.getConstellationLayout();          // null before first resize — guard
+if (cl) {
+  // a star centre for the LIVE phase (tracks the toggle glide):
+  const css = field.projectToCss(cl.stars[gi].x, cl.stars[gi].y);  // worm/thread/label anchor
+  // an arbitrary normalized coord (a WPL cluster-hull vertex from ch6.json):
+  const w = constellationPoint(cl, hullNx, hullNy);
+  const hullCss = field.projectToCss(w.x, w.y);      // §0.4a caption-overlap QA
+}
+```
+
+`getConstellationLayout()` returns the fixed-aspect (square) letterboxed box
+(`left/width/bottom/height/halfExtent/starRadius`) PLUS `stars` — the per-gi
+star WORLD coordinates for the **currently applied phase table + mix** (so worm,
+threads and labels track the toggle glide, re-read after each `applyState`) and
+`{ phaseA, phaseB, mix }`. `constellationPoint(layout, nx, ny)` is the EXACT
+centre mapping the shader uses (the frame is centred at the origin, world = n ×
+halfExtent), so the SVG and the GL discs can never drift. Rebuilt on resize; the
+star coords are re-derived per read. The `wplDim` uniform holds the WPL stars
+dimmed for C6-2/C6-3 and restores to 1 for the C6-4 brighten (the C1-2 shelf
+pattern — no new capability).
+
+### 22.5 What the platform added (for the pipeline/other agents)
+
+- **New `LayoutId` `constellation`** (code 8) + **new `FieldRenderState` fields**:
+  `phaseTableA`, `phaseTableB`, `phaseMix` (set by `resolveRenderState`). All
+  default inactive (`phaseTableA/B` null → resolved to 'all'; the shader reads
+  `uStar` ONLY while the constellation layout is in the A/B mix) — so **R1-R5
+  scenes render byte-identically** (verified: `glError` 0, the constellation
+  renders the 23 discs with the WPL teal cluster beside the IPL worm, and the
+  discarded `posConstellation` compute never changes a prior layout's returned
+  position).
+- **No new per-point buffer, zero wire cost:** the render reads `uStar[gi]`
+  (a packed `vec4` per group — xy = phase A, zw = phase B) off the ball's group
+  id (`group_ids.u16`). The star tables are 4 × 23 × (x,y) floats fed via
+  `field.setStarTables`; the box geometry (`computeConstellation`,
+  `constellationPoint`, `CONSTELLATION_*` constants) is in `field/layout.ts`.
+- **Pipeline dependency (shipped):** `scenes/ch6.json`
+  `constellation.stars.{all,powerplay,middle,death}` (23 × (x,y), Procrustes-
+  aligned, normalized to a stable common `[-1,1]` frame), plus the worm order /
+  WPL threads / cluster hull the scene draws. Positions are computed ONCE in the
+  pipeline (Jensen-Shannon divergence → classical MDS → per-phase Procrustes
+  align to the all-phase master); the browser never re-fits (§22.2). The
+  constellation + phase state are in-shader — no engine dependency, no WASM.
+- The constellation position lives in the shared `computeCore()`, so the pick
+  pass tracks the star-discs and can never drift from the visual field.

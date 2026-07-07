@@ -18,10 +18,9 @@ export interface NavItem {
 export const FUTURE_CHAPTERS: string[] = [
 	// 'Chapter 2: The Last of the Anchors', 'Chapter 3: The Counterrevolution',
 	// 'Chapter 4: The Rising Tide', 'Interlude: The Net Session' and
-	// 'Chapter 5: What a Ball Is Worth' are now LIVE (their scenes declare a
-	// navLabel; see src/lib/scenes/ch2, ch3, ch4, interlude, ch5), so they
-	// appear as live nav items.
-	'Chapter 6: Two Dialects',
+	// 'Chapter 5: What a Ball Is Worth' and 'Chapter 6: Two Dialects' are now LIVE
+	// (their scenes declare a navLabel; see src/lib/scenes/ch2..ch6, interlude), so
+	// they appear as live nav items.
 	'Chapter 7: The Twelfth Man',
 	'Chapter 8: The Captain’s Brain',
 	'Chapter 9: The Living League',

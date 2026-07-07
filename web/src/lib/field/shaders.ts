@@ -269,6 +269,20 @@ uniform float uRailProgress;       // 0 = balls in the field · 1 = balls at the
 uniform float uRailDim;            // rest-of-field luminance×alpha at progress 1
 uniform float uRailScale;          // hero point-size multiplier at the slots
 uniform float uRailLift;           // world-units peak of the flight arc
+
+// ---- Constellation (Ch 6, §22). Every ball condenses to its SEASON-GROUP STAR
+//      centre. uStar[gi] holds the ball's star position for BOTH phase tables
+//      (xy = table A / the "from" map, zw = table B / the "table" map), each a
+//      normalized coord in the common [-1,1] frame; uStarMix lerps them (the phase
+//      toggle — a coherent star-table swap, never a re-embed). The frame maps
+//      1:1 in both axes into the fixed-aspect (square) letterboxed box (centred
+//      at the origin, half-size uConstHalfExtent). A small radial jitter of
+//      radius uConstStarR makes each star a glowing disc of its own balls.
+//      Inactive for every prior layout (never code 8), so they render identically.
+uniform vec4 uStar[GROUP_COUNT];   // per-gi star: xy = phase A · zw = phase B (normalized [-1,1])
+uniform float uStarMix;            // 0 = phase A · 1 = phase B (the phase-toggle lerp)
+uniform float uConstHalfExtent;    // world half-size of the [-1,1] star frame (letterboxed)
+uniform float uConstStarR;         // world radius of a star's jitter disc
 `;
 
 /** Core per-point attributes (both shaders read these). */
@@ -308,13 +322,14 @@ uint pcg(uint v) {
 }
 const float INV32 = 1.0 / 4294967296.0;
 
-vec3 pickLayout(int id, vec3 pFree, vec3 pCols, vec3 pWall, vec3 pWorms, vec3 pFrontier, vec3 pTide, vec3 pWorth) {
+vec3 pickLayout(int id, vec3 pFree, vec3 pCols, vec3 pWall, vec3 pWorms, vec3 pFrontier, vec3 pTide, vec3 pWorth, vec3 pConst) {
 	if (id == 1) return pCols;
 	if (id == 2) return pWall;
 	if (id == 4) return pWorms;
 	if (id == 5) return pFrontier;
 	if (id == 6) return pTide;
 	if (id == 7) return pWorth;
+	if (id == 8) return pConst;
 	return pFree; // 0 free · 3 assembly share the free-field scatter
 }
 
@@ -504,13 +519,31 @@ Core computeCore() {
 		(h3 - 0.5) * 0.25
 	);
 
+	// constellation (Ch 6, §22): the ball's season-group STAR centre. uStar[gi]
+	// carries the star's normalized [-1,1] position for both phase tables (xy =
+	// A, zw = B); uStarMix lerps them (the phase toggle — the WHOLE season-cohort
+	// glides together, no per-point stagger, since every ball of a season shares
+	// gi and so shares starN + a fixed jitter offset → the disc translates
+	// rigidly, Gestalt common fate). The frame maps 1:1 into the square box
+	// (centred at the origin), matching constellationPoint() exactly so the SVG
+	// worm / threads / labels can never drift. A radial jitter (h4 angle, h1
+	// radius; linear radius → a centre-dense glow) makes the star a disc of balls.
+	vec2 starN = mix(uStar[gi].xy, uStar[gi].zw, uStarMix);
+	float starAng = h4 * 6.28318530718;
+	float starRad = uConstStarR * h1;
+	vec3 posConstellation = vec3(
+		starN.x * uConstHalfExtent + cos(starAng) * starRad,
+		starN.y * uConstHalfExtent + sin(starAng) * starRad,
+		(h3 - 0.5) * 0.25
+	);
+
 	// morph with per-point stagger so the field streams, not teleports
 	float delay = h3 * 0.55;
 	float t = clamp(uProgress * 1.55 - delay, 0.0, 1.0);
 	t = t * t * (3.0 - 2.0 * t);
 	vec3 pos = mix(
-		pickLayout(uLayoutA, posFree, posCols, posWall, posWorms, posFrontier, posTide, posWorth),
-		pickLayout(uLayoutB, posFree, posCols, posWall, posWorms, posFrontier, posTide, posWorth),
+		pickLayout(uLayoutA, posFree, posCols, posWall, posWorms, posFrontier, posTide, posWorth, posConstellation),
+		pickLayout(uLayoutB, posFree, posCols, posWall, posWorms, posFrontier, posTide, posWorth, posConstellation),
 		t
 	);
 

@@ -95,6 +95,17 @@ INTERLUDE_SET_FILES = ("scenes/interlude.json",)
 # engine grids it reads are counted in the engines check, not here. All
 # lazy-loaded at Ch 5 entry; held to the per-chapter budget.
 CH5_SET_FILES = ("scenes/ch5.json", "wpa.u8", "restate.u8")
+# R4a Chapter 6 "Two Dialects": the whole chapter — the Season Constellation
+# Map (per-phase Procrustes-aligned star tables + IPL worm + WPL nearest-
+# neighbour dotted threads + the two-truths-at-once pairing), the League
+# Maturity Clock, Run DNA (the helix), the Stumping Signature, the Photo-Finish
+# rate, the batting ladder + depth, the sister-franchise payoff (16 variants),
+# and the footnote layer (Star Gravity / Gini, Competitive Balance, Powerplay
+# Fear, Twos Culture) — all ship in one scene doc (scenes/ch6.json). Engine-
+# and buffer-free: the controlling morph reuses the existing per-point
+# group_ids.u16 (already in the cold-open set), so Ch 6 adds no per-point
+# buffer. Lazy-loaded at Ch 6 entry; held to the per-chapter budget.
+CH6_SET_FILES = ("scenes/ch6.json",)
 # Engine tables under engines/: R2a's engine #1 (par/SR+) + engine #5 (entry
 # states) consumed by Chapter 2, plus the parallel-track engine #2 (re288) +
 # engine #3 (wp_grid) built during R2/R3a and consumed in R3b. All lazy-loaded
@@ -142,6 +153,7 @@ def build_ledger(out_root: Path = canon.OUT_ROOT) -> dict:
     ch4_files = [n for n in CH4_SET_FILES if n in artifacts]
     interlude_files = [n for n in INTERLUDE_SET_FILES if n in artifacts]
     ch5_files = [n for n in CH5_SET_FILES if n in artifacts]
+    ch6_files = [n for n in CH6_SET_FILES if n in artifacts]
     engine_files = sorted(n for n in artifacts if n.startswith(ENGINES_PREFIXES))
 
     checks = [
@@ -202,6 +214,13 @@ def build_ledger(out_root: Path = canon.OUT_ROOT) -> dict:
             "budget_gz": BUDGET_CHAPTER_GZ,
             "actual_gz": gz_sum(ch5_files),
             "pass": bool(ch5_files) and gz_sum(ch5_files) <= BUDGET_CHAPTER_GZ,
+        },
+        {
+            "name": "chapter ch6 (Two Dialects scene doc)",
+            "files": ch6_files,
+            "budget_gz": BUDGET_CHAPTER_GZ,
+            "actual_gz": gz_sum(ch6_files),
+            "pass": bool(ch6_files) and gz_sum(ch6_files) <= BUDGET_CHAPTER_GZ,
         },
         {
             "name": "engines (ch2 par/entry + R3b parallel-track re288/wp_grid)",

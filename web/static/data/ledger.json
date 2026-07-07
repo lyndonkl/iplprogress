@@ -67,8 +67,8 @@
    "bytes_gz": 20686
   },
   "meta.json": {
-   "bytes_raw": 1312,
-   "bytes_gz": 461
+   "bytes_raw": 1367,
+   "bytes_gz": 473
   },
   "payoff/ch1.json": {
    "bytes_raw": 20655,
@@ -97,6 +97,10 @@
   "scenes/ch5.json": {
    "bytes_raw": 135010,
    "bytes_gz": 25375
+  },
+  "scenes/ch6.json": {
+   "bytes_raw": 35295,
+   "bytes_gz": 10166
   },
   "scenes/coldopen.json": {
    "bytes_raw": 3720,
@@ -142,7 +146,7 @@
     "scenes/coldopen.json"
    ],
    "budget_gz": 3000000,
-   "actual_gz": 405997,
+   "actual_gz": 406009,
    "pass": true
   },
   {
@@ -217,6 +221,15 @@
    "pass": true
   },
   {
+   "name": "chapter ch6 (Two Dialects scene doc)",
+   "files": [
+    "scenes/ch6.json"
+   ],
+   "budget_gz": 2000000,
+   "actual_gz": 10166,
+   "pass": true
+  },
+  {
    "name": "engines (ch2 par/entry + R3b parallel-track re288/wp_grid)",
    "files": [
     "engines/entry.json",
@@ -256,6 +269,7 @@
     "scenes/ch3.json",
     "scenes/ch4.json",
     "scenes/ch5.json",
+    "scenes/ch6.json",
     "scenes/coldopen.json",
     "scenes/interlude.json",
     "scenes/sandbox.json",
@@ -265,7 +279,7 @@
     "wpa.u8"
    ],
    "budget_gz": 25000000,
-   "actual_gz": 1800518,
+   "actual_gz": 1810696,
    "pass": true
   }
  ],

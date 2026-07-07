@@ -24,7 +24,7 @@
 
 <div class="pin">
 	<div class="scene-card interactive card">
-		<p class="overline">Chapter 5: What a Ball Is Worth · done</p>
+		<p class="overline">Chapter 6: Two Dialects · done</p>
 
 		<h2>Every ball is still here.</h2>
 		<p class="promise">
@@ -34,8 +34,8 @@
 		</p>
 
 		<p class="next">
-			<strong>Up next: Chapter 6, Two Dialects.</strong>
-			<em>A second league speaks a different dialect of the same language. We put both on one map.</em>
+			<strong>Up next: Chapter 7, The Twelfth Man.</strong>
+			<em>In 2023 the men added a rule many credit for their scoring taking off. The women never did. A rare natural experiment.</em>
 			<span class="tag">in build · the story grows chapter by chapter</span>
 		</p>
 
