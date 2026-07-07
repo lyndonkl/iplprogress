@@ -1,4 +1,4 @@
-# Story Shell Contract — R1a (+ R1b field capabilities: §11 picking · §12 filtering; + R2a Ch 2: §13 worm-space · §14 run-out cascade; + R2b Ch 3: §15 frontier plane · §16 dismissal rivers; + MF §17 mobile "read, then watch" captions; + R3a Ch 4: §18 tide skyline + waterline; + R3b-2 Ch 5: §19 worth grid + pricelens · §20 over rail · §21 WPA highlight; + R4a Ch 6: §22 constellation + phase toggle)
+# Story Shell Contract — R1a (+ R1b field capabilities: §11 picking · §12 filtering; + R2a Ch 2: §13 worm-space · §14 run-out cascade; + R2b Ch 3: §15 frontier plane · §16 dismissal rivers; + MF §17 mobile "read, then watch" captions; + R3a Ch 4: §18 tide skyline + waterline; + R3b-2 Ch 5: §19 worth grid + pricelens · §20 over rail · §21 WPA highlight; + R4a Ch 6: §22 constellation + phase toggle; + R4b Ch 7: §23 twin rivers `flow` + impact-sub sparks)
 
 The scene system every scene builder codes against. The shell (this directory +
 `lib/field/` + `lib/state/`) is owned by the story-shell architect; **scene
@@ -1755,3 +1755,232 @@ pattern — no new capability).
   constellation + phase state are in-shader — no engine dependency, no WASM.
 - The constellation position lives in the shared `computeCore()`, so the pick
   pass tracks the star-discs and can never drift from the visual field.
+
+---
+
+## 23. The twin rivers + the impact-sub sparks — Ch 7's controlling morph (R4b `flow` layout + `sparks` + `flowLift`)
+
+Chapter 7's single controlling morph (free→flow, analogous to Ch 1's free→wall …
+Ch 6's free→constellation). Every ball condenses to its **league-season river
+cell**, forming **two flowing ribbons** (the storyboard's "twin rivers"):
+
+- **x = the ball's SEASON** along a shared time axis: the IPL ribbon spans
+  2008→2026 across the width; the WPL's 2023→2026 land on the **same season x's**
+  as the IPL years, so its ribbon **sources at 2023** right alongside the IPL (the
+  honest diff-in-diff geometry — there is no faked pre-2023 WPL stretch, it simply
+  begins at the rule year). Both leagues share one time axis; the league is read
+  in-shader off the ball's group id (the WPL bit rides along with the season group).
+- **y = that league-season's RUN RATE** on a fixed "runs an over" axis, plus a
+  **FIXED DECORATIVE band thickness** (a constant vertical jitter around the
+  centreline, **NOT** a ball-count / volume encoding — height means run rate, full
+  stop). Each season's segment TILTS toward its next same-league season, so the
+  band reads as a continuous flowing ribbon rather than separated columns.
+
+The two rivers run parallel over the shared window and **DIVERGE at 2023** (the
+IPL climbing, the WPL staying level); the causal read is the **vertical gap
+between the two centrelines**, which the scene draws as clean SVG lines on the
+annotation plane. Positions are **in-shader** from the season group id
+(`group_ids.u16` = `position.y`) against a small **river table**; **no positions
+cross the wire, no new per-point buffer** (the only new per-point information is a
+517-index spark subset, baked into a spare flag bit — see §23.4). Hue stays
+identity (IPL outcome colours vs the WPL teal family distinguish the two rivers
+even where they run vertically close). Add nothing yourself — the shell owns the
+layout.
+
+### 23.1 Declaring it
+
+```ts
+fieldState: { layout: 'flow' }   // that's it — free→flow is the morph
+```
+
+The field lands as the two ribbons automatically (a moderate `FLOW_RIBBON_ALPHA`
+so each dense band reads as a bright ribbon of texture, not a saturated blob — the
+reader's **team stays ignited at full brightness inside its own river**, an IPL
+team in the men's river, a WPL team in the women's, personalization surviving the
+most abstract Ch 7 layout). The morph is the chapter's ONE layout morph; the
+divergence reveal (`flowLift`, §23.3) and the impact-sub sparks (`sparks`, §23.4)
+are scalar/subset states that **compose** with `flow` and spend no second morph.
+
+**Honesty lock (do not fight it).** The plot's **data aspect ratio is FIXED**
+(`FLOW_ASPECT`) and viewport-independent — the frame **LETTERBOXES** rather than
+stretching, so the vertical gap between the two rivers reads identically on desktop
+and portrait phone. `FLOW_ASPECT` / `FLOW_FILL` / `FLOW_RIBBON_ALPHA` live in
+`lib/field/layout.ts` and are the owner-tunable constants flagged for build sign-off.
+
+### 23.2 Feeding the river table — `field.setRiverTable(table)` (READ THIS)
+
+The per-league-season run-rate centrelines are a small lookup the scene feeds ONCE
+(from `scenes/ch7.json`), before the flow layout engages, exactly like
+`setStarTables` / `setWorthTables`:
+
+```ts
+field.setRiverTable({
+  heights,        // number[] indexed by gi: the league-season TRUE run rate (runs
+                  //   an over). NaN → the gi has no river (collapses to box centre).
+  baseHeights,    // OPTIONAL number[] by gi: the flat BASELINE the river lifts FROM
+                  //   at flowLift 0 (the pipeline sets baseHeights==heights for the
+                  //   pre-rule seasons so only the post-fork climb reveals; omit for
+                  //   no lift).
+  rateLo, rateHi, // the "runs an over" axis range (world floor / ceiling)
+  bandThickness,  // decorative band height as a FRACTION of the axis (0..1); a
+                  //   constant, NOT ball count
+  forkSeason,     // the fork year (2023) — exposed as the world fork x on getFlowLayout()
+  axisTicks       // OPTIONAL run-rate values the scene labels on the axis
+});
+```
+
+`heights[gi]` is a raw run rate; the field maps it to world y through the
+`rateLo`/`rateHi` axis (the exact `flowRateToY` mapping the scene uses for its SVG).
+Re-calling replaces the table. The season x's are derived by the shell from each
+group's SEASON YEAR (`computeFlow`), so an IPL season and the WPL season of the
+same year share one x automatically. Rebuilt on resize.
+
+### 23.3 The divergence reveal — `SceneFieldState.flowLift`
+
+```ts
+flowLift?: number;   // 0 = rivers at the flat baseline · 1 = at true heights (default 1)
+```
+
+The ONE scalar a scene drives over the held rivers: it lerps each river's
+centreline from the table's flat `baseHeights` (0) to its TRUE `heights` (1) — the
+divergence emphasis (C7-3's "flat for fifteen years, then the post-2023 stretch
+lifts"). Only the post-fork seasons move (the pipeline sets `baseHeight ==
+trueHeight` for the pre-rule seasons, so they never lift); with **no** `baseHeights`
+fed it is a no-op (base == true). Drive it **0→1 across the hold from a caption
+step via `SceneDef.dynamicState`** (a post-morph field change, exactly like the
+cascade `sweep` / waterline `level` / pricelens `mix`). At `flowLift: 1` (the
+settled state **and** the reduced-motion end state) the rivers show the honest
+TRUE-height picture — the divergence is real data, never an exaggeration. Lerps
+like any scalar (default 1 both sides → a no-op); read in-shader only while the
+flow layout is in the A/B mix, so **every prior scene renders byte-identically**.
+
+The scene sequencing note (like the §12.2 orchestrator caveat): C7-2 lands the
+rivers at `flowLift: 1`; C7-3 wants "flat, then lift", so it enters with
+`flowLift: 0` (declare `fromState`/`morphLength` so the entry does not visibly
+drop the rivers first) and drives `flowLift` 0→1 in its hold via `dynamicState`;
+its `reducedMotionEndState` carries `flowLift: 1`.
+
+### 23.4 The impact-sub sparks — `SceneFieldState.sparks` + `field.setSparks(indices)`
+
+The **517 impact-sub deliveries** (the twelfth players brought on since 2023) glow
+as bright sparks entering the IPL river. It is a cross-cutting **LUMINANCE +
+small-lift** glow (hue stays identity) over a per-point membership flag — the
+CONTRACT §14/§16 subset precedent, but a simple glow, not a re-stack.
+
+**Declaring the glow (the scene's fieldState):**
+
+```ts
+sparks?: {
+  glow: number;        // 0..1 spark brightness/glow strength (0 = inactive)
+  lift?: number;       // world-units vertical lift for spark points (default 0)
+  othersDim?: number;  // luminance × for NON-spark points while glowing (default 1 = none)
+} | null;
+```
+
+Drive `glow` **0→1 across the hold from a caption step via `dynamicState`** (like
+the cascade sweep); set `othersDim < 1` to damp both rivers so the sparks pop. It
+composes with any layout, is reversible (the next scene declaring no `sparks` lerps
+`glow` back to 0), and is inactive at `glow` 0, so **every prior scene renders
+byte-identically**.
+
+**Feeding membership (READ THIS — the setRunouts precedent):**
+
+```ts
+// once, when the scene mounts (before the sparks engage):
+field.setSparks(ch7.impact_subs.spark_indices);   // the 517 field point indices
+// field.setSparks(null) clears membership
+```
+
+`spark_indices` are field point indices (same point order as every per-point
+buffer), straight from `scenes/ch7.json`. There is **no pipeline seed** (unlike the
+run-out flag), so a flow scene **must** call `setSparks` to light the sparks. Baked
+ONCE — no per-frame cost, demand mode preserved.
+
+**Attribute-budget note (important integration constraint).** Membership is NOT a
+new per-point attribute — it is packed into **bit 1 of the existing `aRunOut`
+flag** (bit 0 = run-out / Ch 2 cascade, bit 1 = spark / Ch 7). Adding a 15th
+vertex attribute **overflows the ANGLE/Metal `MAX_VERTEX_ATTRIBS` ceiling on the
+build machine** (verified at runtime: `THREE.WebGLProgram … Too many attributes`,
+which blacks out the WHOLE field, not just flow), so the two single-bit runtime
+flags share one byte. They never collide: Ch 2 and Ch 7 never render together, and
+`setRunouts` / `setSparks` do bit-preserving read-modify-writes (each clears and
+sets only its own bit), so a reader can scroll Ch 2 ↔ Ch 7 without corrupting
+either. The shader decodes `o.runOut = mod(aRunOut, 2.0) >= 0.5` (bit 0) and
+`o.spark = aRunOut >= 1.5` (bit 1); the bit-0 decode is arithmetically identical to
+the old `aRunOut > 0.5` for every value the run-out path ever sets (0/1), so Ch 2
+renders byte-identically. If `match_index.u16` ever ships (R6), the field would be
+back at the ceiling — keep any future flag packed the same way.
+
+### 23.5 Drawing the centrelines / axis / fork marker / legend — `field.getFlowLayout()`
+
+The two centrelines (the crisp two-line read of the divergence), the "runs an over"
+axis, the season axis, the **2023 fork marker**, the league labels and the
+persistent legend ("teal = the women's game · height = runs an over · the band's
+thickness is just for looks") are the **scene's job on the annotation plane** (SVG
+registered to field coordinates) — never GL geometry. Register them with:
+
+```ts
+import { flowSeasonToX, flowRateToY } from '$lib/field/layout';
+const fl = field.getFlowLayout();          // null before first resize OR before a river table is fed — guard
+if (fl) {
+  // a per-gi centreline vertex for the LIVE flowLift (the SVG line tracks the reveal):
+  const css = field.projectToCss(fl.centres[gi].x, fl.centres[gi].y);
+  // the 2023 fork marker (a vertical rule):
+  const forkTop = field.projectToCss(fl.forkX, fl.bottom + fl.height);
+  // an axis tick at a raw run rate, or a season label:
+  const tickY = field.projectToCss(fl.left, flowRateToY(fl, 9.0));
+  const seasonX = field.projectToCss(flowSeasonToX(fl, 2016), fl.bottom);
+}
+```
+
+`getFlowLayout()` returns the fixed-aspect letterboxed box + the run-rate axis
+range + per-gi season x's + the **per-gi centreline world coords for the live
+`flowLift`** (so the SVG centrelines track the divergence reveal, re-read after each
+`applyState`) + the **world `forkX`** + the decorative `bandHalf` + the echoed
+`forkSeason` / `axisTicks`:
+
+```ts
+{
+  left, width, bottom, height;   // the letterboxed data box (world)
+  xs: number[];                  // per-gi season centre x (world; NaN = no season)
+  minSeason, maxSeason;          // the shared time-axis span
+  cellHalfW;                     // in-season x jitter half-width (ribbon continuity)
+  rateLo, rateHi;                // the "runs an over" axis range (map via flowRateToY)
+  bandHalf;                      // decorative band half-thickness (world)
+  forkX; forkSeason;             // the fork marker (world x + the year)
+  axisTicks: number[];           // run-rate values to label
+  centres: { x, y }[];           // per-gi centreline world coord for the LIVE flowLift (NaN = no river)
+}
+```
+
+`flowSeasonToX(fl, season)` and `flowRateToY(fl, rate)` are the **exact** mappings
+the shader bakes into `uFlow`, so the SVG centrelines / axis / fork marker can never
+drift from the GL ribbons.
+
+### 23.6 Reduced motion & what the platform added (for the pipeline / other agents)
+
+- **Reduced motion** jump-cuts free→flow live (the settled twin rivers at
+  `flowLift: 1`, both axes labelled, team glow intact) — declare
+  `reducedMotionEndState: { layout: 'flow', flowLift: 1 }` (or let it default to
+  `fieldState`). The sparks resolve to their end glow; there is no motion to watch.
+- **New `LayoutId` `flow`** (code 9) + **new `FieldRenderState` fields**:
+  `flowLift` (1 = true heights, inert), `sparkGlow` (0 = inactive), `sparkLift`,
+  `sparkOthersDim`, set by `resolveRenderState`. All default inert (`flow` is never
+  a layout in R1..R4a; the spark branch is a shader no-op at `sparkGlow` 0) — so
+  **R1a…R4a scenes render byte-identically** (verified in the running app: the free
+  field, worm-space, tide skyline and constellation all render unchanged; the
+  aRunOut bit-0 decode is unchanged for the run-out cascade).
+- **No new per-point buffer, zero wire cost:** the render reads `uFlow[gi]` (a
+  packed `vec4` per group — season x, baseline y, true y, slope) off the ball's
+  group id, fed via `field.setRiverTable`; the spark subset is a 517-index list
+  baked into `aRunOut` bit 1 via `field.setSparks`. The box geometry
+  (`computeFlow`, `flowSeasonToX`, `flowRateToY`, `FLOW_*` constants) is in
+  `field/layout.ts`.
+- **Pipeline dependency (shipped):** `scenes/ch7.json` — the per-league-season run
+  rates (`natural_experiment.ipl_rr` / `wpl_rr`, the scene rolls them into the
+  per-gi `heights` + `baseHeights`) and the `impact_subs.spark_indices` (the 517
+  spark deliveries). The rivers, the run rates and the sparks are all direct
+  roll-ups of the corpus — no fitted model, no engine, no WASM.
+- The flow position + the spark lift live in the shared `computeCore()`, so the
+  pick pass tracks the ribbons and the lifted sparks and can never drift from the
+  visual field.

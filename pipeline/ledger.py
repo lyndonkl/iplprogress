@@ -106,6 +106,17 @@ CH5_SET_FILES = ("scenes/ch5.json", "wpa.u8", "restate.u8")
 # group_ids.u16 (already in the cold-open set), so Ch 6 adds no per-point
 # buffer. Lazy-loaded at Ch 6 entry; held to the per-chapter budget.
 CH6_SET_FILES = ("scenes/ch6.json",)
+# R4b Chapter 7 "The Twelfth Man": the whole chapter — the Impact Player natural
+# experiment (IPL vs the rule-free WPL diff-in-diff), the License Index at
+# identical match states, the Rule-Change event-study placebo grid, the Playbook
+# Decoder, the honest null (batting-order fluidity), the 16 team-playbook payoff
+# variants, and the footnote layer — all ship in one scene doc (scenes/ch7.json),
+# INCLUDING the impact-sub spark index list (the render's subset-highlight
+# membership, ~517 field point indices) inline. Engine- and buffer-free: the
+# twin-rivers controlling morph reuses the existing group_ids.u16 + attrs.u8
+# (already in the cold-open set), so Ch 7 adds no per-point buffer. Lazy-loaded
+# at Ch 7 entry; held to the per-chapter budget.
+CH7_SET_FILES = ("scenes/ch7.json",)
 # Engine tables under engines/: R2a's engine #1 (par/SR+) + engine #5 (entry
 # states) consumed by Chapter 2, plus the parallel-track engine #2 (re288) +
 # engine #3 (wp_grid) built during R2/R3a and consumed in R3b. All lazy-loaded
@@ -154,6 +165,7 @@ def build_ledger(out_root: Path = canon.OUT_ROOT) -> dict:
     interlude_files = [n for n in INTERLUDE_SET_FILES if n in artifacts]
     ch5_files = [n for n in CH5_SET_FILES if n in artifacts]
     ch6_files = [n for n in CH6_SET_FILES if n in artifacts]
+    ch7_files = [n for n in CH7_SET_FILES if n in artifacts]
     engine_files = sorted(n for n in artifacts if n.startswith(ENGINES_PREFIXES))
 
     checks = [
@@ -221,6 +233,13 @@ def build_ledger(out_root: Path = canon.OUT_ROOT) -> dict:
             "budget_gz": BUDGET_CHAPTER_GZ,
             "actual_gz": gz_sum(ch6_files),
             "pass": bool(ch6_files) and gz_sum(ch6_files) <= BUDGET_CHAPTER_GZ,
+        },
+        {
+            "name": "chapter ch7 (Twelfth Man scene doc + spark indices)",
+            "files": ch7_files,
+            "budget_gz": BUDGET_CHAPTER_GZ,
+            "actual_gz": gz_sum(ch7_files),
+            "pass": bool(ch7_files) and gz_sum(ch7_files) <= BUDGET_CHAPTER_GZ,
         },
         {
             "name": "engines (ch2 par/entry + R3b parallel-track re288/wp_grid)",

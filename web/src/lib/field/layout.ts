@@ -858,3 +858,148 @@ export function computeRivers(groups: GroupMeta[], halfW: number, halfH: number)
 		height
 	};
 }
+
+/* ---------------------------------------------------------------------------
+ * The twin rivers (Ch 7 controlling morph, CONTRACT §23). Every ball condenses
+ * to its LEAGUE-SEASON RIVER CELL, forming two flowing ribbons:
+ *   x = the ball's SEASON along a shared time axis (IPL 2008 left → 2026 right;
+ *       the WPL's 2023-2026 share the SAME season x's, so its ribbon sources at
+ *       2023 right alongside the IPL — the honest diff-in-diff geometry: there is
+ *       no faked pre-2023 stretch for the WPL, it simply begins at the rule year)
+ *   y = that league-season's RUN RATE on a fixed "runs an over" axis (the per-gi
+ *       river table fed via field.setRiverTable), plus a FIXED DECORATIVE band
+ *       thickness (a constant jitter around the centreline, NOT a ball-count /
+ *       volume encoding — height means run rate, full stop), so the ribbon reads
+ *       as a flowing band of its own balls.
+ * The two rivers run parallel over the shared window and DIVERGE at 2023 (the IPL
+ * climbing, the WPL staying level); the causal read is the VERTICAL GAP between
+ * the two centrelines, which the scene draws as clean SVG lines on the annotation
+ * plane. Positions are in-shader from the season group id (group_ids.u16 = the
+ * ball's gi = position.y; the league bit rides along) against the small river
+ * table; no positions cross the wire, no new per-point buffer.
+ *
+ * This layout.ts function owns only the letterboxed BOX + the per-gi season x's
+ * (derived from each group's SEASON YEAR, so IPL-2023 and WPL-2023 land on the
+ * same x). The per-gi centreline HEIGHTS (run rate) + the flat baseline for the
+ * lift + the band thickness + the fork season are fed by the scene into
+ * field.setRiverTable; field.ts bakes them into the uFlow uniform against this box.
+ *
+ * HONESTY LOCK (storyboard §0.1, mirroring worms/frontier/tide/worth/constellation):
+ * the plot's DATA aspect ratio is FIXED and independent of the viewport — the
+ * frame LETTERBOXES (adds margin) rather than stretching, so the vertical gap
+ * between the two rivers reads identically on desktop and portrait phone.
+ * FLOW_ASPECT / FLOW_FILL / FLOW_RIBBON_ALPHA are the owner-tunable constants
+ * flagged for build sign-off; changing them keeps the fixed-aspect + letterbox
+ * invariant intact.
+ * ------------------------------------------------------------------------- */
+
+/** Fixed world width : world height for the twin-rivers box (viewport-independent). */
+export const FLOW_ASPECT = 1.6;
+/** Fraction of the frame the fixed-aspect box fills (letterbox margin + axis/label room). */
+export const FLOW_FILL = 0.82;
+/**
+ * Base alpha the flow ribbons settle to: the two rivers are dense bands (~310k
+ * IPL balls across 19 seasons), so a moderate alpha lets each ribbon read as a
+ * bright band of texture rather than a saturated blob (brighter than the worm
+ * haze 0.3 — the rivers are the hero visual, not a low haze). Team-ignited points
+ * resist it (personalization survives). Owner-tunable; baked as FLOW_RIBBON_A.
+ */
+export const FLOW_RIBBON_ALPHA = 0.5;
+
+export interface FlowLayout {
+	/** world x at the box left edge (the earliest season) */
+	left: number;
+	/** world width of the twin-rivers box (season axis span) */
+	width: number;
+	/** world y at run rate = the axis low (the box floor) */
+	bottom: number;
+	/** world height spanning the "runs an over" axis low → high */
+	height: number;
+	/** world x of each group's SEASON centre, indexed by gi (NaN = no season) */
+	xs: number[];
+	/** earliest / latest season year across all groups (the shared time axis span) */
+	minSeason: number;
+	maxSeason: number;
+	/**
+	 * in-season x jitter half-width = half the year pitch, so adjacent seasons'
+	 * balls meet and the ribbon reads continuous left→right (world units)
+	 */
+	cellHalfW: number;
+}
+
+/**
+ * Fixed-aspect, letterboxed twin-rivers box for the current frame — the largest
+ * box of the locked data aspect that fits, then centred. Season x's are laid by
+ * SEASON YEAR across a shared time axis (minSeason → maxSeason), so an IPL season
+ * and the WPL season of the same year share one x (the two rivers run over the
+ * same window). The per-gi run-rate heights are fed separately via
+ * field.setRiverTable; this box only carries the season-x mapping + the frame.
+ */
+export function computeFlow(groups: GroupMeta[], halfW: number, halfH: number): FlowLayout {
+	const frameW = 2 * halfW * FLOW_FILL;
+	const frameH = 2 * halfH * FLOW_FILL;
+	let width = frameW;
+	if (width > frameH * FLOW_ASPECT) width = frameH * FLOW_ASPECT;
+	const height = width / FLOW_ASPECT;
+	const left = -width / 2;
+	const bottom = -height / 2;
+
+	let minSeason = Infinity;
+	let maxSeason = -Infinity;
+	for (const g of groups) {
+		if (g.season < minSeason) minSeason = g.season;
+		if (g.season > maxSeason) maxSeason = g.season;
+	}
+	if (!Number.isFinite(minSeason)) {
+		minSeason = 0;
+		maxSeason = 1;
+	}
+	const span = Math.max(1, maxSeason - minSeason);
+
+	const xs: number[] = new Array(groups.length).fill(NaN);
+	for (const g of groups) xs[g.gi] = left + ((g.season - minSeason) / span) * width;
+
+	return {
+		left,
+		width,
+		bottom,
+		height,
+		xs,
+		minSeason,
+		maxSeason,
+		// half the year pitch: adjacent seasons' jitter meets exactly, so the ribbon
+		// reads as one continuous band rather than separated per-season columns.
+		cellHalfW: (width / span) * 0.5
+	};
+}
+
+/**
+ * World x for a SEASON YEAR in the given flow box — the exact mapping the shader
+ * uses for a season centre (before the in-season jitter). Scenes call this to
+ * anchor the season-axis labels, the 2023 fork marker and any season chip to the
+ * GL ribbons via `field.projectToCss`. `season` may be fractional (e.g. 2022.5
+ * for a tick between years).
+ */
+export function flowSeasonToX(
+	layout: { left: number; width: number; minSeason: number; maxSeason: number },
+	season: number
+): number {
+	const span = Math.max(1, layout.maxSeason - layout.minSeason);
+	return layout.left + ((season - layout.minSeason) / span) * layout.width;
+}
+
+/**
+ * World y for a RUN RATE (runs an over) in the given flow box + rate axis — the
+ * exact mapping field.ts bakes into the uFlow centreline uniform, so the scene's
+ * SVG centrelines, the gap read and the "runs an over" axis marks can never drift
+ * from the GL ribbons. `rateLo` / `rateHi` are the axis range the scene fed via
+ * setRiverTable (returned on `getFlowLayout()`). Clamped to the axis.
+ */
+export function flowRateToY(
+	layout: { bottom: number; height: number; rateLo: number; rateHi: number },
+	rate: number
+): number {
+	const span = layout.rateHi - layout.rateLo;
+	const norm = span > 0 ? (Math.min(Math.max(rate, layout.rateLo), layout.rateHi) - layout.rateLo) / span : 0;
+	return layout.bottom + norm * layout.height;
+}

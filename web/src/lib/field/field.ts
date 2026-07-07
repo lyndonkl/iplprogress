@@ -23,6 +23,9 @@ import {
 	computeWorth,
 	computeConstellation,
 	constellationPoint,
+	computeFlow,
+	flowSeasonToX,
+	flowRateToY,
 	CONSTELLATION_PHASES,
 	basePointPx,
 	WORM_X_CAP,
@@ -39,7 +42,8 @@ import {
 	type RiversLayout,
 	type TideLayout,
 	type WorthLayout,
-	type ConstellationLayout
+	type ConstellationLayout,
+	type FlowLayout
 } from './layout';
 import { makeVertexShader, fragmentShader, makePickVertexShader, pickFragmentShader } from './shaders';
 
@@ -208,6 +212,37 @@ export interface FieldHandle {
 	 */
 	getConstellationLayout(): ConstellationLayoutInfo | null;
 	/**
+	 * Feed the per-gi river table for the Ch 7 twin rivers (§23 — the `flow`
+	 * layout). Fed ONCE by the scene (from `scenes/ch7.json`) before the flow
+	 * layout engages, like `setStarTables` / `setWorthTables`. `heights[gi]` is the
+	 * league-season's TRUE run rate (runs an over), indexed by gi (the
+	 * `group_ids.u16` value); `baseHeights[gi]` is the flat baseline the river lifts
+	 * FROM (drive `flowLift` 0→1 for the divergence reveal — the pipeline sets
+	 * `baseHeights == heights` for the pre-rule seasons so only the post-fork climb
+	 * moves; omit `baseHeights` for no lift). `rateLo`/`rateHi` are the "runs an
+	 * over" axis range (world floor/ceiling); `bandThickness` is the decorative band
+	 * height as a FRACTION of the axis (0..1, a constant, NOT a ball-count encoding);
+	 * `forkSeason` is the fork year (2023) exposed as the world fork x on
+	 * `getFlowLayout()`; `axisTicks` are run-rate values the scene labels. The field
+	 * bakes them into the `uFlow` uniform against the letterboxed box (rebuilt on
+	 * resize) — no positions cross the wire, no new per-point buffer. Re-calling
+	 * replaces the table. A gi whose height is NaN has no river (collapses to the
+	 * box centre — graceful; R1..R6 never use `flow`).
+	 */
+	setRiverTable(table: RiverTable): void;
+	/**
+	 * current twin-rivers geometry (§23 — Ch 7's controlling morph): the fixed-
+	 * aspect, letterboxed box + the run-rate axis range + the per-gi season x's +
+	 * the per-gi centreline WORLD coords for the LIVE `flowLift` (so the scene's SVG
+	 * centrelines, the gap read and the axis marks track the divergence reveal) +
+	 * the world fork x (the 2023 marker) + the decorative band half-thickness. Map
+	 * an arbitrary (season, rate) through `flowSeasonToX` / `flowRateToY` (layout.ts)
+	 * then `field.projectToCss`. null before the first resize OR before a river table
+	 * is fed. Rebuilt on resize; the centres are re-derived from the live `flowLift`
+	 * on every read.
+	 */
+	getFlowLayout(): FlowLayoutInfo | null;
+	/**
 	 * Feed the pricelens tables for the Ch 5 worth grid (§19). `tables` maps a
 	 * table id (e.g. 'early' | 'recent' | 'rise' | 'wpl') to a 200-entry
 	 * per-cell LUMINANCE array (0..1, cell index = over×10 + wicketsDown — the
@@ -259,8 +294,67 @@ export interface FieldHandle {
 	 * until the pipeline re-encodes dismissal-kind bits into attrs.u8.
 	 */
 	setDismissals(kindByIndex: ArrayLike<number> | null): void;
+	/**
+	 * Set impact-sub spark membership for the Ch 7 twin rivers (§23). Pass the point
+	 * indices of the deliveries carrying an activated Impact Player substitution (the
+	 * scene derives them from `scenes/ch7.json` `impact_subs.spark_indices` — the 517
+	 * spark deliveries); the field bakes them into the per-point `aSpark` GL flag ONCE
+	 * (no per-frame cost — demand mode preserved) and renders. Pass `null` to clear
+	 * (all 0). The working-today path (the `setRunouts` / `setDismissals` precedent);
+	 * there is no pipeline seed, so a `flow` scene MUST call this to light the sparks.
+	 */
+	setSparks(indices: Iterable<number> | null): void;
 	readonly data: FieldData;
 	readonly stats: Readonly<FieldStats>;
+}
+
+/**
+ * The per-gi river table for `field.setRiverTable` (§23 — the Ch 7 twin rivers).
+ * `heights` / `baseHeights` are indexed by gi (the `group_ids.u16` value), straight
+ * from the scene's roll-up of `scenes/ch7.json` run rates.
+ */
+export interface RiverTable {
+	/** per-gi TRUE run rate (runs an over), indexed by gi; NaN = the gi has no river */
+	heights: ArrayLike<number>;
+	/**
+	 * per-gi flat BASELINE run rate the river lifts FROM at `flowLift` 0 (the
+	 * divergence reveal). Omit → no lift (baseline == true, so `flowLift` is a no-op).
+	 */
+	baseHeights?: ArrayLike<number>;
+	/** "runs an over" axis low (the box floor) */
+	rateLo: number;
+	/** "runs an over" axis high (the box ceiling) */
+	rateHi: number;
+	/** decorative band height as a FRACTION of the axis (0..1); a constant, NOT ball count */
+	bandThickness: number;
+	/** the fork season year (e.g. 2023) — exposed as the world fork x on getFlowLayout() */
+	forkSeason: number;
+	/** run-rate values the scene labels on the "runs an over" axis (scene convenience) */
+	axisTicks?: number[];
+}
+
+/**
+ * Twin-rivers geometry exposed to scenes (§23 — the Ch 7 flow layout). The fixed-
+ * aspect, letterboxed box (from `computeFlow`) + the run-rate axis range and
+ * decorative band half-thickness (from the fed river table) + the per-gi centreline
+ * WORLD coords for the CURRENTLY APPLIED `flowLift` (so the scene's SVG centrelines,
+ * the gap read and the axis marks track the divergence reveal) + the world fork x.
+ * Map an arbitrary (season, rate) through `flowSeasonToX` / `flowRateToY` (layout.ts).
+ */
+export interface FlowLayoutInfo extends FlowLayout {
+	/** "runs an over" axis range (world floor/ceiling map through flowRateToY) */
+	rateLo: number;
+	rateHi: number;
+	/** decorative band half-thickness (world) — the ribbon's constant vertical spread */
+	bandHalf: number;
+	/** world x of the fork season (the 2023 marker the scene draws) */
+	forkX: number;
+	/** the fork season year (echoed from the fed river table) */
+	forkSeason: number;
+	/** run-rate values to label on the "runs an over" axis (echoed from the table) */
+	axisTicks: number[];
+	/** per-gi centreline WORLD coordinate for the live `flowLift` (length groupCount; NaN = no river) */
+	centres: { x: number; y: number }[];
 }
 
 /** A pooled-share dismissal band, for anchoring the band's SVG label (§16). */
@@ -345,6 +439,23 @@ export function createField(opts: FieldOptions): FieldHandle {
 	const groupSeason = new Array<number>(groupCount).fill(0);
 	for (const g of data.groups) groupSeason[g.gi] = g.season;
 
+	// gi → the NEXT same-league season's gi (or -1), for the Ch 7 twin-rivers slope
+	// (§23): each river segment tilts toward its next season so the band flows. Static
+	// (the season groups never change), computed once.
+	const nextGi = new Int32Array(groupCount).fill(-1);
+	{
+		const byLeague = new Map<string, GroupMeta[]>();
+		for (const g of data.groups) {
+			const arr = byLeague.get(g.league);
+			if (arr) arr.push(g);
+			else byLeague.set(g.league, [g]);
+		}
+		for (const arr of byLeague.values()) {
+			arr.sort((a, b) => a.season - b.season);
+			for (let i = 0; i < arr.length - 1; i++) nextGi[arr[i].gi] = arr[i + 1].gi;
+		}
+	}
+
 	// season range → the run-out cascade's sweep normalizer (§14). The sweep maps
 	// 0→1 across [minSeason, maxSeason], so each season's cohort has one phase.
 	const minSeason = data.groups.reduce((m, g) => Math.min(m, g.season), Infinity);
@@ -403,6 +514,22 @@ export function createField(opts: FieldOptions): FieldHandle {
 	let appliedPhaseA: ConstellationPhase = 'all';
 	let appliedPhaseB: ConstellationPhase = 'all';
 	let appliedPhaseMix = 0;
+
+	/* ---- twin-rivers river table (§23 — the Ch 7 flow layout) ----------------
+	 * uFlow[gi] = (season centre x, flat-baseline y, true run-rate y, world slope
+	 * toward the next same-league season), all in world units, baked from the fed
+	 * river table against the letterboxed box (rebuilt on resize). No per-point
+	 * position ever crosses the wire — the render reads uFlow off the ball's gi. */
+	const flowVectors: THREE.Vector4[] = data.groups.map(() => new THREE.Vector4());
+	let riverTable: {
+		heights: Float64Array;
+		base: Float64Array;
+		rateLo: number;
+		rateHi: number;
+		bandThickness: number;
+		forkSeason: number;
+		axisTicks: number[];
+	} | null = null;
 
 	/* ---- worth-grid pricelens texture (§19) ---------------------------------
 	 * 200 cells × 8 rows, RG float: R = the cell's price LUMINANCE (0..1, fed by
@@ -584,6 +711,107 @@ export function createField(opts: FieldOptions): FieldHandle {
 		return { ...constellationLayout, stars, phaseA: appliedPhaseA, phaseB: appliedPhaseB, mix };
 	}
 
+	/* ---- twin-rivers river table (§23 — the Ch 7 flow layout) --------------- */
+	/**
+	 * Store / replace the per-gi river table (§23) and bake it into the uFlow
+	 * uniform against the current box. Fed once by the scene from scenes/ch7.json
+	 * (like setStarTables / setWorthTables); a gi with a NaN height has no river and
+	 * collapses to the box centre. Re-renders so the change shows immediately.
+	 */
+	function setRiverTable(table: RiverTable): void {
+		if (disposed) return;
+		if (table.heights.length !== groupCount) {
+			if (import.meta.env.DEV)
+				console.warn(
+					`[every-ball-ever] setRiverTable: heights has ${table.heights.length} entries,`,
+					`expected ${groupCount} (one per gi) — ignoring.`
+				);
+			return;
+		}
+		const heights = new Float64Array(groupCount);
+		const base = new Float64Array(groupCount);
+		for (let gi = 0; gi < groupCount; gi++) {
+			const h = Number(table.heights[gi]);
+			heights[gi] = h;
+			const b = table.baseHeights ? Number(table.baseHeights[gi]) : h;
+			base[gi] = Number.isFinite(b) ? b : h;
+		}
+		riverTable = {
+			heights,
+			base,
+			rateLo: table.rateLo,
+			rateHi: table.rateHi,
+			bandThickness: Math.max(0, table.bandThickness),
+			forkSeason: table.forkSeason,
+			axisTicks: table.axisTicks ? table.axisTicks.slice() : []
+		};
+		applyFlowGeometry();
+		invalidate();
+	}
+
+	// Bake the river table into the uFlow uniform (season x, baseline y, true y,
+	// slope-to-next) against the current letterboxed box. Called on setRiverTable and
+	// on resize. Cheap (groupCount groups) — no per-frame cost, demand mode holds.
+	function applyFlowGeometry(): void {
+		if (!riverTable || !flowLayout) return;
+		const box = {
+			bottom: flowLayout.bottom,
+			height: flowLayout.height,
+			rateLo: riverTable.rateLo,
+			rateHi: riverTable.rateHi
+		};
+		for (let gi = 0; gi < groupCount; gi++) {
+			const x = flowLayout.xs[gi];
+			const h = riverTable.heights[gi];
+			if (Number.isNaN(x) || !Number.isFinite(h)) {
+				flowVectors[gi].set(0, 0, 0, 0); // no river → box centre (graceful)
+				continue;
+			}
+			const trueY = flowRateToY(box, h);
+			const b = riverTable.base[gi];
+			const baseY = Number.isFinite(b) ? flowRateToY(box, b) : trueY;
+			flowVectors[gi].set(x, baseY, trueY, 0); // slope filled in the next pass
+		}
+		// world slope of each river segment toward its next same-league season (on the
+		// TRUE heights), so the band tilts and reads as a continuous flowing ribbon.
+		for (let gi = 0; gi < groupCount; gi++) {
+			const ng = nextGi[gi];
+			if (ng < 0) {
+				flowVectors[gi].w = 0;
+				continue;
+			}
+			const dx = flowVectors[ng].x - flowVectors[gi].x;
+			flowVectors[gi].w = Math.abs(dx) > 1e-6 ? (flowVectors[ng].z - flowVectors[gi].z) / dx : 0;
+		}
+		uniforms.uFlow.value = flowVectors;
+		uniforms.uFlowHalfPitch.value = flowLayout.cellHalfW;
+		uniforms.uFlowBandHalf.value = riverTable.bandThickness * 0.5 * flowLayout.height;
+	}
+
+	function getFlowLayout(): FlowLayoutInfo | null {
+		if (!flowLayout || !riverTable) return null;
+		const lift = Math.min(1, Math.max(0, applied.flowLift));
+		const centres: { x: number; y: number }[] = new Array(groupCount);
+		for (let gi = 0; gi < groupCount; gi++) {
+			const v = flowVectors[gi];
+			if (Number.isNaN(flowLayout.xs[gi]) || !Number.isFinite(riverTable.heights[gi])) {
+				centres[gi] = { x: NaN, y: NaN };
+			} else {
+				centres[gi] = { x: v.x, y: v.y + (v.z - v.y) * lift };
+			}
+		}
+		return {
+			...flowLayout,
+			rateLo: riverTable.rateLo,
+			rateHi: riverTable.rateHi,
+			bandHalf: riverTable.bandThickness * 0.5 * flowLayout.height,
+			forkX: flowSeasonToX(flowLayout, riverTable.forkSeason),
+			forkSeason: riverTable.forkSeason,
+			axisTicks: riverTable.axisTicks.slice(),
+			centres
+		};
+	}
+
 	/* ---- over-rail uniform arrays (§20) — sized to RAIL_MAX_SLOTS ----------- */
 	const railIdxArr = new Float32Array(RAIL_MAX_SLOTS).fill(-9999);
 	const railSlotVecs: THREE.Vector2[] = Array.from(
@@ -713,7 +941,21 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uStar: { value: starVectors },
 		uStarMix: { value: 0 },
 		uConstHalfExtent: { value: 0.82 },
-		uConstStarR: { value: 0.045 }
+		uConstStarR: { value: 0.045 },
+		// twin rivers (§23) — the per-gi river cell (season x, baseline y, true y,
+		// slope) + the decorative band + the lift. Zero until setRiverTable is fed
+		// (the rivers collapse to the origin — graceful; R1..R6 never use flow), and
+		// the lift defaults to 1 (true heights). Read only while the flow layout is
+		// in the mix, so every prior scene renders byte-identically.
+		uFlow: { value: flowVectors },
+		uFlowHalfPitch: { value: 0.02 },
+		uFlowBandHalf: { value: 0.05 },
+		uFlowLift: { value: 1 },
+		// impact-sub sparks (§23) — inactive by default (uSparkGlow 0), so the spark
+		// branch is a shader no-op and every prior scene renders byte-identically.
+		uSparkGlow: { value: 0 },
+		uSparkLift: { value: 0 },
+		uSparkOthersDim: { value: 1 }
 	};
 
 	const geometry = new THREE.BufferGeometry();
@@ -734,8 +976,13 @@ export function createField(opts: FieldOptions): FieldHandle {
 	// (0x40). Client-baked, zero wire cost. Overridable at runtime via
 	// setRunouts(indices) with a CPU set (columnar wicket_kind == 'run out'), so
 	// the cascade works BEFORE the pipeline re-encodes the bit.
+	// aRunOut is a packed runtime FLAG byte (no wire cost): bit0 = run-out (Ch 2
+	// cascade, seeded from attrs bit 6 / setRunouts), bit1 = impact-sub spark (Ch 7,
+	// setSparks). ONE attribute carries both — Ch 2 and Ch 7 never render together,
+	// and adding a 15th vertex attribute overflows the ANGLE/Metal ceiling (verified:
+	// "Too many attributes"), so the two single-bit flags share this byte (§23).
 	const runOutFlag = new Uint8Array(n);
-	for (let i = 0; i < n; i++) if ((data.attrs[i] & 64) !== 0) runOutFlag[i] = 1;
+	for (let i = 0; i < n; i++) if ((data.attrs[i] & 64) !== 0) runOutFlag[i] = 1; // bit0
 	geometry.setAttribute('aRunOut', new THREE.BufferAttribute(runOutFlag, 1, false));
 	const runOutAttr = geometry.getAttribute('aRunOut') as THREE.BufferAttribute;
 	geometry.setAttribute('aSubOrd', new THREE.BufferAttribute(subOrd, 1, false));
@@ -877,6 +1124,7 @@ export function createField(opts: FieldOptions): FieldHandle {
 	let tideLayout: TideLayout | null = null;
 	let worthLayout: WorthLayout | null = null;
 	let constellationLayout: ConstellationLayout | null = null;
+	let flowLayout: FlowLayout | null = null;
 	let cssW = 1;
 	let cssH = 1;
 
@@ -994,12 +1242,26 @@ export function createField(opts: FieldOptions): FieldHandle {
 	function setRunouts(indices: Iterable<number> | null): void {
 		if (disposed) return;
 		const arr = runOutAttr.array as Uint8Array;
-		arr.fill(0);
+		for (let i = 0; i < n; i++) arr[i] &= 0xfe; // clear bit0, PRESERVE the spark bit1
 		if (indices === null) {
-			for (let i = 0; i < n; i++) if ((data.attrs[i] & 64) !== 0) arr[i] = 1; // pipeline seed
+			for (let i = 0; i < n; i++) if ((data.attrs[i] & 64) !== 0) arr[i] |= 1; // pipeline seed
 		} else {
-			for (const i of indices) if (i >= 0 && i < n) arr[i] = 1;
+			for (const i of indices) if (i >= 0 && i < n) arr[i] |= 1;
 		}
+		runOutAttr.needsUpdate = true;
+		invalidate();
+	}
+
+	/* ---- impact-sub spark membership (§23 — the Ch 7 sparks) ---------------- */
+	// Bake a CPU-supplied index set (the 517 impact-sub deliveries) into aRunOut's
+	// bit1 ONCE (bit0 = run-out is preserved), no per-frame cost — demand mode holds.
+	// No pipeline seed (unlike the run-out bit) — a flow scene must call this to light
+	// the sparks. Packed into aRunOut to stay inside the vertex-attribute budget.
+	function setSparks(indices: Iterable<number> | null): void {
+		if (disposed) return;
+		const arr = runOutAttr.array as Uint8Array;
+		for (let i = 0; i < n; i++) arr[i] &= 0xfd; // clear bit1, PRESERVE the run-out bit0
+		if (indices !== null) for (const i of indices) if (i >= 0 && i < n) arr[i] |= 2;
 		runOutAttr.needsUpdate = true;
 		invalidate();
 	}
@@ -1307,7 +1569,11 @@ export function createField(opts: FieldOptions): FieldHandle {
 			a.railLift === b.railLift &&
 			a.phaseTableA === b.phaseTableA &&
 			a.phaseTableB === b.phaseTableB &&
-			a.phaseMix === b.phaseMix
+			a.phaseMix === b.phaseMix &&
+			a.flowLift === b.flowLift &&
+			a.sparkGlow === b.sparkGlow &&
+			a.sparkLift === b.sparkLift &&
+			a.sparkOthersDim === b.sparkOthersDim
 		);
 	}
 
@@ -1470,6 +1736,16 @@ export function createField(opts: FieldOptions): FieldHandle {
 		// phase glide is a minimal per-frame touch. NEVER a live re-embed.
 		applyStarArrays(s.phaseTableA ?? 'all', s.phaseTableB ?? 'all', s.phaseMix);
 
+		// twin rivers (§23): the divergence-reveal lift over the held flow layout —
+		// a scalar drive only (the per-gi river cells are baked into uFlow by
+		// setRiverTable / resize). Read in-shader only while the flow layout is in the
+		// mix, so this is a no-op for every prior scene. impact-sub sparks: the
+		// luminance-lift glow over the aSpark subset — inert at sparkGlow 0.
+		uniforms.uFlowLift.value = s.flowLift;
+		uniforms.uSparkGlow.value = s.sparkGlow;
+		uniforms.uSparkLift.value = s.sparkLift;
+		uniforms.uSparkOthersDim.value = s.sparkOthersDim;
+
 		// label plane opacity is scene-state-driven, never animated on its own
 		const o = Math.min(1, Math.max(0, s.labels));
 		labelLayer.style.opacity = o.toFixed(3);
@@ -1627,6 +1903,7 @@ export function createField(opts: FieldOptions): FieldHandle {
 		tideLayout = computeTide(data.groups, halfW, halfH);
 		worthLayout = computeWorth(halfW, halfH);
 		constellationLayout = computeConstellation(halfW, halfH);
+		flowLayout = computeFlow(data.groups, halfW, halfH);
 		uniforms.uHalfW.value = halfW;
 		uniforms.uHalfH.value = halfH;
 		uniforms.uWormLeft.value = wormLayout.left;
@@ -1663,6 +1940,9 @@ export function createField(opts: FieldOptions): FieldHandle {
 		// world-scale (halfExtent) + the jitter-disc radius change on resize.
 		uniforms.uConstHalfExtent.value = constellationLayout.halfExtent;
 		uniforms.uConstStarR.value = constellationLayout.starRadius;
+		// twin rivers (§23): the letterboxed box changed, so re-bake the per-gi river
+		// cells (season x, centreline heights, band) if a table has been fed.
+		applyFlowGeometry();
 		uniforms.uPointScale.value = basePointPx(w, h, n) * dpr;
 		uniforms.uColHalfWidth.value = columnLayout.colHalfWidth;
 		uniforms.uColBottom.value = columnLayout.bottom;
@@ -1733,12 +2013,15 @@ export function createField(opts: FieldOptions): FieldHandle {
 		getWorthLayout: () => worthLayout,
 		getConstellationLayout,
 		setStarTables,
+		setRiverTable,
+		getFlowLayout,
 		setWorthTables,
 		hasStateAttr,
 		hasWpaAttr,
 		setFirstInnings,
 		setRunouts,
 		setDismissals,
+		setSparks,
 		dispose(): void {
 			disposed = true;
 			if (rafId !== null) cancelAnimationFrame(rafId);

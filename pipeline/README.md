@@ -22,6 +22,7 @@ python3 pipeline/flatten.py \
   && python3 pipeline/bowlerplane.py \
   && python3 pipeline/ch5.py \
   && python3 pipeline/ch6.py \
+  && python3 pipeline/ch7.py \
   && python3 pipeline/payoff_harness.py \
   && python3 pipeline/ledger.py \
   && python3 -m unittest discover -s pipeline/tests -q
@@ -53,6 +54,17 @@ distances → classical MDS via a Jacobi eigensolver → per-phase Procrustes al
 emits only `scenes/ch6.json`, whose controlling morph reuses the existing `group_ids.u16`;
 it runs **after** `flatten`/`scenes` for manifest order (it registers `scenes/ch6.json` in
 `meta.json`);
+`ch7.py` (R4b) is likewise engine- and buffer-free: its own corpus pass (never reading an
+R1–R4a artifact) computes the Impact Player natural experiment (IPL vs the rule-free WPL
+diff-in-diff), the License Index at identical match states, the rule-change event-study
+placebo grid, the Playbook Decoder, the honest null, the 16 team-playbook payoff variants,
+and — critically — the **impact-sub spark index list** (the ~517 field point indices of the
+deliveries carrying an Impact Player substitution, in `group_ids.u16` point order), emitted
+inline in `scenes/ch7.json` because the raw-JSON `replacements` field is not in the shipped
+columnar dataset (so unlike Ch 2/3/4 the render cannot derive membership client-side; the
+index list is the Ch 5 over-rail precedent). The twin-rivers controlling morph reuses the
+existing `group_ids.u16` + `attrs.u8`, so Ch 7 adds no per-point buffer; it runs **after**
+`flatten`/`scenes` for manifest order (it registers `scenes/ch7.json` in `meta.json`);
 `payoff_harness.py` emits `payoff/ch1.json`;
 `ledger.py` audits everything on disk against the blueprint §2 budgets. The harness and
 the ledger exit non-zero on failure. The whole build runs in seconds and is **byte-for-byte
@@ -74,6 +86,7 @@ verified by rebuilding and diffing checksums.
 | `interlude.py` | **R3b — the Net Session interlude scene.** Consumes the gate-validated `engines/wp_grid.json` (win) + `engines/re288.json` (runs) and emits `scenes/interlude.json`: both dials re-indexed to one widget coordinate `[overs_left-1][wickets_in_hand-1]` (win adds a required-rate bucket), per era band + an all-time pooled default (win from `ipl pooled`; runs **derived** here — RE288 ships no IPL-pooled surface — as the evidence-weighted mean of the five era surfaces, monotone-repaired with the engine's own isotonic step) + the WPL toggle with both evidence masks (win `n<12`, runs `n<15`). Resolves three presets from the grids (**"Dhoni, 2011 final"** read from the corpus as the real chase-of-206 state; **"needing 10 an over at halfway, 2010"** and **"the same chase, 2025"** — one scoreboard, two era surfaces), the validated era anchor, and data-bound footnotes (calibration, wicket-lever-early/rate-lever-late, mask thresholds). Every preset's quoted number is the exact grid readout at its cell, so the copy can never contradict the meter. Reads engines only; never edits them. |
 | `ch5.py` | **R3b-2 — Chapter 5 "What a Ball Is Worth".** Consumes the gate-validated `engines/wp_grid.json` + `engines/re288.json` (never rebuilds them; adds two documented derived views: mid-first-innings WP = the era defend curve at a projected total of runs-so-far + RE runs-to-come, interpolated between bucket midpoints — exactly the view `wp.py` designates for R3b — and per-ball RE by interpolating the era surface across the over axis). Emits the **`wpa.u8`** per-point buffer (signed-quantized WPA, batting-team perspective, sentinel 255 for D/L / undecided / short-target matches — the matches the grids exclude), the **`restate.u8`** per-point buffer (the ball's RE-grid cell, `over*10 + wickets_down`, the controlling-morph coordinate), and `scenes/ch5.json` (defended band, RE drift + third-wicket validation, linear weights + per-season price board, Wicket Value Index, finisher cliff, the 2019-final scrub over + WP worm, league WPA headlines, 20 franchise payoff cards with tappable over replays, WPL beats, footnotes incl. the demoted chase-difficulty + era-swap exhibits, and both buffer decode specs). The scrub match and the era-swap innings resolve **by identity**, never a hard-coded index. |
 | `ch6.py` | **R4a — Chapter 6 "Two Dialects" (IPL × WPL, beside the path not on it).** Its own corpus pass (no engine, no per-point buffer — the controlling morph reuses `group_ids.u16`) plus a pure-Python linear-algebra core (Jacobi eigensolver, classical MDS, 2×2 orthogonal-Procrustes/polar factor, Jensen-Shannon divergence). Emits `scenes/ch6.json`: the **Season Constellation Map** — each of the 23 season-groups placed by the JS distance between its 7-way per-ball outcome distribution (dot/single/two-or-three/four/six/wicket/extras), classical MDS to the all-phase MASTER star layout, each per-phase layout (PP 1-6 / middle 7-15 / death 16-20) Procrustes-aligned to it so the WPL never flips sides; emits star (x,y) per phase (stable box), the IPL chronological worm, each WPL star's nearest-IPL neighbour per phase (dotted threads) and the two-truths pairing (outcome-mix twin IPL 2008 vs run-rate twin IPL 2022); the **League Maturity Clock** (WPL yr4 8.54 == IPL yr15), **Run DNA** helix (four 46.8 vs 33.9, six 15.5 vs 29.0), **Stumping Signature** (WPL 5.2-7.9% vs IPL 2026 1.4%), **Photo-Finish** rate (WPL 24.1% the tightest league), the batting ladder + depth (WPL 2025 pos-7+ 15.3%), the 16 sister-franchise payoff variants, and the footnote layer (Star Gravity/Gini, Competitive Balance win-HHI, Powerplay Fear, Twos Culture). Registers `scenes/ch6.json` in `meta.json`. |
+| `ch7.py` | **R4b — Chapter 7 "The Twelfth Man" (the Impact Player rule as a natural experiment).** Its own corpus pass (no engine, no per-point buffer — the twin-rivers controlling morph reuses `group_ids.u16` + `attrs.u8`) in flatten's exact season-blocked point order. Emits `scenes/ch7.json`: the **natural experiment** (IPL run rate range-bound 7.5-8.7 for 2008-2022 then 8.99/9.56/9.63/9.88, vs the rule-free WPL 8.08→8.54; diff-in-diff ≈ +0.9 RPO with disclosed confounds — on screen "the control group", "diff-in-diff" one click deep), the **License Index** (at ≥4 down / overs 7-16: SR 116.8→129.9 while the dismissal rate held ~flat 4.88→4.95; top order took the licence most, +18.0% vs +11.0% for 6-8), the **event-study placebo grid** (every candidate season 2012-2025's before/after level shift + SE + t, emitted whole so the placebo cursor is a lookup; the true 2023 date clears the entire pre-rule placebo cloud, with the honest disclosure that 2024's raw magnitude edges it as the break deepens), the **Playbook Decoder** (subs at the innings break 51.8%→35.7%), the **honest null** (entry entropy flat; top-3 SR 131.5→155.3; bowlers/innings 5.79→6.12), and the **impact-sub extraction**: 556 Impact Player events across 517 distinct deliveries (WPL 0 — the control arm), the bat-vs-bowl reinforcement split (256/300), and the **spark index list** (the 517 field point indices carrying an event, the render's subset-highlight membership). 16 team-playbook payoff variants (10 IPL playbook cards + 5 WPL control-arm cards + neutral). Registers `scenes/ch7.json` in `meta.json`. |
 | `payoff_harness.py` | Payoff-card snapshot harness: emits + asserts the 16 Chapter-1 variants (R1a full spec). |
 | `ledger.py` | Payload ledger vs the §2 budgets; prints the table; writes `ledger.json`. |
 | `tests/` | `unittest` snapshot tests (see below). |
@@ -433,7 +446,7 @@ snapshot). Era bands are the engines' (2008-10 vs 2023-26 unless stated).
 ## Tests
 
 ```sh
-python3 -m unittest discover -s pipeline/tests -q     # 282 tests
+python3 -m unittest discover -s pipeline/tests -q     # 336 tests
 ```
 
 - `test_canon.py` — canonicalization tables exhaustive over the corpus in **both**

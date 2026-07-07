@@ -29,6 +29,7 @@ export type ChapterId =
 	| 'interlude'
 	| 'ch5'
 	| 'ch6'
+	| 'ch7'
 	| 'endcard'
 	| 'bowl';
 
@@ -292,6 +293,27 @@ export interface OverRail {
  * phase-less constellation scene (C6-2..C6-4) omits this → the 'all' map. NEVER a
  * live re-embed (a browser re-fit could mirror-flip the WPL, §0.1). See CONTRACT §22.
  */
+/**
+ * The impact-sub sparks (§23 capability — the Ch 7 subset lift). A cross-cutting
+ * LUMINANCE + small-lift glow over the per-point `aSpark` flag (the 517 impact-sub
+ * deliveries, baked once via `field.setSparks(indices)` — the `setRunouts` /
+ * `setDismissals` precedent). It composes with any layout (the sparks glow as they
+ * enter the IPL river over the held `flow` layout) and spends NO controlling morph
+ * (like `highlight` / `cascade`). LUMINANCE/position only — hue stays identity.
+ * Reversible: the NEXT scene declaring no `sparks` lerps `glow` back to 0. Drive
+ * `glow` across the hold from a caption step via `SceneDef.dynamicState` (a
+ * post-morph field change, like the cascade `sweep` / rivers `engage`). Inactive at
+ * `glow` 0 (every prior scene byte-identical). See CONTRACT §23.
+ */
+export interface SparkSubset {
+	/** spark brightness/glow strength 0..1 (0 = inactive — no spark effect) */
+	glow: number;
+	/** world-units vertical lift for spark points while glowing (default 0) */
+	lift?: number;
+	/** luminance × for non-spark points while the sparks glow (default 1 — no dimming) */
+	othersDim?: number;
+}
+
 export interface ConstellationPhaseState {
 	/** the active/target phase map: 'all' | 'powerplay' | 'middle' | 'death' */
 	table: ConstellationPhase;
@@ -340,6 +362,17 @@ export interface SceneFieldState {
 	overrail?: OverRail | null;
 	/** the constellation phase toggle over the held season map, or null/omitted → the 'all' map (§22) */
 	phase?: ConstellationPhaseState | null;
+	/**
+	 * twin-rivers divergence reveal over the held `flow` layout (§23): 0 = the rivers
+	 * sit at the table's flat BASELINE heights, 1 = at their TRUE run-rate heights (so
+	 * the post-2023 IPL stretch climbs away from the WPL). Only meaningful with the
+	 * `flow` layout + a `baseHeights`-carrying river table; default 1 (true heights).
+	 * Drive 0→1 across the hold via `dynamicState` for C7-3's "flat, then lift". At 1
+	 * (the settled + reduced-motion end state) the rivers show the honest picture.
+	 */
+	flowLift?: number;
+	/** the impact-sub spark glow over the `aSpark` subset, or null/omitted for none (§23) */
+	sparks?: SparkSubset | null;
 	/** whether the picked team's balls stay ignited (default true — §2 standing rule) */
 	teamIgnite?: boolean;
 	/**

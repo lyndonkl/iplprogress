@@ -15,6 +15,7 @@ import type {
 	RunoutCascade,
 	SceneDef,
 	SceneFieldState,
+	SparkSubset,
 	SubsetHighlight,
 	SubsetResort,
 	SubsetRivers,
@@ -106,6 +107,8 @@ interface ResolvedSceneState {
 	pricelens: PriceLens | null;
 	overrail: OverRail | null;
 	phase: ConstellationPhaseState | null;
+	flowLift: number;
+	sparks: SparkSubset | null;
 	teamIgnite: boolean;
 	wallHeatMix: number;
 }
@@ -125,6 +128,8 @@ export function withDefaults(s: SceneFieldState): ResolvedSceneState {
 		pricelens: s.pricelens ?? null,
 		overrail: s.overrail ?? null,
 		phase: s.phase ?? null,
+		flowLift: s.flowLift ?? 1,
+		sparks: s.sparks ?? null,
 		teamIgnite: s.teamIgnite ?? true,
 		wallHeatMix: s.wallHeatMix ?? 0
 	};
@@ -241,6 +246,14 @@ export function resolveRenderState(
 		? lerp(fromPh?.mix ?? ph.mix ?? 1, toPh?.mix ?? ph.mix ?? 1, clampedT)
 		: 0;
 
+	// Impact-sub sparks (§23) resolve like the highlight: glow / lift / othersDim
+	// all LERP from their inert defaults (glow 0, lift 0, othersDim 1), so the sparks
+	// fade in when a scene declares them and fade back out (glow → 0) when the next
+	// scene declares none. Membership is the baked aSpark flag; the effect is gated
+	// on glow > 0, so a no-spark scene equals DEFAULT_RENDER_STATE.
+	const fromSp = f.sparks;
+	const toSp = g.sparks;
+
 	// Facet filter resolves like the highlight: the discrete facets come from
 	// whichever side declares an active filter (preferring `to`), while filterDim
 	// lerps — an inactive side contributes dim 1, so a filter fades in/out cleanly.
@@ -337,7 +350,16 @@ export function resolveRenderState(
 		// (the field defaults them to 'all' — inert). Positions lerp, never re-fit.
 		phaseTableA: ph ? (ph.from ?? ph.table) : null,
 		phaseTableB: ph ? ph.table : null,
-		phaseMix: phMix
+		phaseMix: phMix,
+		// twin-rivers divergence reveal (§23): lerps like any scalar (default 1 both
+		// sides = true heights, a no-op). Read in-shader only while the flow layout is
+		// in the mix, so a non-flow scene equals DEFAULT_RENDER_STATE.
+		flowLift: lerp(f.flowLift, g.flowLift, clampedT),
+		// impact-sub sparks (§23): glow / lift / othersDim lerp from inert defaults so
+		// the spark glow fades in and back out; inactive at glow 0 (byte-identical).
+		sparkGlow: lerp(fromSp?.glow ?? 0, toSp?.glow ?? 0, clampedT),
+		sparkLift: lerp(fromSp?.lift ?? 0, toSp?.lift ?? 0, clampedT),
+		sparkOthersDim: lerp(fromSp?.othersDim ?? 1, toSp?.othersDim ?? 1, clampedT)
 	};
 }
 

@@ -67,7 +67,7 @@
  *                 facet + the exact-match tooltip. See CONTRACT §12.4.)
  */
 
-import { RAIL_MAX_SLOTS, WORTH_CELL_FILL } from './layout';
+import { FLOW_RIBBON_ALPHA, RAIL_MAX_SLOTS, WORTH_CELL_FILL } from './layout';
 
 /** Fraction of the reveal range a point spends "raining in" (assembly layout). */
 export const ASSEMBLY_RAIN_WINDOW = 0.045;
@@ -283,6 +283,29 @@ uniform vec4 uStar[GROUP_COUNT];   // per-gi star: xy = phase A · zw = phase B 
 uniform float uStarMix;            // 0 = phase A · 1 = phase B (the phase-toggle lerp)
 uniform float uConstHalfExtent;    // world half-size of the [-1,1] star frame (letterboxed)
 uniform float uConstStarR;         // world radius of a star's jitter disc
+
+// ---- Twin rivers (Ch 7, §23). Every ball condenses to its LEAGUE-SEASON RIVER
+//      cell. uFlow[gi] packs the season's world geometry: x = season centre x
+//      (shared time axis), y = the flat BASELINE run-rate height (world), z = the
+//      TRUE run-rate height (world), w = the world slope toward the next same-league
+//      season (the tilt that makes the band read as a continuous flowing ribbon).
+//      The centreline lerps baseline→true by uFlowLift (the divergence reveal). A
+//      fixed decorative band jitter (±uFlowBandHalf) makes the ribbon a band of its
+//      own balls (NOT a ball-count encoding). x jitters ±uFlowHalfPitch so adjacent
+//      seasons meet and the ribbon reads continuous. Inactive for every prior layout
+//      (never code 9), so R1..R6 render byte-identically.
+uniform vec4 uFlow[GROUP_COUNT];   // per-gi: (seasonX, baselineY, trueY, slope) in world units
+uniform float uFlowHalfPitch;      // in-season x jitter half-width (half the year pitch, world)
+uniform float uFlowBandHalf;       // decorative band half-thickness (world; constant, not ball count)
+uniform float uFlowLift;           // 0 = baseline heights · 1 = true run-rate heights (the reveal)
+
+// ---- Impact-sub sparks (Ch 7, §23). A luminance + small-lift glow over the
+//      per-point aSpark flag (the 517 impact-sub deliveries, baked via setSparks).
+//      Composes with any layout (the sparks glow as they enter the IPL river);
+//      inactive at uSparkGlow == 0, so every prior scene renders byte-identically.
+uniform float uSparkGlow;          // spark brightness/glow strength 0..1 (0 = inactive)
+uniform float uSparkLift;          // world-units vertical lift for spark points
+uniform float uSparkOthersDim;     // luminance × for non-spark points while sparks glow
 `;
 
 /** Core per-point attributes (both shaders read these). */
@@ -293,7 +316,12 @@ in float aBallsFaced;
 in float aTeam;
 in float aSubOrd;
 in float aCumRuns;  // batter cumulative innings runs, NORMALIZED 0..1 (worm-space y)
-in float aRunOut;   // run-out membership flag 0/1 (worm-space cascade)
+in float aRunOut;   // packed runtime FLAG bits (no wire cost): bit0 = run-out (Ch 2
+                    // cascade), bit1 = impact-sub spark (Ch 7). One attribute holds
+                    // both — they are baked via setRunouts / setSparks and Ch 2 and
+                    // Ch 7 never render together, so packing keeps the field inside
+                    // the vertex-attribute budget (adding a 15th attribute overflows
+                    // the ANGLE/Metal ceiling — CONTRACT §18.6 / §23).
 in float aBowlEcon; // bowler-season economy byte 0..254 (frontier x); raw, non-normalized
 in float aBowlSr;   // bowler-season strike-rate byte 0..254, 255 = no-wicket sentinel (frontier y)
 in float aDismissal;// dismissal-kind flag -1 none / 0 bowled / 1 lbw / 2 caught / 3 stumped (rivers)
@@ -322,7 +350,7 @@ uint pcg(uint v) {
 }
 const float INV32 = 1.0 / 4294967296.0;
 
-vec3 pickLayout(int id, vec3 pFree, vec3 pCols, vec3 pWall, vec3 pWorms, vec3 pFrontier, vec3 pTide, vec3 pWorth, vec3 pConst) {
+vec3 pickLayout(int id, vec3 pFree, vec3 pCols, vec3 pWall, vec3 pWorms, vec3 pFrontier, vec3 pTide, vec3 pWorth, vec3 pConst, vec3 pFlow) {
 	if (id == 1) return pCols;
 	if (id == 2) return pWall;
 	if (id == 4) return pWorms;
@@ -330,6 +358,7 @@ vec3 pickLayout(int id, vec3 pFree, vec3 pCols, vec3 pWall, vec3 pWorms, vec3 pF
 	if (id == 6) return pTide;
 	if (id == 7) return pWorth;
 	if (id == 8) return pConst;
+	if (id == 9) return pFlow;
 	return pFree; // 0 free · 3 assembly share the free-field scatter
 }
 
@@ -379,6 +408,8 @@ struct Core {
 	float wpaByte;       // decoded WPA byte 0..255 (aPrice bits 8-15; 255 = sentinel)
 	bool railMember;     // one of the over rail's named points (§20)
 	float railT;         // 0..1 flight progress toward the rail slot (overlay pass only)
+	bool spark;          // impact-sub spark membership (aSpark) — Ch 7 luminance lift (§23)
+	float flowWeight;    // 0..1 amount of the twin-rivers layout in the A/B mix (ribbon alpha)
 };
 
 Core computeCore() {
@@ -404,7 +435,11 @@ Core computeCore() {
 	o.top10 = (a & 32) != 0;
 	// run-out membership is a dedicated flag (seeded from attrs bit 6 or a CPU
 	// index set) so it is decoupled from the immutable attr byte — see §14.
-	o.runOut = aRunOut > 0.5;
+	// aRunOut is a packed flag byte: bit0 = run-out (Ch 2 cascade), bit1 = impact-sub
+	// spark (Ch 7). Decoding bit0 with mod is byte-identical to the old gt-0.5 test for
+	// every value the run-out path ever sets (0/1), so R1..R4a render identically.
+	o.runOut = mod(aRunOut, 2.0) >= 0.5;
+	o.spark = aRunOut >= 1.5; // bit1 set (value 2 or 3) — the Ch 7 spark subset (§23)
 
 	// subset re-sort membership (drives position + color)
 	bool resortOn = uResortClass >= 0.0;
@@ -537,13 +572,33 @@ Core computeCore() {
 		(h3 - 0.5) * 0.25
 	);
 
+	// twin rivers (Ch 7, §23): x = the ball's season centre (uFlow[gi].x) + an
+	// in-season jitter of ±uFlowHalfPitch so adjacent seasons meet and the ribbon
+	// reads continuous; y = the season's centreline run-rate height, lerped from the
+	// flat BASELINE (uFlow[gi].y) to the TRUE height (uFlow[gi].z) by uFlowLift (the
+	// divergence reveal), tilted toward the next season by the world slope
+	// (uFlow[gi].w) so the band flows, plus a FIXED decorative band jitter of
+	// ±uFlowBandHalf (a constant thickness, NOT a ball-count encoding — height means
+	// run rate). WPL seasons carry their own gi with the same season x as the IPL
+	// year, so the two rivers coexist on one time axis and diverge at 2023. This
+	// matches flowSeasonToX / flowRateToY in layout.ts exactly, so the SVG
+	// centrelines / axis / fork marker can never drift from the GL ribbons.
+	vec4 fv = uFlow[gi];
+	float flowXOff = (h4 * 2.0 - 1.0) * uFlowHalfPitch;
+	float flowCy = mix(fv.y, fv.z, clamp(uFlowLift, 0.0, 1.0)) + fv.w * flowXOff;
+	vec3 posFlow = vec3(
+		fv.x + flowXOff,
+		flowCy + (h2 * 2.0 - 1.0) * uFlowBandHalf,
+		(h3 - 0.5) * 0.25
+	);
+
 	// morph with per-point stagger so the field streams, not teleports
 	float delay = h3 * 0.55;
 	float t = clamp(uProgress * 1.55 - delay, 0.0, 1.0);
 	t = t * t * (3.0 - 2.0 * t);
 	vec3 pos = mix(
-		pickLayout(uLayoutA, posFree, posCols, posWall, posWorms, posFrontier, posTide, posWorth, posConstellation),
-		pickLayout(uLayoutB, posFree, posCols, posWall, posWorms, posFrontier, posTide, posWorth, posConstellation),
+		pickLayout(uLayoutA, posFree, posCols, posWall, posWorms, posFrontier, posTide, posWorth, posConstellation, posFlow),
+		pickLayout(uLayoutB, posFree, posCols, posWall, posWorms, posFrontier, posTide, posWorth, posConstellation, posFlow),
 		t
 	);
 
@@ -558,6 +613,15 @@ Core computeCore() {
 	// how much of the worth layout (code 7) is in the mix — gates the pricelens
 	// recolor + density gain (no-op for every prior layout, never 7).
 	o.worthWeight = (uLayoutA == 7 ? (1.0 - t) : 0.0) + (uLayoutB == 7 ? t : 0.0);
+
+	// how much of the twin-rivers layout (code 9) is in the mix — gates the ribbon
+	// alpha (no-op for every prior layout, never 9).
+	o.flowWeight = (uLayoutA == 9 ? (1.0 - t) : 0.0) + (uLayoutB == 9 ? t : 0.0);
+
+	// impact-sub spark lift (§23) — the POSITION change lives here so the pick pass
+	// tracks the lifted spark; the brighten/glow is per-shader (visual). Gated on
+	// uSparkGlow so it is a no-op for every prior scene (byte-identical).
+	if (uSparkGlow > 0.0 && o.spark) pos.y += uSparkLift * uSparkGlow;
 
 	// subset re-sort flight — matching points arc into their season's column
 	if (o.matchResort) {
@@ -707,6 +771,7 @@ export function makeVertexShader(groupCount: number, hasMatch = false, railOverl
 #define WORTH_CELL_FILL ${WORTH_CELL_FILL.toFixed(6)}
 #define RAIL_MAX ${RAIL_MAX_SLOTS}
 #define RAIL_STAGGER_W ${RAIL_STAGGER.toFixed(6)}
+#define FLOW_RIBBON_A ${FLOW_RIBBON_ALPHA.toFixed(6)}
 ${hasMatch ? '#define HAS_MATCH' : ''}
 ${railOverlay ? '#define RAIL_OVERLAY' : ''}
 
@@ -858,6 +923,12 @@ void main() {
 	//      outside worm-space (wormWeight is 0 for every R1 layout).
 	alphaMul *= mix(1.0, WORM_HAZE_ALPHA, core.wormWeight);
 
+	// ---- Twin-rivers ribbon alpha (§23): the two rivers settle to a moderate
+	//      alpha so each dense band reads as a bright ribbon of texture, not a
+	//      saturated blob. No-op outside the flow layout (flowWeight is 0 for every
+	//      prior layout, never code 9), so R1..R6 render byte-identically.
+	alphaMul *= mix(1.0, FLOW_RIBBON_A, core.flowWeight);
+
 	// ---- Worth-grid pricelens (§19): the cell's price LUMINANCE rides the
 	//      color (hue stays identity — a scalar multiply is luminance only) and
 	//      the DENSITY GAIN rides the alpha, so a cell's INTEGRATED brightness
@@ -922,6 +993,24 @@ void main() {
 		}
 	}
 
+	// ---- Impact-sub sparks (§23): the 517 impact-sub deliveries glow as bright
+	//      sparks entering the IPL river — a LUMINANCE boost + glow + size (hue
+	//      stays identity), with non-spark points optionally damped (uSparkOthersDim)
+	//      so the sparks pop. The pos lift already happened in core. No-op at
+	//      uSparkGlow == 0, so every prior scene renders byte-identically.
+	if (uSparkGlow > 0.0) {
+		if (core.spark) {
+			c *= 1.0 + 0.9 * uSparkGlow;
+			glow = max(glow, 0.7 * uSparkGlow);
+			sizeMul *= 1.0 + 0.5 * uSparkGlow;
+			alphaMul = max(alphaMul, 0.9 * uSparkGlow);
+		} else {
+			float od = mix(1.0, uSparkOthersDim, uSparkGlow);
+			alphaMul *= od;
+			c *= mix(0.8, 1.0, od);
+		}
+	}
+
 	// ---- Facet filter: points failing an active facet are hidden/ghosted.
 	//      (uFilterDim is 0 to hide, small to ghost, 1 no-op — and is a no-op
 	//      whenever no facet is active because filterPass is then always true.)
@@ -971,6 +1060,10 @@ void main() {
 		glow = max(glow, glowK);
 		// resist the haze so the reader's team reads at full brightness in worm-space
 		alphaMul = max(alphaMul, mix(alphaMul, 0.82, core.wormWeight));
+		// resist the twin-rivers ribbon alpha a stop so the reader's team glows inside
+		// its own river (an IPL team in the men's river, a WPL team in the women's) —
+		// personalization survives the most abstract Ch 7 layout (standing rule)
+		alphaMul = max(alphaMul, mix(alphaMul, 0.82, core.flowWeight));
 		// resist the worth density gain a stop so the reader's team stays readable
 		// on the price map (personalization survives — standing rule)
 		alphaMul = max(alphaMul, mix(alphaMul, 0.55, core.worthWeight));

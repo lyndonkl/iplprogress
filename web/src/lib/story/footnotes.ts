@@ -498,6 +498,55 @@ export const FOOTNOTES = {
 			'A WPL side’s "nearest men’s season-star by style" is the IPL season whose ball-by-ball shot mix sits closest to that team’s, measured by the same Jensen-Shannon distance the map uses. For all four WPL sisters and UP Warriorz it comes out as IPL 2008, the same early-IPL dialect the whole chapter has been tracing.',
 			'Five grounds have hosted both leagues: Arun Jaitley in Delhi, Brabourne and DY Patil across Mumbai and Navi Mumbai, Ekana in Lucknow, and Chinnaswamy in Bengaluru. Every card is built by the pipeline from one 16-variant table, snapshot-tested, never typed by hand.'
 		]
+	},
+
+	/* ---- Chapter 7 · The Twelfth Man (r4b) -----------------------------------
+	 * The hero leads on screen as "the control group"; the technical names —
+	 * difference-in-differences, the event study, the t-statistic, entry entropy —
+	 * live here, one click deep (the glossary rule). Numbers track ch7.json. */
+	'ch7-rivers': {
+		title: 'How the two rivers, and the control group, are built',
+		paragraphs: [
+			'Run rate is all the runs, extras included, per six legal balls; wides and no-balls are left out of the deliveries counted. It is the same formula as Chapter 6’s maturity clock, so the two chapters’ WPL numbers agree. Each river’s height at a season is that league-season’s run rate. The band’s thickness is decoration, a constant, not a count of balls.',
+			'The control-group estimate has a technical name: a difference-in-differences. It is the IPL’s change after the rule minus the WPL’s change over the very same window. The men sat inside a fifteen-year band that ran 7.48 to 8.65, then climbed season by season from the rule year on: 8.99 in 2023, 9.56, 9.63, 9.88, about 1.36 an over off the band. The women, with no such rule, drifted only 8.08 to 8.54, about +0.46. Take out that drift and roughly +0.9 of the men’s jump lines up with the rule.',
+			'Evidence weight, not proof. Pitches and balls changed over the same window, batting intent had been climbing since the 2018 six-rate break, and the WPL is an imperfect control: four seasons, no true pre-rule period. The rule opened the door. It was not the only thing that walked through. Chapter 10 apportions the credit.',
+			'The honest null (its technical name is Batting-Order Fluidity). The twelfth name did not rewire how teams think about the order. The spread of wickets-already-down when each batter walks in (the technical name is entry entropy, measured in bits) held flat across the rule, about 3.04 before and 3.06 after. What changed is intent, not the running order: the top three’s strike rate jumped 131.5 to 155.3 while the tail batted about as often as before.',
+			'Two demoted exhibits. Tail Exposure: the safety net is about tail quality, not exposure. The number eight came to the crease about as often after the rule as before (53.4% of innings to 56.2%). Part-Timer Extinction, the bowling dividend: with a spare name to spend, teams reached for one more bowler the year the rule arrived, 5.79 distinct bowlers an innings to 6.12.'
+		]
+	},
+	'ch7-license': {
+		title: 'How the licence is measured',
+		paragraphs: [
+			'The match state is held identical on both sides: at least four wickets down, in overs 7 to 16. Pre-rule is 2020 to 2022, post-rule 2023 to 2026. Strike rate is batter runs per 100 legal balls faced. From that spot it jumped 116.8 to 129.9.',
+			'The out-rate is every non-retired dismissal per 100 legal balls at those states. Read it honestly: it did NOT fall. It held essentially flat, 4.88 to 4.95 (the bowler-credited-only view, 4.62 to 4.75, tells the same story). So the claim is aggression up at no material risk premium, never risk down.',
+			'The by-position split is over all IPL states, with batting position taken by order of first appearance. Positions 1 to 3 lifted 18.0%, positions 6 to 8 lifted 11.0%. The top order took the licence most. The best batters cashed the free aggression first.',
+			'Sample sizes: 6,000 balls and 293 dismissals before the rule; 10,525 balls and 521 dismissals after.'
+		]
+	},
+	'ch7-placebo': {
+		title: 'How the placebo test works, and where the subs come from',
+		paragraphs: [
+			'For every candidate year the "jump" is the mean IPL run rate over the three seasons from that year, minus the mean over the three before it (the same run-rate formula). For a made-up date before the rule, the later window stops at 2022, so no fake date can borrow the real post-2023 climb. Every candidate is worked out once in the pipeline, so dragging the cursor is a lookup, never a live fit in your browser.',
+			'The technical name for the whole exercise is a rule-change event study with a placebo test; the jump is measured the same before-and-after way as the control-group estimate. The real 2023 rule date jumps about 1.10 runs an over and stands clear of the whole grey cloud. The biggest a made-up date before the rule ever manages is about 0.55. That size of jump, in runs an over, is exactly what the cursor reads out.',
+			'One honest wrinkle, shown on screen. The rule year is not the single largest jump: 2024’s raw size (about 1.16) edges 2023’s (about 1.10), because scoring kept climbing as teams learned the card, exactly the learning curve the playbook shows. The break brackets 2023 and 2024, and 2023 is where it starts.',
+			'Where the impact subs come from: the raw Cricsheet match JSON records an Impact Player substitution in a delivery’s "replacements" field, from 2023 on. We infer activation from the entry itself. The ball it is recorded on is where the sub takes effect. Role and concussion substitutions are excluded. That leaves 556 activations across 517 distinct deliveries; the WPL records none, which is exactly what makes it the control arm. Two teams subbing on the same first ball of the second innings is why 556 events land on 517 deliveries.'
+		]
+	},
+	'ch7-playbook': {
+		title: 'How impact-sub timing is read',
+		paragraphs: [
+			'"At the innings break" means the substitution is recorded on the first ball of an innings (over 0, ball 0). Everything else counts as mid-innings. Counting is per substitution event.',
+			'The share used at the break fell season by season: 51.8% in 2023, 42.3% in 2024, 35.7% in 2025, ticking back to 39.3% in 2026. Teams stopped burning the card at the obvious moment and started holding it for a mid-innings strike. A league learning its own rule in real time.',
+			'A fuller view exists: the sub-timing flow from toss to innings to timing to role to result. It lives here rather than as its own on-screen exhibit, to keep the chapter to one hero and three supporting beats.'
+		]
+	},
+	'ch7-payoff': {
+		title: 'How your playbook card is built',
+		paragraphs: [
+			'One card per franchise: 10 IPL, 5 WPL, and a neutral league-wide card. An IPL card carries that team’s habits: the split of batting versus bowling reinforcements, the most-used impact player, the break-versus-mid timing, and the win rate behind each pattern. Every current IPL side used the rule, so there is no empty state on the men’s side.',
+			'Reinforcement type is read from the match state when the sub is activated: if that team is batting it is a batting reinforcement, if fielding a bowling one. Batting reinforcements are recorded on the ball the sub walks in for; bowling ones at the start of the innings their team fields.',
+			'A WPL card is the control-arm card. The women’s league never had the rule, which is precisely why anyone can say what the rule did to the men’s. An advantage, never a deficit. Every card is built by the pipeline from one 16-variant table, snapshot-tested, never typed by hand.'
+		]
 	}
 } as const satisfies Record<string, FootnoteEntry>;
 

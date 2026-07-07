@@ -15,6 +15,7 @@
 	import { scenes as interludeScenes } from '$lib/scenes/interlude';
 	import { scenes as ch5Scenes } from '$lib/scenes/ch5';
 	import { scenes as ch6Scenes } from '$lib/scenes/ch6';
+	import { scenes as ch7Scenes } from '$lib/scenes/ch7';
 	import { scenes as endCardScenes } from '$lib/scenes/endcard';
 	import { scenes as sandboxScenes } from '$lib/scenes/sandbox';
 
@@ -37,6 +38,9 @@
 		// Two Dialects: the second league becomes a full character (beside the IPL
 		// path, not behind it) — and the control arm Chapter 7 needs.
 		...ch6Scenes,
+		// The Twelfth Man: the 2023 Impact Player rule as a natural experiment, with
+		// the rule-free WPL as the control group. Picks up the Ch 4 cliff.
+		...ch7Scenes,
 		...endCardScenes,
 		...sandboxScenes
 	];

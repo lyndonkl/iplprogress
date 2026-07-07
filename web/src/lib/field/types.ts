@@ -147,7 +147,8 @@ export type LayoutId =
 	| 'frontier'
 	| 'tide'
 	| 'worth'
-	| 'constellation';
+	| 'constellation'
+	| 'flow';
 
 /**
  * Which per-innings-phase star map is active in the Ch 6 constellation
@@ -197,7 +198,19 @@ export const LAYOUT_CODE: Record<LayoutId, number> = {
 	// The phase toggle lerps the 23 star centres between two precomputed tables
 	// (uStarMix), never a re-embed. Fixed data aspect (square), letterboxed like
 	// `worms`/`frontier`/`tide`/`worth`. No new per-point buffer. See CONTRACT §22.
-	constellation: 8
+	constellation: 8,
+	// Ch 7 controlling morph (free→flow): the twin rivers. Every ball condenses to
+	// its LEAGUE-SEASON RIVER CELL — x = the ball's season along a shared time axis
+	// (IPL 2008→2026 spans the width; WPL 2023→2026 shares the same season x's, a
+	// short ribbon), y = that league-season's RUN RATE on a fixed "runs an over"
+	// axis (a per-gi river table fed via setRiverTable, indexed in-shader by the
+	// ball's group id — the league bit comes free with the season group). A fixed
+	// DECORATIVE band thickness (a constant jitter, NOT a ball-count encoding) makes
+	// the ribbon read as a flowing band of its own balls; the two rivers run
+	// parallel then DIVERGE at 2023. `flowLift` reveals the post-fork climb (the
+	// divergence emphasis). Fixed data aspect, letterboxed like the others. No new
+	// per-point buffer (reuses group_ids.u16 + the attrs WPL bit). See CONTRACT §23.
+	flow: 9
 };
 
 /**
@@ -554,6 +567,36 @@ export interface FieldRenderState {
 	phaseTableB: ConstellationPhase | null;
 	/** 0 = pure table A · 1 = pure table B (the star-centre lerp) */
 	phaseMix: number;
+
+	/* ---- twin rivers (§23 capability — the Ch 7 flow layout) ------------------
+	 * The `flow` layout places every ball at its league-season river cell from the
+	 * per-gi river table fed via `field.setRiverTable`. `flowLift` is the ONE scalar
+	 * a scene drives over the held rivers: it lerps each river's centreline from the
+	 * table's flat BASELINE height (0) to its TRUE run-rate height (1) — the
+	 * divergence reveal (C7-3's "flat, then the post-2023 stretch lifts"). Only the
+	 * post-fork seasons move (the pipeline sets baseHeight == trueHeight for the
+	 * pre-rule seasons, so they never lift); with no baseHeights fed the lift is a
+	 * no-op (base == true). At flowLift 1 (the settled + reduced-motion end state)
+	 * the rivers sit at their TRUE heights — the honest picture. Read only while the
+	 * flow layout is in the A/B mix, so every prior scene renders byte-identically. */
+	/** 0 = rivers at the flat baseline · 1 = rivers at true run-rate heights (default 1) */
+	flowLift: number;
+
+	/* ---- impact-sub sparks (§23 capability — the Ch 7 subset lift) ------------
+	 * A cross-cutting LUMINANCE + small-lift glow over the per-point `aSpark` flag
+	 * (baked once via `field.setSparks`, the setRunouts precedent — the 517 impact-
+	 * sub deliveries). It composes with any layout (the sparks glow as they enter
+	 * the IPL river) and spends NO controlling morph. LUMINANCE/position only — hue
+	 * stays identity. Inactive at `sparkGlow` 0 (every prior scene byte-identical);
+	 * reversible (glow lerps back to 0). Drive `sparkGlow` across the hold from a
+	 * caption step via `SceneDef.dynamicState`, like the cascade sweep / rivers
+	 * engage. `sparkOthersDim` optionally damps non-spark points so the sparks pop. */
+	/** spark brightness/glow strength 0..1 (0 = inactive — no spark effect) */
+	sparkGlow: number;
+	/** world-units vertical lift for spark points while glowing */
+	sparkLift: number;
+	/** luminance × for non-spark points while sparks glow (1 = no dimming) */
+	sparkOthersDim: number;
 }
 
 export const DEFAULT_RENDER_STATE: FieldRenderState = {
@@ -611,5 +654,9 @@ export const DEFAULT_RENDER_STATE: FieldRenderState = {
 	railLift: 0.35,
 	phaseTableA: null,
 	phaseTableB: null,
-	phaseMix: 0
+	phaseMix: 0,
+	flowLift: 1,
+	sparkGlow: 0,
+	sparkLift: 0,
+	sparkOthersDim: 1
 };
