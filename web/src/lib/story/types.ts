@@ -6,6 +6,7 @@ import type {
 	FilterMode,
 	HighlightClass,
 	LayoutId,
+	ResortableClass,
 	ResortColumns,
 	RiversClass
 } from '$lib/field/types';
@@ -25,12 +26,16 @@ export type ChapterId =
 	| 'ch3'
 	| 'ch4'
 	| 'interlude'
+	| 'ch5'
 	| 'endcard'
 	| 'bowl';
 
 /** Uniform-driven subset highlight: lift/tint points matching a class mask. */
 export interface SubsetHighlight {
-	/** which points match: an outcome class ('six', 'four', …) or 'wicket' */
+	/**
+	 * which points match: an outcome class ('six', 'four', …), 'wicket', or
+	 * 'wpa' (Ch 5 §21 — the biggest win-chance swings, gated by `wpaThreshold`)
+	 */
 	class: HighlightClass;
 	/** world-units vertical lift for matching points (frustum is y ∈ [-1, 1]) */
 	lift: number;
@@ -43,6 +48,15 @@ export interface SubsetHighlight {
 	 * IPL's sixes lift while the WPL's stay on its shelf). Default false.
 	 */
 	skipWpl?: boolean;
+	/**
+	 * ONLY read when `class` is 'wpa' (Ch 5 §21): the minimum ABSOLUTE
+	 * win-chance swing (|ΔWP|, 0..1 — e.g. 0.3 = "moved the win chance by 30 in
+	 * 100 or more") a ball must carry to match. Resolved against the wpa.u8
+	 * byte encoding (|byte − 127| ≥ round(t × 127), floored at 1 so 0 never
+	 * matches the whole field); sentinel-255 balls (no honest tag: D/L,
+	 * undecided, short-target matches) never match. Default 0 → floor 1.
+	 */
+	wpaThreshold?: number;
 }
 
 /**
@@ -57,8 +71,8 @@ export interface SubsetHighlight {
  * on-device from attrs + group ids. See CONTRACT §7.
  */
 export interface SubsetResort {
-	/** which points re-sort: an outcome class ('six', …) or 'wicket' */
-	class: HighlightClass;
+	/** which points re-sort: an outcome class ('six', …) or 'wicket' ('wpa' is highlight-only) */
+	class: ResortableClass;
 	/** WPL points never re-sort — they stay on the wall (default false) */
 	skipWpl?: boolean;
 	/** which season groups become columns (default 'ipl' when skipWpl, else 'all') */
@@ -180,6 +194,86 @@ export interface Waterline {
 }
 
 /**
+ * The pricelens (§19 capability — the Ch 5 worth-grid color state). A
+ * cross-cutting COLOR state over the held `worth` layout, declared on a scene's
+ * `fieldState`. It composes with the layout and does NOT spend a second
+ * controlling morph (the Ch 4 fixed-columns/moving-water discipline: the grid
+ * holds, the prices move). Each table id names a 200-entry per-cell LUMINANCE
+ * table the scene fed ONCE via `field.setWorthTables()` (cell = over×10 +
+ * wicketsDown, the restate.u8 convention); the shader renders
+ * `mix(from, table, mix)` and then applies the §0.1 density-normalization gain
+ * (derived on-device from restate.u8 cell populations) so a cell's INTEGRATED
+ * brightness tracks its price, never its point count. LUMINANCE only — hue
+ * stays identity. The C5-6a era flip is `{ from: 'early', table: 'recent' }`
+ * with `mix` driven 0→1 from `SceneDef.dynamicState` (a post-morph field
+ * change, like the C1-5 tint / cascade sweep / waterline level); the dip-to-
+ * dark re-light staging is the scene driving `dim` down and back in the same
+ * dynamicState. A scene declaring no pricelens renders `worth` with the
+ * neutral ramp (density gain only); a no-op for every prior layout. An unknown
+ * / not-yet-fed table id renders the neutral ramp (dev-warned). See CONTRACT §19.
+ */
+export interface PriceLens {
+	/** the active table id ('early' | 'recent' | 'rise' | 'wpl' — scene-defined names) */
+	table: string;
+	/**
+	 * optional mix SOURCE table: when set, the lens renders mix(from, table, mix)
+	 * — the era flip / lens landing. Omitted → the lens is pure `table`.
+	 */
+	from?: string | null;
+	/**
+	 * 0 = pure `from` · 1 = pure `table` (default 1). Drive it across the hold
+	 * via `dynamicState` for the C5-6a flip; it lerps like any scalar between
+	 * scenes that declare the same pair.
+	 */
+	mix?: number;
+}
+
+/**
+ * The over rail (§20 capability — the Ch 5 set-piece six-ball lift). A
+ * cross-cutting subset modifier (like `resort` / `cascade` / `rivers`: it
+ * composes with any base layout and spends NO controlling morph): the named
+ * field points — a tiny index set, the six(+) deliveries of ONE over, from
+ * `scenes/ch5.json` — lift out of the field and fly to viewport-anchored rail
+ * slots as `progress` scrubs 0→1, enlarging to hero size; the REST of the
+ * field dims hard behind them (set-piece dimming). The flying balls render in
+ * a dedicated GL OVERLAY draw on top of the 316k field so a hero ball is never
+ * fogged by later-indexed points; the DOM ball chips (names and numbers) are
+ * the SCENE's job, anchored to the slots via `field.projectToCss`, and the WP
+ * worm is the SCENE's SVG on the annotation plane. Fully reversible: drive
+ * `progress` from `SceneDef.dynamicState` (the C5-3 GSAP scrub maps its scroll
+ * progress straight onto it, so a stray scroll can never desync the rail from
+ * the captions), and the NEXT scene declaring no overrail lerps `progress`
+ * back to 0 — the balls return to their exact field positions (the reverse leg
+ * is free). Reduced motion: the resolved end state renders the balls AT their
+ * slots instantly (the scene's six-panel DOM strip carries the fallback
+ * content). Inactive (empty `indices`) = byte-identical for every prior scene.
+ * See CONTRACT §20.
+ */
+export interface OverRail {
+	/** field point indices of the over's balls, bowling order (≤ 8, from scenes/ch5.json) */
+	indices: readonly number[];
+	/**
+	 * per-ball slot anchors as VIEWPORT FRACTIONS [x, y] (x 0 left → 1 right,
+	 * y 0 top → 1 bottom — CSS-like, so a slot projects to the same spot the
+	 * scene's DOM chip occupies). One per index; missing slots default to an
+	 * evenly-spaced row across the middle of the viewport.
+	 */
+	slots?: readonly (readonly [number, number])[];
+	/** 0 = balls in the field · 1 = balls at their slots (drive via dynamicState) */
+	progress: number;
+	/**
+	 * luminance×alpha for the REST of the field at progress 1 (default 0.06 —
+	 * dims hard; note alpha dims SATURATE on dense layouts because overlapping
+	 * points re-accumulate coverage, so values above ~0.1 read barely dimmed)
+	 */
+	dimRest?: number;
+	/** hero point-size multiplier at the slots (default 7) */
+	scale?: number;
+	/** world-units peak of the flight arc (default 0.35) */
+	lift?: number;
+}
+
+/**
  * A scene's declarative field state — the layout the field ARRIVES at while
  * the scene scrubs in, plus the cross-cutting uniform states. Omitted fields
  * take the defaults in fieldstate.ts (reveal 1 · dim 1 · wplDim 1 · labels 0 ·
@@ -205,6 +299,10 @@ export interface SceneFieldState {
 	rivers?: SubsetRivers | null;
 	/** rising going-rate level that drowns first-innings columns below it over the tide skyline, or null/omitted for none (§18) */
 	waterline?: Waterline | null;
+	/** per-cell price recolor over the worth grid, or null/omitted for the neutral ramp (§19) */
+	pricelens?: PriceLens | null;
+	/** the set-piece six-ball lift to viewport-anchored rail slots, or null/omitted for none (§20) */
+	overrail?: OverRail | null;
 	/** whether the picked team's balls stay ignited (default true — §2 standing rule) */
 	teamIgnite?: boolean;
 	/**

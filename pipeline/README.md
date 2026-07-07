@@ -1,10 +1,11 @@
-# Pipeline — "Every Ball Ever" R0 + R1a + R2a
+# Pipeline — "Every Ball Ever" R0 + R1 + R2 + R3
 
 Python 3, **stdlib only** (json, gzip, struct/array, pathlib, unittest). Flattens the
 Cricsheet ball-by-ball corpus (`data/ipl_json/*.json`, `data/wpl_json/*.json`) into the
-R0 data-contract artifacts, the R1a addendum (cold open + Chapter 1), and the R2a
-engine tables (engine #1 par/SR+ + engine #5 entry states, first needed by Chapter 2)
-under `web/static/data/`.
+R0 data-contract artifacts, the R1a addendum (cold open + Chapter 1), the R2a
+engine tables (engine #1 par/SR+ + engine #5 entry states, first needed by Chapter 2),
+the R2b/R3a chapter artifacts, and the R3b consumables (the Net Session interlude +
+Chapter 5's WPA/restate buffers and scene doc) under `web/static/data/`.
 
 ## Run everything
 
@@ -19,6 +20,7 @@ python3 pipeline/flatten.py \
   && python3 pipeline/wp.py \
   && python3 pipeline/interlude.py \
   && python3 pipeline/bowlerplane.py \
+  && python3 pipeline/ch5.py \
   && python3 pipeline/payoff_harness.py \
   && python3 pipeline/ledger.py \
   && python3 -m unittest discover -s pipeline/tests -q
@@ -40,6 +42,10 @@ never edits an engine, only re-projects it; `bowlerplane.py` (R2b, engine #1
 family) emits the **`bowlerplane.u8`** per-point buffer (the Chapter-3 economy x
 strike-rate morph coordinate) and registers it in `meta.json` — it must run **after**
 `flatten`/`scenes` (which write `meta.json`) so the manifest stays byte-deterministic;
+`ch5.py` (R3b-2) consumes the two gate-validated engine JSONs (never rebuilding them)
+and emits Chapter 5's `wpa.u8` + `restate.u8` per-point buffers and `scenes/ch5.json`,
+registering all three in `meta.json` — it runs **after** `re288.py`/`wp.py` (it reads
+their output) and after `flatten`/`scenes`/`bowlerplane` (manifest order);
 `payoff_harness.py` emits `payoff/ch1.json`;
 `ledger.py` audits everything on disk against the blueprint §2 budgets. The harness and
 the ledger exit non-zero on failure. The whole build runs in seconds and is **byte-for-byte
@@ -59,6 +65,7 @@ verified by rebuilding and diffing checksums.
 | `re288.py` | **Engine #2** (parallel track, consumed R3b) — RE288 run-expectancy surfaces. Emits `engines/re288.json`: expected first-innings runs-to-come on the (overs-bowled × wickets-lost) grid, per era band + evidence-masked pooled WPL, weighted-isotonic-smoothed so runs-to-come is monotone in both axes. Gate-tested by `tests/test_engines.py`. |
 | `wp.py` | **Engine #3** (parallel track, consumed R3b) — win-probability lookup grids + Leverage Index. Emits `engines/wp_grid.json`: P(chase win) on the (era × overs-left × wickets-in-hand × required-rate) grid (monotone in rate & wickets), the LI byproduct on the pooled grid, and the first-innings defend curve. Gate-tested by `tests/test_engines.py` (the binding calibration check). |
 | `interlude.py` | **R3b — the Net Session interlude scene.** Consumes the gate-validated `engines/wp_grid.json` (win) + `engines/re288.json` (runs) and emits `scenes/interlude.json`: both dials re-indexed to one widget coordinate `[overs_left-1][wickets_in_hand-1]` (win adds a required-rate bucket), per era band + an all-time pooled default (win from `ipl pooled`; runs **derived** here — RE288 ships no IPL-pooled surface — as the evidence-weighted mean of the five era surfaces, monotone-repaired with the engine's own isotonic step) + the WPL toggle with both evidence masks (win `n<12`, runs `n<15`). Resolves three presets from the grids (**"Dhoni, 2011 final"** read from the corpus as the real chase-of-206 state; **"needing 10 an over at halfway, 2010"** and **"the same chase, 2025"** — one scoreboard, two era surfaces), the validated era anchor, and data-bound footnotes (calibration, wicket-lever-early/rate-lever-late, mask thresholds). Every preset's quoted number is the exact grid readout at its cell, so the copy can never contradict the meter. Reads engines only; never edits them. |
+| `ch5.py` | **R3b-2 — Chapter 5 "What a Ball Is Worth".** Consumes the gate-validated `engines/wp_grid.json` + `engines/re288.json` (never rebuilds them; adds two documented derived views: mid-first-innings WP = the era defend curve at a projected total of runs-so-far + RE runs-to-come, interpolated between bucket midpoints — exactly the view `wp.py` designates for R3b — and per-ball RE by interpolating the era surface across the over axis). Emits the **`wpa.u8`** per-point buffer (signed-quantized WPA, batting-team perspective, sentinel 255 for D/L / undecided / short-target matches — the matches the grids exclude), the **`restate.u8`** per-point buffer (the ball's RE-grid cell, `over*10 + wickets_down`, the controlling-morph coordinate), and `scenes/ch5.json` (defended band, RE drift + third-wicket validation, linear weights + per-season price board, Wicket Value Index, finisher cliff, the 2019-final scrub over + WP worm, league WPA headlines, 20 franchise payoff cards with tappable over replays, WPL beats, footnotes incl. the demoted chase-difficulty + era-swap exhibits, and both buffer decode specs). The scrub match and the era-swap innings resolve **by identity**, never a hard-coded index. |
 | `payoff_harness.py` | Payoff-card snapshot harness: emits + asserts the 16 Chapter-1 variants (R1a full spec). |
 | `ledger.py` | Payload ledger vs the §2 budgets; prints the table; writes `ledger.json`. |
 | `tests/` | `unittest` snapshot tests (see below). |
@@ -113,6 +120,9 @@ index, over, delivery index):
 | `scenes/interlude.json` **(R3b)** | The Net Session two-dial widget. `state_space` + `index` (the widget coordinate: `win[era][overs_left-1][wickets_in_hand-1][rrr_bucket]`, `runs[era][overs_left-1][wickets_in_hand-1]`, with the `rrr_edges`); `surfaces.win` (20×10×10 per era, engine #3 verbatim) + `surfaces.runs` (20×10 per era, engine #2 re-indexed, plus a derived `ipl pooled` default); `wpl` (both evidence masks + evidenced/masked cell counts + the "not enough WPL cricket yet" note); `presets` (Dhoni 2011 final + the same-chase-two-eras pair, each with `win_pct`/`expected_runs` equal to their grid cell and voice-guide copy); `era_anchor` (the validated ~23%→~31% headline + `delta_points`); `meters`/`sliders`/`intro` copy; `footnotes` (calibration, wickets-early/rate-late, mask thresholds). ~120 KB raw / ~23 KB gz. |
 | `scenes/ch3.json` **(R2b)** | Chapter 3 "The Counterrevolution". `frontier` (the Attack-Containment plane: `under7` share per era + season, the per-league-season Pareto `hull`, the Ashwin `ghost_trail`, the refuted econ~SR `correlation`, and the `axis` encoding the buffer shares), `dot_plus` (season dot rate + Dot+ leaderboard + dot-scarcity index), `dismissal_dna` (era shares + per-season `rivers` counts), `death_wide_tax` (per-season death wides/100 + the doubling), `dot_grid` (the 2009 + 2026 Finals as 120-cell outcome grids), `crack_ratio` (middle-overs, per era), `wpl_beat` (the two clocks), `gravity_defiers` (20 franchise True-Economy cards), `footnotes` (True Economy 7.79→9.38, True Wickets/24, Phase Fingerprint, FIB, the refuted correlation, conventions), and `bowlerplane_buffer` (the `bowlerplane.u8` decode spec). |
 | `bowlerplane.u8` **(R2b)** | Per-point buffer, **2 bytes/point** in the field point order (season-blocked, super overs excluded — identical to the other buffers). Byte 0 = the delivery's bowler-season economy, quantized linearly over [4.0, 16.0] RPO → 0..254 (clamped); byte 1 = its bowling strike rate over [8.0, 60.0] legal-balls-per-wicket → 0..254 (clamped), `255` = the "no strike rate" sentinel (the bowler-season took no bowler-credited wicket). Lets the field condense every ball toward its bowler-season's coordinate on the economy × strike-rate plane (Ch 3's controlling morph). Wides/no-balls carry their bowler-season coordinate like any delivery; every delivery has a bowler, so there are no non-bowler deliveries. Decode: `economy = 4 + b0/254*12`; `strike_rate = 8 + b1/254*52` (b1 < 255). |
+| `wpa.u8` **(R3b-2)** | Per-point buffer, 1 byte/point in field point order: the ball's **Win Probability Added** from the **batting team's** perspective. `byte = 127 + round(wpa*127)` clamped to 0..254 (decode `wpa = (byte-127)/127`, so 127 = 0, resolution ~0.008); **255 = sentinel** "no WPA" — the ball's match is D/L, had no decided result, or set a chase target other than a full 20 overs (6,579 balls, exactly the matches the win grids exclude). Second innings reads the era grid at (overs_left, wickets in hand, required-rate bucket); first innings uses the documented projected-total defend view; terminal balls resolve to the actual result (ties to the super-over winner), so per-chase WPA telescopes exactly to (result − first-state WP). Powers the biggest-swing subset-highlights. |
+| `restate.u8` **(R3b-2)** | Per-point buffer, 1 byte/point in field point order: the ball's RE-grid state cell packed `over*10 + wickets_down` (0..199). `over` = the delivery's over index 0..19 (wides/no-balls carry the over they were bowled in); `wickets_down` = dismissals before this delivery (0..9). Both innings packed; filter with the columnar `innings` array if a scene wants first innings only. Drives the Chapter 5 controlling morph (balls arrayed on the 20-over × 10-wicket grid, colored by the era RE surfaces in `scenes/ch5.json` / `engines/re288.json`). |
+| `scenes/ch5.json` **(R3b-2)** | Chapter 5 "What a Ball Is Worth": `defended_band` (170-189, raw + fitted, per era), `re_drift` (both engine surfaces + diff + the third-wicket validation), `linear_weights` (per era) + `price_board` (per season), `wicket_value` (+ the 2024-26 window + run-inflation context), `finisher` (the moving cliff), `scrub` (the 2019 final last over, ball-by-ball, WP worm + observed endgame dots + `point_indices`, the six field point indices the over-rail lifts — never client-derived), `wpa` (league headlines, top-10 swings, `season_gallery` — one ball per league-season for the neutral payoff gallery — closure + coverage; swing rows carry `point_index` + `state_cell`), `payoff` (20 franchise cards: most valuable ball ever + tappable over replay + 4 runners-up, WPL short-history state; every ball row carries `point_index` + `state_cell` for the C5-11 single-point ignite), `wpl_beat` (RE evidence mask + observed-outcome dots + finisher cohort + `match_counts`, the corpus-counted 88/1,331 the C5-10 captions bind to), `footnotes` (crediting, tie rule, first-innings WP view, smoothing, chase-difficulty + era-swap demoted exhibits), and both buffer decode specs. |
 | `ledger.json` | the payload audit (build report, excluded from its own budget math) |
 
 ## R1a recipe pins (metric definitions that reconcile with the catalog teasers)
@@ -312,6 +322,66 @@ catalog gives a teaser, reconciled **exactly** (the pipeline artifact is authori
   `expected_runs_per_ball` for every (league, season, phase), so Ch 3 can never drift from
   engine #1.
 
+## Chapter 5 recipe pins (R3b-2 — "What a Ball Is Worth")
+
+Every number is recounted independently by `tests/test_ch5.py`; the artifact is
+authoritative over the catalog teasers (which were read on an earlier corpus
+snapshot). Era bands are the engines' (2008-10 vs 2023-26 unless stated).
+
+- **Defended band (the repriced scoreboard):** first-innings totals **170-189**,
+  full first innings (120 legal balls or all out), decided (ties to the
+  super-over winner), non-D/L: **30/41 = 73.2% (2008-10) → 21/54 = 38.9%
+  (2023-26)**; WPL 9/14. (Catalog 74% → 38%.) The fitted defend-curve readout
+  over the same buckets ships alongside (~0.70 → ~0.40).
+- **Third-wicket collapse (RE Surface Drift):** raw observed runs-to-come at the
+  **start of the 7th over** (6 overs bowled), 2 down vs 3 down, IPL first
+  innings, non-D/L: cost **11.81 (2008-10) → 3.48 (2023-26)**, and **1.04** on
+  the catalog's sharper **2024-26** window (its ~0.4 was an earlier snapshot;
+  RE(7th over, 2 down) = 110.3 matches the catalog exactly). The smoothed
+  engine surfaces read 12.07 → 6.39 at the same cell (isotonic smoothing spreads
+  thin-cell evidence); both ship, labelled.
+- **Linear weights (the price board):** `weight = RE(after) − RE(before) + runs
+  on the ball`, era RE surface interpolated across the over axis, **first
+  innings, non-D/L**; wicket balls priced as one wicket event and excluded from
+  run classes. **Dot −0.898 → −1.115; single −0.013 → −0.248 (the flip:
+  value-neutral to value-losing); six +4.76 → +4.59; wicket event −6.96 →
+  −7.62.** (Catalog: dot −0.85 → −1.12, single −0.01 → −0.27.) The per-season
+  price board prices each season's balls on its era band's surface.
+- **Wicket Value Index:** each **bowler-credited** wicket priced `R(state, w) −
+  R(state, w+1)` at its exact (legal balls bowled, wickets) state from **raw
+  observed runs-to-come cells over both innings**, non-D/L (chase truncation is
+  real evidence): **4.155 → 5.113 (+23.1%)** across the chapter's era bands vs
+  run inflation **+18.8%** — wickets appreciated faster than runs. On the
+  catalog's 2024-26 window: **5.51 (+32.6%)**, reproducing its "+33%" (its
+  3.99 → 5.30 was the same recipe on an earlier snapshot).
+- **Finisher / the moving cliff:** chases read at **exactly 30 balls left**,
+  20-over targets, non-D/L, decided; bands of required rate. **8-10 RPO: 17/31 =
+  54.8% → 35/41 = 85.4%** (catalog 54.8 → 85.0); 10-12: 34.6% → 50.0% (catalog
+  34.6 → 51.4); 12+: ~12% both eras. The **fatal RRR** (chase becomes a loser
+  more often than not) moved **~10 → ~12**. WPL 8-10: **9/11 = 81.8%** (catalog
+  ~75% on the earlier snapshot) — between the IPL eras on a tiny sample.
+- **The scrub over (set piece #2):** resolved **by identity** (2019 IPL Final,
+  MI beat CSK by 1 run) to `match_index` **755**; innings 2, over 19 (the 20th),
+  Malinga bowling all six: Watson 1, Jadeja 1, Watson 2, Watson 1 + **run out**,
+  Thakur 2, **Thakur lbw** — needed-before 9/8/7/5/4/2, CSK from WP 0.715 to 0.
+  The worm is the era-correct grid readout (`ipl 2016-2019`); because the grid
+  buckets required rate, three balls hold flat, so each ball also carries the
+  raw all-IPL `observed` (needed, balls-left) win count as honest dot texture.
+- **WPA buffer conventions:** batting-team perspective; sentinel = the 6,579
+  balls of D/L (23) / undecided / short-target matches; per-chase closure is
+  exact (max telescoping gap ~3e-16, asserted). Mean |WPA| per ball is ~flat
+  across eras (0.013-0.016): modern cricket repriced outcomes, it did not get
+  swingier ball-for-ball.
+- **Payoff:** per franchise (all 20, league-scoped ids, renames collapse), the
+  biggest positive swing toward the team batting **or bowling**; runners-up from
+  distinct matches; the top ball ships its full over as a tappable replay with a
+  team-perspective worm. MI's card is DR Smith's last-ball four off Hilfenhaus
+  (2012, +0.988); WPL cards carry the designed short-history state.
+- **Demoted footnote exhibits:** chase difficulty (30-42 off the last 24, 5+
+  wickets in hand): **67.6% → 88.1%** (catalog 69 → 88); era swap: Gilchrist's
+  2008 chase hundred — the same target's failure chance at ball one, 29 in 100
+  on the 2008-10 grid vs 16 in 100 on the 2023-26 grid.
+
 ## Budgets (ledger) — actuals
 
 - **Cold-open critical set** (`meta.json` + `groups.json` + `group_ids.u16` +
@@ -340,8 +410,14 @@ catalog gives a teaser, reconciled **exactly** (the pipeline artifact is authori
   points; the bowler-season coordinate runs constant within a bowler's spell, so it gzips
   hard), ch3.json **9,479 B gz** (frontier hull + ghost trail + Dot+/DNA/death-wide series +
   the two 120-cell grids + 20 gravity-defier cards + footnotes).
-- Full read-through ≤ 25 MB gz → actual ~1.58 MB gz (R2a engines + the parallel track + the
-  R2b Ch 3 buffer).
+- **Chapter 5** (`scenes/ch5.json` + `wpa.u8` + `restate.u8`, lazy-loaded at Ch 5 entry):
+  ≤ 2 MB gz → actual **170,191 B gz**. wpa.u8 316,199 B raw / **104,365 B gz** (the
+  swing bytes vary ball to ball, so it compresses least of the buffers), restate.u8
+  316,199 B raw / **42,462 B gz** (the state cell steps slowly within an innings),
+  ch5.json **23,364 B gz** (two 20×10 RE grids + diff, the price board, 20 payoff cards
+  with replays, the scrub over, footnotes).
+- Full read-through ≤ 25 MB gz → actual ~1.80 MB gz (R2a engines + the parallel track + the
+  R2b/R3a/R3b chapter buffers).
 - The `ledger.py` rows enumerate exactly the shipped filenames (no phantom
   `draw/truth.json` / `ch1/outrate.json` rows — those never shipped; the R1a scene
   data lives in `scenes/coldopen.json` + `scenes/ch1.json`).
@@ -349,7 +425,7 @@ catalog gives a teaser, reconciled **exactly** (the pipeline artifact is authori
 ## Tests
 
 ```sh
-python3 -m unittest discover -s pipeline/tests -q     # 193 tests
+python3 -m unittest discover -s pipeline/tests -q     # 282 tests
 ```
 
 - `test_canon.py` — canonicalization tables exhaustive over the corpus in **both**
@@ -456,6 +532,29 @@ python3 -m unittest discover -s pipeline/tests -q     # 193 tests
   (~0.23 → ~0.31); the WPL win mask flags only `n<12` cells and the runs mask only `n<15` cells,
   counts consistent, never all / never none; the wicket-lever footnote is true in the emitted grid
   (early ≫ late). On-disk == a fresh `build_doc()` byte-for-byte, within the 2 MB chapter budget.
+
+- `test_ch5.py` **(R3b-2, Chapter 5)** — `scenes/ch5.json` + `wpa.u8` + `restate.u8`:
+  buffer contracts (both n_points long; restate round-trips against an independent
+  per-delivery recount of the 2019 final and packs only possible states; the wpa
+  sentinel set equals an independent per-match classification of D/L / undecided /
+  short-target matches; fresh re-encode == bytes on disk); the **famous-ball spot
+  check** (Malinga to Thakur, the final ball of the 2019 final: the buffer byte
+  decodes to −(era-grid readout at needed 2, 1 ball, 4 in hand), the exact number
+  the scrub quotes — and MI's payoff ball is Smith's 2012 last-ball four, +0.988);
+  **WPA consistency** (per-chase telescoping to the result, sampled corpus-wide from
+  the decoded buffer, plus the exact closure gap in the doc); the **scrub over
+  matching the raw 2019 final delivery-for-delivery** (batters/bowler/runs/wickets,
+  needed 9/8/7/5/4/2, identity-resolved match_index 755, worm == grid readout, final
+  ball resolves to 0); the **validations** (defended band 30/41 → 21/54, single flip
+  −0.013 → −0.248 + dot deepening, third-wicket 11.81 → 3.48/1.04, Wicket Value
+  appreciation above run inflation + the 2024-26 window, finisher 17/31 → 35/41 with
+  the fatal band moving 10 → 12, chase-difficulty 25/37 → 37/42, RE-drift grids ==
+  engine verbatim, the price board covering all 23 seasons); the **payoff** (20
+  cards, no empty states, real corpus-verifiable balls, replays containing their top
+  ball, distinct-match runners-up, the WPL designed short-history state); the **WPL
+  beat** (mask == engine verbatim; observed dots only on masked cells with evidence,
+  values matching the engine's n; finisher cohort 9/11 between the eras); and
+  determinism + the 2 MB chapter budget + meta.json registration.
 
 Snapshot constants live at the top of each test file; a new Cricsheet drop that changes
 the corpus must update them consciously.

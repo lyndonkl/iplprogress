@@ -114,16 +114,20 @@
 	});
 
 	/* ---- set-piece morph in flight → nav dims (storyboard §6). A set piece is
-	   a big field move: a layout change (ignition wall, close return) OR a
-	   reveal scrub (the assembly). Detected structurally so no scene id is
-	   hard-coded here. Never in flight under reduced motion (jump-cut). */
+	   a big field move: a layout change (ignition wall, close return), a
+	   reveal scrub (the assembly), OR an over-rail engage/release (the Ch 5
+	   six-ball lift — CONTRACT §20.3: "either side declares an overrail").
+	   Detected structurally so no scene id is hard-coded here. Never in
+	   flight under reduced motion (jump-cut). */
 	const setPieceInFlight = $derived.by(() => {
 		if (reduced) return false;
 		const cur = currentIdx;
 		const scene = scenes[cur];
 		const to = scene.fieldState;
 		const from = scene.fromState ?? (cur > 0 ? scenes[cur - 1].fieldState : to);
-		const bigMove = from.layout !== to.layout || (from.reveal ?? 1) !== (to.reveal ?? 1);
+		const railMove = (from.overrail != null) !== (to.overrail != null);
+		const bigMove =
+			from.layout !== to.layout || (from.reveal ?? 1) !== (to.reveal ?? 1) || railMove;
 		if (!bigMove) return false;
 		const t = progresses[cur] / morphFraction(scene);
 		return t > 0.001 && t < 0.999;

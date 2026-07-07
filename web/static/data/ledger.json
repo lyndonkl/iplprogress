@@ -67,12 +67,16 @@
    "bytes_gz": 20686
   },
   "meta.json": {
-   "bytes_raw": 1157,
-   "bytes_gz": 428
+   "bytes_raw": 1312,
+   "bytes_gz": 461
   },
   "payoff/ch1.json": {
    "bytes_raw": 20655,
    "bytes_gz": 3108
+  },
+  "restate.u8": {
+   "bytes_raw": 316199,
+   "bytes_gz": 42462
   },
   "scenes/ch1.json": {
    "bytes_raw": 37434,
@@ -89,6 +93,10 @@
   "scenes/ch4.json": {
    "bytes_raw": 43409,
    "bytes_gz": 10274
+  },
+  "scenes/ch5.json": {
+   "bytes_raw": 135010,
+   "bytes_gz": 25375
   },
   "scenes/coldopen.json": {
    "bytes_raw": 3720,
@@ -113,6 +121,10 @@
   "wallheat.u8": {
    "bytes_raw": 316199,
    "bytes_gz": 146050
+  },
+  "wpa.u8": {
+   "bytes_raw": 316199,
+   "bytes_gz": 104365
   }
  },
  "checks": [
@@ -130,7 +142,7 @@
     "scenes/coldopen.json"
    ],
    "budget_gz": 3000000,
-   "actual_gz": 405964,
+   "actual_gz": 405997,
    "pass": true
   },
   {
@@ -194,6 +206,17 @@
    "pass": true
   },
   {
+   "name": "chapter ch5 (scene + wpa/restate buffers)",
+   "files": [
+    "scenes/ch5.json",
+    "wpa.u8",
+    "restate.u8"
+   ],
+   "budget_gz": 2000000,
+   "actual_gz": 172202,
+   "pass": true
+  },
+  {
    "name": "engines (ch2 par/entry + R3b parallel-track re288/wp_grid)",
    "files": [
     "engines/entry.json",
@@ -227,19 +250,22 @@
     "matches.json",
     "meta.json",
     "payoff/ch1.json",
+    "restate.u8",
     "scenes/ch1.json",
     "scenes/ch2.json",
     "scenes/ch3.json",
     "scenes/ch4.json",
+    "scenes/ch5.json",
     "scenes/coldopen.json",
     "scenes/interlude.json",
     "scenes/sandbox.json",
     "team.u8",
     "teams.json",
-    "wallheat.u8"
+    "wallheat.u8",
+    "wpa.u8"
    ],
    "budget_gz": 25000000,
-   "actual_gz": 1628283,
+   "actual_gz": 1800518,
    "pass": true
   }
  ],

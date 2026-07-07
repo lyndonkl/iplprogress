@@ -58,10 +58,16 @@
  *                 y, §13; binds zeros until the pipeline ships cumruns.u8)
  *   aRunOut     = run-out membership flag 0/1 (worm-space cascade, §14; seeded
  *                 from attrs bit 6, overridable via field.setRunouts — no wire cost)
+ *   aPrice      = packed Ch 5 record (CONTRACT §19/§21): restate.u8 state-cell
+ *                 byte (bits 0-7 — the worth-grid position) + wpa.u8 byte × 256
+ *                 (bits 8-15 — the WPA subset-highlight; 255 = sentinel). Baked
+ *                 on-device from the two optional buffers (attribute budget).
  *   aMatchIndex = per-delivery match index (u16, OPTIONAL — only present when
  *                 the pipeline ships match_index.u16; gates the uFilterMatch
  *                 facet + the exact-match tooltip. See CONTRACT §12.4.)
  */
+
+import { RAIL_MAX_SLOTS, WORTH_CELL_FILL } from './layout';
 
 /** Fraction of the reveal range a point spends "raining in" (assembly layout). */
 export const ASSEMBLY_RAIN_WINDOW = 0.045;
@@ -101,6 +107,14 @@ export const CASCADE_FLASH_WINDOW = 0.05;
  * this must move with it.
  */
 export const WALLHEAT_NEUTRAL_BYTE = 73;
+
+/**
+ * Per-ball flight stagger (in `railProgress` units) between adjacent rail slots
+ * (Ch 5 §20): ball 1 leads, ball 6 trails, so the over lifts out as a readable
+ * left-to-right wave rather than a teleport. The progress ramp is over-driven
+ * (×1.25) so the LAST ball still completes at progress 1.
+ */
+export const RAIL_STAGGER = 0.05;
 
 /* ---------------------------------------------------------------------------
  * Shared GLSL — the position + visibility core. Used verbatim by BOTH the
@@ -219,6 +233,42 @@ uniform float uTideX[GROUP_COUNT]; // per-group season block centre x (world)
 uniform float uWaterLevel;      // going-rate level in RUNS; column total < this drowns. -1 = inactive
 uniform float uWaterDrownDim;   // luminance × for a drowned column (1 = no dimming)
 uniform float uWaterTeamKeep;   // 1 = the picked team's columns stay lit even when drowned
+
+// ---- Worth grid (Ch 5, §19). Fixed-aspect, letterboxed 20-over × 10-wicket
+//      state grid; positions in-shader from the packed aPrice attribute (cell =
+//      over×10 + wicketsDown from restate.u8). The pricelens tables live in a
+//      200×N RG float data texture: R = the cell's price LUMINANCE (0..1, the
+//      scene's table) · G = the cell's DENSITY GAIN (client-derived from the
+//      cell's point count, §0.1) — one row per table id fed via setWorthTables.
+uniform float uWorthLeft;     // world x at over 0 (the grid's left edge)
+uniform float uWorthWidth;    // world width across the 20 overs
+uniform float uWorthBottom;   // world y at 9 wickets down (the grid's bottom edge)
+uniform float uWorthHeight;   // world height (0 wickets down at the TOP)
+uniform highp sampler2D uWorthTex; // 200×N RG float pricelens rows (lum, gain) —
+                              // highp: the default lowp sampler would quantize the
+                              // small density gains (min 0.02) into visible banding
+uniform int uWorthRowA;       // pricelens table row A (-1 = neutral ramp)
+uniform int uWorthRowB;       // pricelens table row B (-1 = neutral ramp)
+uniform float uWorthMix;      // 0 = pure row A · 1 = pure row B (the era-flip lerp)
+
+// ---- WPA subset-highlight (Ch 5, §21). Only read while uHlClass == 7: a point
+//      matches iff |wpaByte − 127| ≥ uHlWpaMin and the byte isn't the 255
+//      sentinel ("no WPA": D/L, undecided, short-target matches).
+uniform float uHlWpaMin;      // min |wpaByte − 127| to match (byte units, ≥ 1)
+
+// ---- Over rail (Ch 5, §20). The set-piece six-ball lift: the named points fly
+//      to viewport-anchored slots as uRailProgress scrubs 0→1; everything else
+//      dims by uRailDim. Members are CULLED from the main pass and drawn by a
+//      dedicated RAIL_OVERLAY pass on top of the field (draw-order honesty: a
+//      hero ball must never be fogged by later-indexed points). Inactive at
+//      uRailN == 0, so every prior scene renders byte-identically.
+uniform int uRailN;                // active rail slots (0 = inactive)
+uniform float uRailIdx[RAIL_MAX];  // field point index per slot (bowling order)
+uniform vec2 uRailSlot[RAIL_MAX];  // viewport-fraction anchors (x 0 left→1 right, y 0 top→1 bottom)
+uniform float uRailProgress;       // 0 = balls in the field · 1 = balls at their slots
+uniform float uRailDim;            // rest-of-field luminance×alpha at progress 1
+uniform float uRailScale;          // hero point-size multiplier at the slots
+uniform float uRailLift;           // world-units peak of the flight arc
 `;
 
 /** Core per-point attributes (both shaders read these). */
@@ -239,6 +289,10 @@ in float aTide;     // packed tide record (§18), baked on-device to stay within
                     // byte×2, tide y), within-season packing slot quantized 0..1023
                     // (bits 8-17; tide x, innings ranked short→tall), first-innings
                     // flag (bit 18; 0 routes the ball to the reservoir haze)
+in float aPrice;    // packed Ch 5 record (§19/§21), baked on-device (attribute
+                    // budget): state-cell byte from restate.u8 (bits 0-7; cell =
+                    // over×10 + wicketsDown, worth-grid position) + WPA byte from
+                    // wpa.u8 × 256 (bits 8-15; 127 = zero swing, 255 = sentinel)
 ${hasMatch ? 'in float aMatchIndex; // per-delivery match index (u16)' : ''}
 `;
 }
@@ -254,12 +308,13 @@ uint pcg(uint v) {
 }
 const float INV32 = 1.0 / 4294967296.0;
 
-vec3 pickLayout(int id, vec3 pFree, vec3 pCols, vec3 pWall, vec3 pWorms, vec3 pFrontier, vec3 pTide) {
+vec3 pickLayout(int id, vec3 pFree, vec3 pCols, vec3 pWall, vec3 pWorms, vec3 pFrontier, vec3 pTide, vec3 pWorth) {
 	if (id == 1) return pCols;
 	if (id == 2) return pWall;
 	if (id == 4) return pWorms;
 	if (id == 5) return pFrontier;
 	if (id == 6) return pTide;
+	if (id == 7) return pWorth;
 	return pFree; // 0 free · 3 assembly share the free-field scatter
 }
 
@@ -304,6 +359,11 @@ struct Core {
 	float tideWeight;    // 0..1 amount of the tide layout in the A/B mix (drown / reservoir gate)
 	bool tideFirst;      // builds a tide column (aTide bit 18) — vs the reservoir haze
 	float tideTotal;     // decoded innings total in RUNS (byte × 2) — the waterline drown test
+	float worthWeight;   // 0..1 amount of the worth layout in the A/B mix (pricelens gate)
+	float worthCell;     // decoded state cell 0..199 (aPrice bits 0-7) — pricelens texel x
+	float wpaByte;       // decoded WPA byte 0..255 (aPrice bits 8-15; 255 = sentinel)
+	bool railMember;     // one of the over rail's named points (§20)
+	float railT;         // 0..1 flight progress toward the rail slot (overlay pass only)
 };
 
 Core computeCore() {
@@ -428,13 +488,29 @@ Core computeCore() {
 		);
 	}
 
+	// worth grid (Ch 5, §19): cell = over×10 + wicketsDown (restate.u8 byte in
+	// aPrice bits 0-7). x = the over (0 left → 19 right), y = wickets fallen
+	// (0 at the TOP → 9 at the bottom), deterministic jitter packing the cell
+	// body (WORTH_CELL_FILL of the pitch — the gutter keeps cells readable).
+	// This matches worthCell() in layout.ts exactly, so annotation-plane rings
+	// and hatches can never drift from the GL cells.
+	o.worthCell = min(mod(aPrice, 256.0), 199.0);
+	o.wpaByte = floor(aPrice / 256.0);
+	float wOver = floor(o.worthCell / 10.0);
+	float wDown = o.worthCell - wOver * 10.0;
+	vec3 posWorth = vec3(
+		uWorthLeft + ((wOver + 0.5 + (h4 - 0.5) * WORTH_CELL_FILL) / 20.0) * uWorthWidth,
+		uWorthBottom + (1.0 - (wDown + 0.5 + (h2 - 0.5) * WORTH_CELL_FILL) / 10.0) * uWorthHeight,
+		(h3 - 0.5) * 0.25
+	);
+
 	// morph with per-point stagger so the field streams, not teleports
 	float delay = h3 * 0.55;
 	float t = clamp(uProgress * 1.55 - delay, 0.0, 1.0);
 	t = t * t * (3.0 - 2.0 * t);
 	vec3 pos = mix(
-		pickLayout(uLayoutA, posFree, posCols, posWall, posWorms, posFrontier, posTide),
-		pickLayout(uLayoutB, posFree, posCols, posWall, posWorms, posFrontier, posTide),
+		pickLayout(uLayoutA, posFree, posCols, posWall, posWorms, posFrontier, posTide, posWorth),
+		pickLayout(uLayoutB, posFree, posCols, posWall, posWorms, posFrontier, posTide, posWorth),
 		t
 	);
 
@@ -445,6 +521,10 @@ Core computeCore() {
 	// how much of the tide layout (code 6) is in the mix — gates the waterline
 	// drown + the reservoir alpha (no-op for every R1/R2 layout, never 6).
 	o.tideWeight = (uLayoutA == 6 ? (1.0 - t) : 0.0) + (uLayoutB == 6 ? t : 0.0);
+
+	// how much of the worth layout (code 7) is in the mix — gates the pricelens
+	// recolor + density gain (no-op for every prior layout, never 7).
+	o.worthWeight = (uLayoutA == 7 ? (1.0 - t) : 0.0) + (uLayoutB == 7 ? t : 0.0);
 
 	// subset re-sort flight — matching points arc into their season's column
 	if (o.matchResort) {
@@ -501,11 +581,15 @@ Core computeCore() {
 	else if (o.outcome == 4) sizeMul = 1.9;
 	o.baseSizeMul = sizeMul;
 
-	// subset highlight — the LIFT is position (shared); the color is per-shader
+	// subset highlight — the LIFT is position (shared); the color is per-shader.
+	// Class 7 (§21) selects by WPA swing size: |wpaByte − 127| ≥ uHlWpaMin, with
+	// the 255 sentinel ("no WPA") never matching.
 	o.hlMatch = false;
 	if (uHlClass >= 0.0) {
 		int hc = int(uHlClass + 0.5);
-		bool m = (hc == 6) ? o.wicket : (o.outcome == hc);
+		bool m;
+		if (hc == 7) m = o.wpaByte < 254.5 && abs(o.wpaByte - 127.0) >= uHlWpaMin;
+		else m = (hc == 6) ? o.wicket : (o.outcome == hc);
 		if (m && uHlSkipWpl > 0.5 && o.wpl) m = false;
 		o.hlMatch = m;
 		if (m) pos.y += uHlLift;
@@ -532,6 +616,45 @@ Core computeCore() {
 		}
 	}
 
+	// over rail (§20) — the set-piece six-ball lift. Membership is a tiny
+	// uniform index set (≤ RAIL_MAX, no attribute cost): rail members are CULLED
+	// from the main pass (both visual and pick) while the rail is engaged, and a
+	// dedicated RAIL_OVERLAY draw — compiled from this same core — flies them to
+	// their viewport-anchored slots ON TOP of the whole field, so a hero ball is
+	// never fogged by later-indexed points (draw order = point order). Fully
+	// reversible: uRailProgress back to 0 returns each ball to its exact field
+	// position. A no-op at uRailN == 0 (every prior scene, byte-identical).
+	o.railMember = false;
+	o.railT = 0.0;
+	int railSlot = -1;
+	if (uRailN > 0) {
+		for (int i = 0; i < RAIL_MAX; i++) {
+			if (i >= uRailN) break;
+			if (abs(position.x - uRailIdx[i]) < 0.5) { railSlot = i; break; }
+		}
+	}
+#ifdef RAIL_OVERLAY
+	if (railSlot < 0) {
+		o.culled = true; // the overlay draws rail members only
+	} else {
+		o.railMember = true;
+		// staggered per slot (ball 1 leads) so the over lifts as a wave; the ramp
+		// is over-driven so the last ball still completes at progress 1
+		float rt = clamp(uRailProgress * 1.25 - float(railSlot) * RAIL_STAGGER_W, 0.0, 1.0);
+		rt = rt * rt * (3.0 - 2.0 * rt);
+		vec2 sfrac = uRailSlot[railSlot];
+		vec3 posSlot = vec3((sfrac.x * 2.0 - 1.0) * uHalfW, (1.0 - sfrac.y * 2.0) * uHalfH, 0.45);
+		pos = mix(pos, posSlot, rt);
+		pos.y += 4.0 * rt * (1.0 - rt) * uRailLift;
+		o.railT = rt;
+	}
+#else
+	if (railSlot >= 0) {
+		o.railMember = true;
+		o.culled = true; // the overlay draw owns this ball while the rail is engaged
+	}
+#endif
+
 	o.reAmt = resortOn ? clamp(uResortEngage, 0.0, 1.0) : 0.0;
 	o.filterPass = passesFilter(gi);
 	o.pos = pos;
@@ -540,7 +663,7 @@ Core computeCore() {
 `;
 }
 
-export function makeVertexShader(groupCount: number, hasMatch = false): string {
+export function makeVertexShader(groupCount: number, hasMatch = false, railOverlay = false): string {
 	return /* glsl */ `
 #define GROUP_COUNT ${groupCount}
 #define RAIN_W ${ASSEMBLY_RAIN_WINDOW}
@@ -548,7 +671,11 @@ export function makeVertexShader(groupCount: number, hasMatch = false): string {
 #define CASCADE_FLASH_W ${CASCADE_FLASH_WINDOW.toFixed(6)}
 #define WORM_HAZE_ALPHA ${WORM_HAZE_ALPHA.toFixed(6)}
 #define TIDE_RESERVOIR_A ${TIDE_RESERVOIR_ALPHA.toFixed(6)}
+#define WORTH_CELL_FILL ${WORTH_CELL_FILL.toFixed(6)}
+#define RAIL_MAX ${RAIL_MAX_SLOTS}
+#define RAIL_STAGGER_W ${RAIL_STAGGER.toFixed(6)}
 ${hasMatch ? '#define HAS_MATCH' : ''}
+${railOverlay ? '#define RAIL_OVERLAY' : ''}
 
 ${UNIFORMS_GLSL}
 ${coreAttrsGlsl(hasMatch)}
@@ -594,6 +721,18 @@ vec3 heatColor(float h) {
 	float t = (h - WALLHEAT_NEUTRAL) / (1.0 - WALLHEAT_NEUTRAL);
 	if (t < 0.5) return mix(C_TWO, C_FOUR, t / 0.5);
 	return mix(C_FOUR, C_SIX, clamp((t - 0.5) / 0.5, 0.0, 1.0));
+}
+
+// Pricelens texel for a worth-grid cell (§19): R = the cell's price LUMINANCE
+// (0..1, from the scene's table), G = the cell's DENSITY GAIN (client-derived
+// from the cell's point count so INTEGRATED brightness tracks the price). Rows
+// A and B mix by uWorthMix — the C5-6a era flip is exactly this lerp. A row of
+// -1 reads as the neutral ramp (lum 1, gain 1).
+vec2 worthLumGain(float cell) {
+	int cx = int(cell + 0.5);
+	vec2 a = uWorthRowA >= 0 ? texelFetch(uWorthTex, ivec2(cx, uWorthRowA), 0).rg : vec2(1.0);
+	vec2 b = uWorthRowB >= 0 ? texelFetch(uWorthTex, ivec2(cx, uWorthRowB), 0).rg : vec2(1.0);
+	return mix(a, b, clamp(uWorthMix, 0.0, 1.0));
 }
 
 void main() {
@@ -665,14 +804,39 @@ void main() {
 		}
 	}
 
+	// ---- Rail-overlay resistance (§20): a LIFTED hero ball reads as THE
+	//      OBJECT, not as its cell's price or the scene's mood — as railT → 1
+	//      it resists the scene dim and the pricelens luminance/density gain
+	//      (mirrors the team ignite's worth resistance). Compiled ONLY into
+	//      the overlay pass; railKeep is constant 0.0 in the main pass, so
+	//      every prior scene renders byte-identically.
+#ifdef RAIL_OVERLAY
+	float railKeep = core.railT;
+#else
+	float railKeep = 0.0;
+#endif
+
 	// ---- Dims are luminance-only (hue is identity, never quantity).
-	c *= uDim;
+	c *= mix(uDim, 1.0, railKeep);
 	if (wpl) c *= uWplDim;
 
 	// ---- Worm-space density haze (§13): the field settles to low alpha so
 	//      overlapping balls read as texture/density, not a solid fill. No-op
 	//      outside worm-space (wormWeight is 0 for every R1 layout).
 	alphaMul *= mix(1.0, WORM_HAZE_ALPHA, core.wormWeight);
+
+	// ---- Worth-grid pricelens (§19): the cell's price LUMINANCE rides the
+	//      color (hue stays identity — a scalar multiply is luminance only) and
+	//      the DENSITY GAIN rides the alpha, so a cell's INTEGRATED brightness
+	//      tracks the active price table, never its point count (§0.1 binding).
+	//      Gated on the worth layout being in the mix — a no-op for every prior
+	//      layout (worthWeight is 0, never code 7).
+	if (core.worthWeight > 0.0) {
+		vec2 pw = worthLumGain(core.worthCell);
+		float ww = core.worthWeight * (1.0 - railKeep);
+		c *= mix(1.0, pw.x, ww);
+		alphaMul *= mix(1.0, pw.y, ww);
+	}
 
 	// ---- Tide reservoir + waterline drown (§18). No-op unless the tide layout is
 	//      in the mix (tideWeight > 0), so R1/R2 render byte-identically. First-
@@ -733,6 +897,22 @@ void main() {
 		c *= mix(0.5, 1.0, uFilterDim);
 	}
 
+	// ---- Over rail (§20): while the rail is engaged the REST of the field dims
+	//      hard behind the lifted balls (set-piece dimming, luminance + alpha,
+	//      following uRailProgress so the dim rides the lift). Rail members are
+	//      culled from this pass and drawn by the overlay. No-op at uRailN == 0.
+	if (uRailN > 0 && !core.railMember) {
+		float rr = mix(1.0, uRailDim, clamp(uRailProgress, 0.0, 1.0));
+		alphaMul *= rr;
+		c *= mix(0.8, 1.0, rr);
+	}
+#ifdef RAIL_OVERLAY
+	// the overlay's hero balls enlarge toward uRailScale and pick up a glow as
+	// they arrive at their slots (the DOM chip takes over the names/numbers)
+	sizeMul *= mix(1.0, uRailScale, core.railT);
+	glow = max(glow, 0.45 * core.railT);
+#endif
+
 	// ---- Team ignite: the reader's franchise renders in team color and resists
 	//      the dims AND the worm-space haze — personalization survives (C2-8).
 	if (uPickedTeam >= 0.0 && abs(aTeam - uPickedTeam) < 0.5) {
@@ -758,6 +938,9 @@ void main() {
 		glow = max(glow, glowK);
 		// resist the haze so the reader's team reads at full brightness in worm-space
 		alphaMul = max(alphaMul, mix(alphaMul, 0.82, core.wormWeight));
+		// resist the worth density gain a stop so the reader's team stays readable
+		// on the price map (personalization survives — standing rule)
+		alphaMul = max(alphaMul, mix(alphaMul, 0.55, core.worthWeight));
 	}
 
 	vColor = c;
@@ -814,6 +997,9 @@ export function makePickVertexShader(groupCount: number, hasMatch = false): stri
 #define GROUP_COUNT ${groupCount}
 #define RAIN_W ${ASSEMBLY_RAIN_WINDOW}
 #define CASCADE_FLASH_W ${CASCADE_FLASH_WINDOW.toFixed(6)}
+#define WORTH_CELL_FILL ${WORTH_CELL_FILL.toFixed(6)}
+#define RAIL_MAX ${RAIL_MAX_SLOTS}
+#define RAIL_STAGGER_W ${RAIL_STAGGER.toFixed(6)}
 ${hasMatch ? '#define HAS_MATCH' : ''}
 
 ${UNIFORMS_GLSL}

@@ -9,6 +9,8 @@ import {
 } from '$lib/field/types';
 import { ASSEMBLY_RAIN_WINDOW } from '$lib/field/shaders';
 import type {
+	OverRail,
+	PriceLens,
 	RunoutCascade,
 	SceneDef,
 	SceneFieldState,
@@ -20,6 +22,36 @@ import type {
 
 /** Default drowned-column luminance × (storyboard §6: dims one-plus stop). */
 const WATERLINE_DEFAULT_DROWN = 0.18;
+
+/** Over-rail defaults (§20): rest-of-field dim / hero scale / flight-arc peak.
+ *  The dim default is LOW (0.06): alpha dims saturate on dense layouts (many
+ *  overlapping points re-accumulate coverage), so a set-piece "dims hard" needs
+ *  a near-floor multiplier — verified against the free field at 316k points. */
+const RAIL_DEFAULT_DIM = 0.06;
+const RAIL_DEFAULT_SCALE = 7;
+const RAIL_DEFAULT_LIFT = 0.35;
+
+/**
+ * The WPA highlight threshold in wpa.u8 BYTE units (§21): |ΔWP| 0..1 →
+ * round(t × 127), floored at 1 so a threshold of 0 never matches the whole
+ * field (byte 127 = zero swing; sentinel 255 never matches in-shader).
+ */
+function wpaByteMin(hl: SubsetHighlight | null): number {
+	if (!hl || hl.class !== 'wpa') return 0;
+	return Math.max(1, Math.round((hl.wpaThreshold ?? 0) * 127));
+}
+
+/** Flatten per-ball [x,y] slot anchors to the uniform layout; missing slots
+ *  default to an evenly-spaced row across the middle of the viewport. */
+function railSlotArray(rail: OverRail): number[] {
+	const m = rail.indices.length;
+	const out: number[] = [];
+	for (let i = 0; i < m; i++) {
+		const s = rail.slots?.[i];
+		out.push(s ? s[0] : (i + 0.5) / Math.max(1, m), s ? s[1] : 0.42);
+	}
+	return out;
+}
 
 /** The six filter uniform fields resolved from a scene's declarative facets. */
 interface ResolvedFilter {
@@ -70,6 +102,8 @@ interface ResolvedSceneState {
 	cascade: RunoutCascade | null;
 	rivers: SubsetRivers | null;
 	waterline: Waterline | null;
+	pricelens: PriceLens | null;
+	overrail: OverRail | null;
 	teamIgnite: boolean;
 	wallHeatMix: number;
 }
@@ -86,6 +120,8 @@ export function withDefaults(s: SceneFieldState): ResolvedSceneState {
 		cascade: s.cascade ?? null,
 		rivers: s.rivers ?? null,
 		waterline: s.waterline ?? null,
+		pricelens: s.pricelens ?? null,
+		overrail: s.overrail ?? null,
 		teamIgnite: s.teamIgnite ?? true,
 		wallHeatMix: s.wallHeatMix ?? 0
 	};
@@ -155,6 +191,34 @@ export function resolveRenderState(
 	const fromWl = f.waterline;
 	const toWl = g.waterline;
 	const wl = toWl ?? fromWl;
+
+	// Pricelens (§19) resolves like the cascade/waterline: the active descriptor
+	// (preferring `to`) fixes the DISCRETE table pair (from / table), while `mix`
+	// LERPS between the sides' declared mixes (a side with no lens contributes
+	// the active lens's own mix, so a lens fades nothing when only one side
+	// declares it — the recolor itself is already gated on the worth layout's
+	// share of the morph, so it rides free→worth in and worth→free out for free).
+	// Cross-TABLE transitions (e.g. the C5-6b lens release, rise → recent) are
+	// the scene's job via dynamicState, exactly like the cascade sweep. With NO
+	// lens on either side both rows resolve null → the neutral ramp (inert; every
+	// prior scene byte-identical).
+	const fromPl = f.pricelens;
+	const toPl = g.pricelens;
+	const pl = toPl ?? fromPl;
+	const plMix = pl
+		? lerp(fromPl?.mix ?? pl.mix ?? 1, toPl?.mix ?? pl.mix ?? 1, clampedT)
+		: 0;
+
+	// Over rail (§20) resolves like the cascade: the active descriptor
+	// (preferring `to`) fixes the DISCRETE config (indices / slots / dimRest /
+	// scale / lift), while only `progress` LERPS — so the balls fly out as the
+	// scene declaring the rail advances progress, and settle back into their
+	// exact field positions (progress → 0) when the next scene declares none.
+	// With NO rail on either side the index set is empty → inert (uRailN 0),
+	// every prior scene byte-identical.
+	const fromRail = f.overrail;
+	const toRail = g.overrail;
+	const rail = toRail ?? fromRail;
 
 	// Facet filter resolves like the highlight: the discrete facets come from
 	// whichever side declares an active filter (preferring `to`), while filterDim
@@ -227,7 +291,26 @@ export function resolveRenderState(
 		// no waterline is declared, so a non-tide scene equals DEFAULT_RENDER_STATE.
 		waterLevel: wl ? lerp(fromWl?.level ?? 0, toWl?.level ?? 0, clampedT) : -1,
 		waterDrownDim: wl ? wl.drownDim ?? WATERLINE_DEFAULT_DROWN : 1,
-		waterTeamKeep: wl ? wl.teamKeepLit ?? true : false
+		waterTeamKeep: wl ? wl.teamKeepLit ?? true : false,
+		// WPA highlight threshold (§21): discrete config from the active highlight
+		// descriptor; 0 (inert) unless that descriptor's class is 'wpa'.
+		highlightWpaMin: wpaByteMin(toHl ?? fromHl),
+		// pricelens (§19): the table pair is discrete from the active descriptor;
+		// mix lerps. No lens → both rows null (the neutral ramp — inert).
+		worthTableA: pl ? (pl.from ?? pl.table) : null,
+		worthTableB: pl ? pl.table : null,
+		worthMix: plMix,
+		// over rail (§20): indices/slots/config discrete from the active
+		// descriptor; progress lerps (a side with no rail contributes 0, so the
+		// balls return to the field on the reverse leg for free).
+		railIndices: rail ? rail.indices : [],
+		railSlots: rail ? railSlotArray(rail) : [],
+		railProgress: rail
+			? lerp(fromRail?.progress ?? 0, toRail?.progress ?? 0, clampedT)
+			: 0,
+		railDim: rail ? rail.dimRest ?? RAIL_DEFAULT_DIM : 1,
+		railScale: rail ? rail.scale ?? RAIL_DEFAULT_SCALE : RAIL_DEFAULT_SCALE,
+		railLift: rail ? rail.lift ?? RAIL_DEFAULT_LIFT : RAIL_DEFAULT_LIFT
 	};
 }
 

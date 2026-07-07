@@ -99,6 +99,27 @@ export interface FieldData {
 	 * attribute budget (MAX_VERTEX_ATTRIBS).
 	 */
 	inningsTotal?: Uint8Array;
+	/**
+	 * per-delivery match-state cell byte (restate.u8), length nPoints — OPTIONAL,
+	 * drives the Ch 5 `worth` layout (CONTRACT §19). One raw byte per point in
+	 * field point order: byte = over × 10 + wicketsDown (0..199), where over is
+	 * the delivery's over index 0..19 and wicketsDown counts dismissals before
+	 * the delivery. Both innings are packed. Present only when the pipeline
+	 * ships restate.u8; absent until then, so the worth grid collapses to the
+	 * top-left cell (graceful — R1..R3b-1 never use `worth`). Packed with the
+	 * WPA byte into the single `aPrice` GL attribute on-device (vertex-attribute
+	 * budget).
+	 */
+	stateCell?: Uint8Array;
+	/**
+	 * per-delivery signed WPA byte (wpa.u8), length nPoints — OPTIONAL, drives
+	 * the Ch 5 WPA subset-highlight (CONTRACT §21). Batting-team perspective:
+	 * byte = 127 + round(wpa × 127) clamped 0..254 (127 = zero swing); byte 255
+	 * = sentinel "no WPA for this ball" (D/L, undecided, or short-target
+	 * matches — exactly what the win grids exclude). Sentinel balls never match
+	 * the highlight. Packed with the state cell into `aPrice`.
+	 */
+	wpa?: Uint8Array;
 	/** true when this is the dev-only synthetic fallback, not pipeline output */
 	synthetic: boolean;
 }
@@ -117,7 +138,15 @@ export const OUTCOME_OTHER = 5;
  * position buffers ever cross the wire (blueprint §2).
  * ------------------------------------------------------------------------- */
 
-export type LayoutId = 'free' | 'columns' | 'wall' | 'assembly' | 'worms' | 'frontier' | 'tide';
+export type LayoutId =
+	| 'free'
+	| 'columns'
+	| 'wall'
+	| 'assembly'
+	| 'worms'
+	| 'frontier'
+	| 'tide'
+	| 'worth';
 
 /** Shader-side layout codes (uLayoutA / uLayoutB). */
 export const LAYOUT_CODE: Record<LayoutId, number> = {
@@ -141,13 +170,25 @@ export const LAYOUT_CODE: Record<LayoutId, number> = {
 	// settle into a low-alpha reservoir haze. The innings total, the packing slot
 	// and the first-innings flag are packed into ONE attribute (aTide). Fixed data
 	// aspect, letterboxed like `worms`/`frontier`. See CONTRACT §18.
-	tide: 6
+	tide: 6,
+	// Ch 5 controlling morph (free→worth): every ball condenses to the cell of
+	// the match situation it was bowled in — x = over of the innings (1 left →
+	// 20 right), y = wickets fallen when the ball was bowled (0 at the TOP → 9
+	// at the bottom) — from restate.u8 (cell = over×10 + wicketsDown, packed
+	// into the aPrice attribute with the WPA byte). Cell color = the pricelens
+	// (a 200-entry table the scene feeds — CONTRACT §19), density-normalized so
+	// integrated cell brightness tracks the price, never the crowd. Fixed data
+	// aspect, letterboxed like `worms`/`frontier`/`tide`. See CONTRACT §19.
+	worth: 7
 };
 
 /**
  * Subset-highlight class codes (uHlClass). 0-5 match the outcome classes in
- * attrs.u8; 6 selects the wicket bit; -1 = no highlight active. The subset
- * re-sort (uResortClass, §7 capability) reuses the SAME class codes.
+ * attrs.u8; 6 selects the wicket bit; 7 selects by WPA swing size (|byte−127|
+ * ≥ the threshold uniform, sentinel 255 never matches — CONTRACT §21); -1 = no
+ * highlight active. The subset re-sort (uResortClass, §7 capability) reuses the
+ * SAME class codes EXCEPT 'wpa' (highlight-only; the re-sort's CPU ordinal pass
+ * decodes attrs.u8, which does not carry WPA).
  */
 export const HL_CLASS = {
 	none: -1,
@@ -157,10 +198,18 @@ export const HL_CLASS = {
 	four: OUTCOME_FOUR,
 	six: OUTCOME_SIX,
 	other: OUTCOME_OTHER,
-	wicket: 6
+	wicket: 6,
+	wpa: 7
 } as const;
 
 export type HighlightClass = Exclude<keyof typeof HL_CLASS, 'none'>;
+
+/** Classes the subset RE-SORT supports ('wpa' is highlight-only — §21). */
+export type ResortableClass = Exclude<HighlightClass, 'wpa'>;
+
+/** wpa.u8 encoding constants (mirror the pipeline's wpa_buffer decode spec). */
+export const WPA_ZERO_BYTE = 127;
+export const WPA_SENTINEL_BYTE = 255;
 
 /**
  * attrs.u8 bit 5 — the "hit by that season's top-10 six-hitter" flag, packed by
@@ -423,6 +472,53 @@ export interface FieldRenderState {
 	waterDrownDim: number;
 	/** the picked team's columns keep their identity glow even when drowned */
 	waterTeamKeep: boolean;
+
+	/* ---- WPA subset-highlight threshold (§21 — Ch 5) --------------------------
+	 * Only meaningful while highlightClass === HL_CLASS.wpa: a point matches iff
+	 * |wpaByte − 127| ≥ this BYTE distance (and the byte isn't the 255 sentinel).
+	 * Resolved from SubsetHighlight.wpaThreshold (absolute |ΔWP| 0..1 →
+	 * round(t × 127), floored at 1 so threshold 0 never matches the whole field). */
+	highlightWpaMin: number;
+
+	/* ---- pricelens (§19 capability — the Ch 5 worth-grid color state) ---------
+	 * A cross-cutting COLOR state over the held `worth` layout (like the
+	 * waterline over `tide` — it composes with the layout and spends NO second
+	 * controlling morph). Each table id names a 200-entry per-cell luminance
+	 * table the scene fed via `field.setWorthTables()`; the shader mixes table A
+	 * → table B by `worthMix` (the C5-6a era flip is exactly this lerp), then
+	 * applies the §0.1 density-normalization gain so a cell's INTEGRATED
+	 * brightness tracks its price, never its point count. Null table = the
+	 * neutral ramp. Luminance only — hue stays identity. Inert for every prior
+	 * layout (the shader branch is gated on the worth layout being in the mix). */
+	/** pricelens table id A (null = neutral ramp) */
+	worthTableA: string | null;
+	/** pricelens table id B (null = neutral ramp) — the mix target */
+	worthTableB: string | null;
+	/** 0 = pure table A · 1 = pure table B */
+	worthMix: number;
+
+	/* ---- over rail (§20 capability — the Ch 5 set-piece six-ball lift) --------
+	 * A cross-cutting subset modifier (like resort/cascade/rivers — it composes
+	 * with any base layout and spends NO controlling morph): the named points
+	 * (a tiny index set, ≤ RAIL_MAX_SLOTS) lift out of the field and fly to
+	 * viewport-anchored rail slots as `railProgress` scrubs 0→1, enlarging to
+	 * hero size; everything else dims by `railDim`. The flying balls render in a
+	 * dedicated 8-point OVERLAY draw on top of the 316k field (so the heroes are
+	 * never fogged by later-indexed points — see CONTRACT §20); the main field
+	 * culls the members while the rail is active. Empty `railIndices` = inactive
+	 * (byte-identical for every prior scene). */
+	/** field point indices of the rail balls, bowling order (empty = inactive) */
+	railIndices: readonly number[];
+	/** viewport-fraction slot anchors, flat [x0,y0, x1,y1, …] (x 0 left→1 right, y 0 top→1 bottom) */
+	railSlots: readonly number[];
+	/** 0 = balls in the field · 1 = balls at their rail slots (lerps) */
+	railProgress: number;
+	/** luminance×alpha for the REST of the field at railProgress 1 (1 = no dimming) */
+	railDim: number;
+	/** hero point-size multiplier at the slots */
+	railScale: number;
+	/** world-units peak of the flight arc */
+	railLift: number;
 }
 
 export const DEFAULT_RENDER_STATE: FieldRenderState = {
@@ -467,5 +563,15 @@ export const DEFAULT_RENDER_STATE: FieldRenderState = {
 	riversKinds: DEFAULT_RIVERS_KINDS,
 	waterLevel: -1,
 	waterDrownDim: 1,
-	waterTeamKeep: false
+	waterTeamKeep: false,
+	highlightWpaMin: 0,
+	worthTableA: null,
+	worthTableB: null,
+	worthMix: 0,
+	railIndices: [],
+	railSlots: [],
+	railProgress: 0,
+	railDim: 1,
+	railScale: 7,
+	railLift: 0.35
 };

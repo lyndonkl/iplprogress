@@ -24,7 +24,7 @@
 
 <div class="pin">
 	<div class="scene-card interactive card">
-		<p class="overline">Interlude: The Net Session · done</p>
+		<p class="overline">Chapter 5: What a Ball Is Worth · done</p>
 
 		<h2>Every ball is still here.</h2>
 		<p class="promise">
@@ -34,8 +34,8 @@
 		</p>
 
 		<p class="next">
-			<strong>Up next: Chapter 5, What a Ball Is Worth.</strong>
-			<em>You have felt the two meters by hand. Next we put a price on every ball, in both.</em>
+			<strong>Up next: Chapter 6, Two Dialects.</strong>
+			<em>A second league speaks a different dialect of the same language. We put both on one map.</em>
 			<span class="tag">in build · the story grows chapter by chapter</span>
 		</p>
 

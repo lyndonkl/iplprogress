@@ -604,6 +604,121 @@ export function tidePoint(
 	return { x, y: tideTotalToY(layout, total) };
 }
 
+/* ---------------------------------------------------------------------------
+ * The worth grid (Ch 5 controlling morph, CONTRACT §19). Every ball condenses
+ * to the CELL of the match situation it was bowled in:
+ *   x = the over of the innings   (over index 0 at the left → 19 at the right)
+ *   y = wickets fallen when bowled (0 at the TOP → 9 at the bottom)
+ * from restate.u8 (cell = over×10 + wicketsDown, 0..199). Points pack the cell
+ * with deterministic in-shader jitter; cell LUMINANCE encodes the expected runs
+ * still to come (the pricelens table, §19), density-normalized so integrated
+ * cell brightness tracks the price, never the cell's crowd. Positions are
+ * in-shader; no positions cross the wire.
+ *
+ * HONESTY LOCK (storyboard §0.1, mirroring worms/frontier/tide): the plot's
+ * DATA aspect ratio is FIXED and independent of the viewport — the frame
+ * LETTERBOXES (adds margin) rather than stretching, so the grid geometry (and
+ * the brightest-at-top-left read) is identical on desktop and portrait phone.
+ * WORTH_ASPECT / WORTH_FILL / WORTH_CELL_FILL and the density-gain constants
+ * below are the owner-tunable constants flagged for build sign-off; changing
+ * them keeps the fixed-aspect + letterbox invariant intact.
+ * ------------------------------------------------------------------------- */
+
+/** Grid extent: 20 overs across × 10 wickets-down rows. */
+export const WORTH_OVERS = 20;
+export const WORTH_WKTS = 10;
+/** Fixed world width : world height for the grid box (viewport-independent). */
+export const WORTH_ASPECT = 1.8;
+/** Fraction of the frame the fixed-aspect box fills (letterbox + label room). */
+export const WORTH_FILL = 0.86;
+/** Fraction of a cell's pitch the points fill (the rest is the cell gutter). */
+export const WORTH_CELL_FILL = 0.8;
+/**
+ * Density-normalization gain (§0.1 BINDING): per-point intensity is scaled by
+ * gain(cell) = clamp((WORTH_GAIN_TARGET / cellCount)^WORTH_GAIN_POW,
+ * WORTH_GAIN_MIN, 1) so a cell's INTEGRATED brightness tracks the price table
+ * no matter how many balls live there (cell populations run 1 → ~15k). The
+ * exponent < 1 compensates alpha-compositing saturation in crowded cells; the
+ * clamp floor keeps ultra-dense cells from vanishing per-point. Owner-tunable.
+ */
+export const WORTH_GAIN_TARGET = 260;
+export const WORTH_GAIN_MIN = 0.02;
+export const WORTH_GAIN_POW = 0.85;
+
+export interface WorthLayout {
+	/** world x at the grid's left edge (over index 0) */
+	left: number;
+	/** world width spanning overs 0 → 19 */
+	width: number;
+	/** world y at the grid's bottom edge (9 wickets down) */
+	bottom: number;
+	/** world height spanning wickets-down 9 (bottom) → 0 (top) */
+	height: number;
+	/** grid extent (20 × 10) — mirrors the restate.u8 encoding */
+	overs: number;
+	wkts: number;
+	/** one cell's world pitch (x / y) */
+	cellW: number;
+	cellH: number;
+	/** half-extent of a cell's POINT-FILLED body (pitch × WORTH_CELL_FILL / 2) */
+	cellHalfW: number;
+	cellHalfH: number;
+}
+
+/**
+ * Fixed-aspect, letterboxed worth-grid box for the current frame — the largest
+ * box of the locked data aspect that fits, then centred. Scenes register cell
+ * rings / hatching / axis labels via `worthCell` + `field.projectToCss`.
+ */
+export function computeWorth(halfW: number, halfH: number): WorthLayout {
+	const frameW = 2 * halfW * WORTH_FILL;
+	const frameH = 2 * halfH * WORTH_FILL;
+	let width = frameH * WORTH_ASPECT;
+	if (width > frameW) width = frameW;
+	const height = width / WORTH_ASPECT;
+	const cellW = width / WORTH_OVERS;
+	const cellH = height / WORTH_WKTS;
+	return {
+		left: -width / 2,
+		width,
+		bottom: -height / 2,
+		height,
+		overs: WORTH_OVERS,
+		wkts: WORTH_WKTS,
+		cellW,
+		cellH,
+		cellHalfW: (cellW * WORTH_CELL_FILL) / 2,
+		cellHalfH: (cellH * WORTH_CELL_FILL) / 2
+	};
+}
+
+/**
+ * World coordinate of a worth-grid CELL CENTRE for (over index 0..19,
+ * wicketsDown 0..9) — the EXACT mapping the shader uses (0 wickets at the TOP),
+ * so annotation-plane rings, hatches, readouts and the C5-6b hero rings can
+ * never drift from the GL cells. The cell's rect is centre ± (cellW/2, cellH/2)
+ * (use `cellHalfW/H` for the point-filled body). Project with
+ * `field.projectToCss`.
+ */
+export function worthCell(
+	w: WorthLayout,
+	over: number,
+	wicketsDown: number
+): { x: number; y: number } {
+	const o = Math.min(Math.max(over, 0), w.overs - 1);
+	const k = Math.min(Math.max(wicketsDown, 0), w.wkts - 1);
+	return {
+		x: w.left + ((o + 0.5) / w.overs) * w.width,
+		y: w.bottom + (1 - (k + 0.5) / w.wkts) * w.height
+	};
+}
+
+/* ---------------------------------------------------------------------------
+ * The over rail (Ch 5 set piece, CONTRACT §20): slot capacity for the six(+)
+ * lifted balls. Uniform arrays and the overlay draw are sized to this.
+ * ------------------------------------------------------------------------- */
+export const RAIL_MAX_SLOTS = 8;
+
 /**
  * Contiguous per-season strips across the full width (IPL block then WPL block,
  * each season-sorted), filling a centred band box. No league gap — the bands

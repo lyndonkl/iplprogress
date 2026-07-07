@@ -19,16 +19,22 @@ import {
 	computeFrontier,
 	computeRivers,
 	computeTide,
+	computeWorth,
 	basePointPx,
 	WORM_X_CAP,
 	WORM_RUNS_CAP,
 	TIDE_TOTAL_CAP,
+	WORTH_GAIN_TARGET,
+	WORTH_GAIN_MIN,
+	WORTH_GAIN_POW,
+	RAIL_MAX_SLOTS,
 	type ColumnLayout,
 	type WallLayout,
 	type WormLayout,
 	type FrontierLayout,
 	type RiversLayout,
-	type TideLayout
+	type TideLayout,
+	type WorthLayout
 } from './layout';
 import { makeVertexShader, fragmentShader, makePickVertexShader, pickFragmentShader } from './shaders';
 
@@ -162,6 +168,33 @@ export interface FieldHandle {
 	 * resize. Rebuilt on resize.
 	 */
 	getTideLayout(): TideLayout | null;
+	/**
+	 * current worth-grid geometry (§19 — Ch 5's controlling morph): the
+	 * fixed-aspect, letterboxed 20-over × 10-wicket box + cell pitches. Scenes
+	 * register cell rings / WPL hatching / readouts / axis labels to the GL cells
+	 * by mapping through `worthCell(layout, over, wicketsDown)` (layout.ts — the
+	 * exact shader mapping, 0 wickets at the TOP) then `projectToCss`. null
+	 * before the first resize. Rebuilt on resize.
+	 */
+	getWorthLayout(): WorthLayout | null;
+	/**
+	 * Feed the pricelens tables for the Ch 5 worth grid (§19). `tables` maps a
+	 * table id (e.g. 'early' | 'recent' | 'rise' | 'wpl') to a 200-entry
+	 * per-cell LUMINANCE array (0..1, cell index = over×10 + wicketsDown — the
+	 * restate.u8 convention; the SCENE normalizes raw engine runs to luminance,
+	 * because scale choices are editorial: the era flip shares one scale, the
+	 * rise lens has its own). The field bakes each table into a row of the
+	 * pricelens data texture alongside the §0.1 DENSITY GAIN it derives once
+	 * from restate.u8 cell populations, so integrated cell brightness tracks the
+	 * price, never the crowd. Up to 7 tables; re-calling replaces the whole set.
+	 * O(1) per frame afterwards — demand mode preserved. Scenes then select
+	 * tables declaratively via `SceneFieldState.pricelens` (table ids + mix).
+	 */
+	setWorthTables(tables: Record<string, ArrayLike<number>>): void;
+	/** whether restate.u8 is loaded (the worth grid has real cells) */
+	readonly hasStateAttr: boolean;
+	/** whether wpa.u8 is loaded (the 'wpa' highlight class can match) */
+	readonly hasWpaAttr: boolean;
 	/**
 	 * Set first-innings membership for the Ch 4 `tide` skyline (§18). Pass the
 	 * point indices whose delivery is part of a FULL FIRST innings (the scene
@@ -300,6 +333,116 @@ export function createField(opts: FieldOptions): FieldHandle {
 	// per-group tide season-block centre x (filled on resize, §18)
 	const tideX = new Float32Array(groupCount);
 
+	/* ---- worth-grid pricelens texture (§19) ---------------------------------
+	 * 200 cells × 8 rows, RG float: R = the cell's price LUMINANCE (0..1, fed by
+	 * the scene via setWorthTables), G = the cell's DENSITY GAIN, derived ONCE
+	 * from restate.u8 cell populations (§0.1 binding: integrated cell brightness
+	 * must track the price table, never the crowd — a dense cheap cell may never
+	 * outshine a sparse expensive one). Row 0 is the always-present NEUTRAL ramp
+	 * (lum 1 × gain); rows 1..7 are the scene's tables. ~12.8KB, created up
+	 * front so the sampler uniform is always bound. */
+	const WORTH_CELLS = 200;
+	const WORTH_TABLE_ROWS = 8;
+	const worthGain = new Float32Array(WORTH_CELLS).fill(1);
+	// stateCellBuf is defined below with the geometry, but the counts only need
+	// the raw data buffer — read it directly (identical source).
+	if (data.stateCell && data.stateCell.length === n) {
+		const counts = new Uint32Array(WORTH_CELLS);
+		for (let i = 0; i < n; i++) counts[Math.min(data.stateCell[i], 199)]++;
+		for (let c = 0; c < WORTH_CELLS; c++)
+			if (counts[c] > 0)
+				worthGain[c] = Math.min(
+					1,
+					Math.max(WORTH_GAIN_MIN, Math.pow(WORTH_GAIN_TARGET / counts[c], WORTH_GAIN_POW))
+				);
+	}
+	const worthTexData = new Float32Array(WORTH_CELLS * WORTH_TABLE_ROWS * 2);
+	for (let c = 0; c < WORTH_CELLS; c++) {
+		worthTexData[c * 2] = 1; // row 0: the neutral ramp (full luminance ×
+		worthTexData[c * 2 + 1] = worthGain[c]; //          the density gain)
+	}
+	const worthTex = new THREE.DataTexture(
+		worthTexData,
+		WORTH_CELLS,
+		WORTH_TABLE_ROWS,
+		THREE.RGFormat,
+		THREE.FloatType
+	);
+	worthTex.minFilter = THREE.NearestFilter;
+	worthTex.magFilter = THREE.NearestFilter;
+	worthTex.needsUpdate = true;
+	/** table id → texture row (1..7); row 0 = neutral, never in the map */
+	const worthRows = new Map<string, number>();
+	const worthWarned = new Set<string>();
+
+	/** Resolve a pricelens table id to its texture row (null/unknown → neutral). */
+	function worthRow(id: string | null): number {
+		if (id === null) return 0;
+		const r = worthRows.get(id);
+		if (r != null) return r;
+		if (import.meta.env.DEV && !worthWarned.has(id)) {
+			worthWarned.add(id);
+			console.warn(
+				`[every-ball-ever] pricelens table '${id}' has not been fed via`,
+				'field.setWorthTables — rendering the neutral ramp until it arrives.'
+			);
+		}
+		return 0;
+	}
+
+	/**
+	 * Feed / replace the pricelens tables (§19). Each table is a 200-entry
+	 * per-cell LUMINANCE array (0..1; cell = over×10 + wicketsDown). Baked into
+	 * texture rows 1..7 in insertion order alongside the density gain — one
+	 * upload, O(1) per frame afterwards (demand mode preserved). Re-resolves the
+	 * currently applied state's rows, so a scene may feed tables before OR after
+	 * its fieldState first declares them.
+	 */
+	function setWorthTables(tables: Record<string, ArrayLike<number>>): void {
+		if (disposed) return;
+		worthRows.clear();
+		worthWarned.clear();
+		let row = 1; // row 0 stays the neutral ramp
+		for (const [id, table] of Object.entries(tables)) {
+			if (row >= WORTH_TABLE_ROWS) {
+				if (import.meta.env.DEV)
+					console.warn(
+						`[every-ball-ever] setWorthTables: more than ${WORTH_TABLE_ROWS - 1} tables —`,
+						`'${id}' and later ids ignored.`
+					);
+				break;
+			}
+			if (table.length !== WORTH_CELLS) {
+				if (import.meta.env.DEV)
+					console.warn(
+						`[every-ball-ever] setWorthTables: table '${id}' has ${table.length} entries,`,
+						`expected ${WORTH_CELLS} — ignoring it.`
+					);
+				continue;
+			}
+			const base = row * WORTH_CELLS * 2;
+			for (let c = 0; c < WORTH_CELLS; c++) {
+				const v = Number(table[c]);
+				worthTexData[base + c * 2] = Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0;
+				worthTexData[base + c * 2 + 1] = worthGain[c];
+			}
+			worthRows.set(id, row);
+			row++;
+		}
+		worthTex.needsUpdate = true;
+		// the applied state may already name these tables — resolve rows now
+		uniforms.uWorthRowA.value = worthRow(applied.worthTableA);
+		uniforms.uWorthRowB.value = worthRow(applied.worthTableB);
+		invalidate();
+	}
+
+	/* ---- over-rail uniform arrays (§20) — sized to RAIL_MAX_SLOTS ----------- */
+	const railIdxArr = new Float32Array(RAIL_MAX_SLOTS).fill(-9999);
+	const railSlotVecs: THREE.Vector2[] = Array.from(
+		{ length: RAIL_MAX_SLOTS },
+		() => new THREE.Vector2(0.5, 0.5)
+	);
+
 	const uniforms: Record<string, THREE.IUniform> = {
 		uProgress: { value: 0 },
 		uLayoutA: { value: LAYOUT_CODE.free },
@@ -392,7 +535,29 @@ export function createField(opts: FieldOptions): FieldHandle {
 		// byte-identically (the drown branch is a shader no-op)
 		uWaterLevel: { value: -1 },
 		uWaterDrownDim: { value: 1 },
-		uWaterTeamKeep: { value: 0 }
+		uWaterTeamKeep: { value: 0 },
+		// worth grid + pricelens (§19) — geometry set on every resize; the recolor
+		// is gated on the worth layout being in the mix, so prior scenes are
+		// byte-identical regardless of these values
+		uWorthLeft: { value: 0 },
+		uWorthWidth: { value: 1 },
+		uWorthBottom: { value: -0.5 },
+		uWorthHeight: { value: 1 },
+		uWorthTex: { value: worthTex },
+		uWorthRowA: { value: 0 },
+		uWorthRowB: { value: 0 },
+		uWorthMix: { value: 0 },
+		// WPA subset-highlight threshold (§21) — only read while uHlClass == 7
+		uHlWpaMin: { value: 0 },
+		// over rail (§20) — inactive by default (uRailN 0), so every prior scene
+		// renders byte-identically (the rail branches are shader no-ops)
+		uRailN: { value: 0 },
+		uRailIdx: { value: railIdxArr },
+		uRailSlot: { value: railSlotVecs },
+		uRailProgress: { value: 0 },
+		uRailDim: { value: 1 },
+		uRailScale: { value: 7 },
+		uRailLift: { value: 0.35 }
 	};
 
 	const geometry = new THREE.BufferGeometry();
@@ -456,6 +621,21 @@ export function createField(opts: FieldOptions): FieldHandle {
 	const tidePack = new Float32Array(n);
 	geometry.setAttribute('aTide', new THREE.BufferAttribute(tidePack, 1, false));
 	const tideAttr = geometry.getAttribute('aTide') as THREE.BufferAttribute;
+	// Ch 5 (§19/§21): ONE packed per-point attribute for the worth grid + the WPA
+	// highlight (vertex-attribute budget, like aTide): restate.u8 state-cell byte
+	// (bits 0-7; cell = over×10 + wicketsDown) + wpa.u8 byte × 256 (bits 8-15).
+	// Both buffers are OPTIONAL: without restate.u8 every ball reads cell 0 (the
+	// worth grid collapses to one cell — graceful, R1..R3b-1 never use `worth`);
+	// without wpa.u8 the WPA byte bakes to the 255 sentinel, so the 'wpa'
+	// highlight class matches nothing. Exact integers < 2^16 — safe in Float32.
+	const hasStateAttr = data.stateCell != null && data.stateCell.length === n;
+	const hasWpaAttr = data.wpa != null && data.wpa.length === n;
+	const stateCellBuf = hasStateAttr ? data.stateCell! : new Uint8Array(n);
+	const wpaBuf = hasWpaAttr ? data.wpa! : null;
+	const pricePack = new Float32Array(n);
+	for (let i = 0; i < n; i++)
+		pricePack[i] = Math.min(stateCellBuf[i], 199) + 256 * (wpaBuf ? wpaBuf[i] : 255);
+	geometry.setAttribute('aPrice', new THREE.BufferAttribute(pricePack, 1, false));
 	// OPTIONAL match index (u16 → non-normalized float attr); gates the match facet
 	if (hasMatchAttr)
 		geometry.setAttribute('aMatchIndex', new THREE.BufferAttribute(data.matchIndex!, 1, false));
@@ -476,6 +656,32 @@ export function createField(opts: FieldOptions): FieldHandle {
 	const points = new THREE.Points(geometry, material);
 	points.frustumCulled = false;
 	scene.add(points);
+
+	/* ---- over-rail overlay draw (§20) — the hero balls render ON TOP ---------
+	 * A second draw of the SAME geometry with the SAME uniforms object, compiled
+	 * with RAIL_OVERLAY: its vertex pass culls everything except the ≤8 rail
+	 * members (offscreen + pointSize 0 → zero fragment cost), and it draws AFTER
+	 * the main pass (renderOrder 1), so a lifted hero ball is never fogged by
+	 * later-indexed points in the 316k draw (draw order = point order there). The
+	 * main pass culls the members while the rail is engaged (computeCore §20), so
+	 * no ball is ever drawn twice. Visible ONLY while uRailN > 0 — the overlay
+	 * costs nothing (not even a vertex pass) for every prior scene, preserving
+	 * byte-identical rendering. */
+	const railMaterial = new THREE.ShaderMaterial({
+		glslVersion: THREE.GLSL3,
+		vertexShader: makeVertexShader(groupCount, hasMatchAttr, true),
+		fragmentShader,
+		uniforms, // SAME object → layout/morph/dim state always matches the field
+		transparent: true,
+		depthTest: false,
+		depthWrite: false,
+		blending: THREE.NormalBlending
+	});
+	const railPoints = new THREE.Points(geometry, railMaterial);
+	railPoints.frustumCulled = false;
+	railPoints.renderOrder = 1;
+	railPoints.visible = false;
+	scene.add(railPoints);
 
 	/* ---- GPU picking pass (§11) — shares geometry + uniforms with the visual
 	   material, so points sit at the same place and honour the same filter; the
@@ -513,6 +719,7 @@ export function createField(opts: FieldOptions): FieldHandle {
 	let frontierLayout: FrontierLayout | null = null;
 	let riversLayout: RiversLayout | null = null;
 	let tideLayout: TideLayout | null = null;
+	let worthLayout: WorthLayout | null = null;
 	let cssW = 1;
 	let cssH = 1;
 
@@ -878,6 +1085,15 @@ export function createField(opts: FieldOptions): FieldHandle {
 		return true;
 	}
 
+	// compare rail index/slot arrays by value for the same reason (the resolver
+	// builds fresh arrays each tick; identical content must stay a no-op).
+	function sameNums(a: readonly number[], b: readonly number[]): boolean {
+		if (a === b) return true;
+		if (a.length !== b.length) return false;
+		for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+		return true;
+	}
+
 	function sameState(a: FieldRenderState, b: FieldRenderState): boolean {
 		return (
 			a.layoutA === b.layoutA &&
@@ -921,7 +1137,17 @@ export function createField(opts: FieldOptions): FieldHandle {
 			sameKinds(a.riversKinds, b.riversKinds) &&
 			a.waterLevel === b.waterLevel &&
 			a.waterDrownDim === b.waterDrownDim &&
-			a.waterTeamKeep === b.waterTeamKeep
+			a.waterTeamKeep === b.waterTeamKeep &&
+			a.highlightWpaMin === b.highlightWpaMin &&
+			a.worthTableA === b.worthTableA &&
+			a.worthTableB === b.worthTableB &&
+			a.worthMix === b.worthMix &&
+			sameNums(a.railIndices, b.railIndices) &&
+			sameNums(a.railSlots, b.railSlots) &&
+			a.railProgress === b.railProgress &&
+			a.railDim === b.railDim &&
+			a.railScale === b.railScale &&
+			a.railLift === b.railLift
 		);
 	}
 
@@ -1030,6 +1256,50 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uniforms.uWaterLevel.value = s.waterLevel;
 		uniforms.uWaterDrownDim.value = s.waterDrownDim;
 		uniforms.uWaterTeamKeep.value = s.waterTeamKeep ? 1 : 0;
+
+		// worth-grid pricelens (§19): table ids resolve to texture rows (a not-yet
+		// -fed id renders the neutral ramp, dev-warned; setWorthTables re-resolves
+		// when the tables arrive). The recolor is gated in-shader on the worth
+		// layout's share of the A/B mix, so these are no-ops for every prior scene.
+		uniforms.uWorthRowA.value = worthRow(s.worthTableA);
+		uniforms.uWorthRowB.value = worthRow(s.worthTableB);
+		uniforms.uWorthMix.value = s.worthMix;
+
+		// WPA subset-highlight threshold (§21) — only read while uHlClass == 7.
+		uniforms.uHlWpaMin.value = s.highlightWpaMin;
+
+		// over rail (§20): bake the tiny index set + slot anchors into the uniform
+		// arrays; the overlay draw wakes only while at least one slot is active, so
+		// every prior scene pays nothing (not even a vertex pass). A cross-cutting
+		// POSITION modifier like the re-sort/cascade/rivers — stage them apart.
+		const railN = Math.min(s.railIndices.length, RAIL_MAX_SLOTS);
+		if (import.meta.env.DEV && s.railIndices.length > RAIL_MAX_SLOTS)
+			console.warn(
+				`[every-ball-ever] over rail: ${s.railIndices.length} indices exceed the`,
+				`${RAIL_MAX_SLOTS}-slot capacity — extra balls stay in the field.`
+			);
+		for (let i = 0; i < RAIL_MAX_SLOTS; i++) {
+			railIdxArr[i] = i < railN ? s.railIndices[i] : -9999;
+			railSlotVecs[i].set(
+				i < railN ? s.railSlots[i * 2] ?? 0.5 : 0.5,
+				i < railN ? s.railSlots[i * 2 + 1] ?? 0.5 : 0.5
+			);
+		}
+		uniforms.uRailN.value = railN;
+		uniforms.uRailProgress.value = s.railProgress;
+		uniforms.uRailDim.value = s.railDim;
+		uniforms.uRailScale.value = s.railScale;
+		uniforms.uRailLift.value = s.railLift;
+		railPoints.visible = railN > 0;
+		if (
+			import.meta.env.DEV &&
+			railN > 0 &&
+			(s.resortClass >= 0 || s.cascadeClass >= 0 || s.riversClass >= 0)
+		)
+			console.warn(
+				'[every-ball-ever] invariant: the over rail (C5-2/3) and a re-sort/cascade/rivers',
+				'are both engaged — cross-cutting position modifiers must be staged apart.'
+			);
 
 		// label plane opacity is scene-state-driven, never animated on its own
 		const o = Math.min(1, Math.max(0, s.labels));
@@ -1186,6 +1456,7 @@ export function createField(opts: FieldOptions): FieldHandle {
 		frontierLayout = computeFrontier(halfW, halfH);
 		riversLayout = computeRivers(data.groups, halfW, halfH);
 		tideLayout = computeTide(data.groups, halfW, halfH);
+		worthLayout = computeWorth(halfW, halfH);
 		uniforms.uHalfW.value = halfW;
 		uniforms.uHalfH.value = halfH;
 		uniforms.uWormLeft.value = wormLayout.left;
@@ -1212,6 +1483,11 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uniforms.uRiverX.value = riverX;
 		// tide skyline (§18): the fixed-aspect letterboxed box + season-block x's
 		applyTideGeometry();
+		// worth grid (§19): the fixed-aspect letterboxed 20×10 box
+		uniforms.uWorthLeft.value = worthLayout.left;
+		uniforms.uWorthWidth.value = worthLayout.width;
+		uniforms.uWorthBottom.value = worthLayout.bottom;
+		uniforms.uWorthHeight.value = worthLayout.height;
 		uniforms.uPointScale.value = basePointPx(w, h, n) * dpr;
 		uniforms.uColHalfWidth.value = columnLayout.colHalfWidth;
 		uniforms.uColBottom.value = columnLayout.bottom;
@@ -1252,6 +1528,12 @@ export function createField(opts: FieldOptions): FieldHandle {
 	}
 	watchDpr();
 
+	// Pre-compile every program in the visible scene — including the (invisible
+	// until Ch 5) rail overlay — so engaging the rail never hitches the set-piece
+	// scrub's first frame with a mid-scroll shader compile, and any GLSL error
+	// surfaces at load, not mid-chapter. No draw happens here (demand mode holds).
+	renderer.compile(scene, camera);
+
 	handleResize(); // initial size + first render
 
 	const handle: FieldHandle = {
@@ -1273,6 +1555,10 @@ export function createField(opts: FieldOptions): FieldHandle {
 		getFrontierLayout: () => frontierLayout,
 		getRiversLayout,
 		getTideLayout: () => tideLayout,
+		getWorthLayout: () => worthLayout,
+		setWorthTables,
+		hasStateAttr,
+		hasWpaAttr,
 		setFirstInnings,
 		setRunouts,
 		setDismissals,
@@ -1284,12 +1570,21 @@ export function createField(opts: FieldOptions): FieldHandle {
 			dprQuery?.removeEventListener('change', onDprChange);
 			geometry.dispose();
 			material.dispose();
+			railMaterial.dispose();
 			pickMaterial.dispose();
 			pickTarget.dispose();
+			worthTex.dispose();
 			renderer.dispose();
 			for (const L of labels) L.el.remove();
 		}
 	};
+
+	// Dev-only debug hook (statically dead in production, like the synthetic
+	// fallback and ?hud=1): exposes the live handle so field capabilities can be
+	// exercised from the console / automation without authoring a scene.
+	if (import.meta.env.DEV) {
+		(window as unknown as Record<string, unknown>).__ebeField = handle;
+	}
 
 	return handle;
 }

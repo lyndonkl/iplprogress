@@ -64,6 +64,14 @@ export async function loadFieldData(baseUrl: string): Promise<FieldData> {
 		// skyline collapses to the floor until it arrives.
 		const inningsTotal = await fetchOptionalU8(`${baseUrl}/data/innings_total.u8`, n);
 
+		// OPTIONAL per-point match-state cell (Ch 5 §19 worth grid: byte = over×10
+		// + wicketsDown, 0..199) and signed WPA byte (Ch 5 §21 highlight: 127 =
+		// zero, 255 = sentinel). Fetched non-fatally like every other per-point
+		// buffer; until they ship, the worth grid collapses to the top-left cell
+		// and the WPA highlight matches nothing (graceful — R1..R3b-1 use neither).
+		const stateCell = await fetchOptionalU8(`${baseUrl}/data/restate.u8`, n);
+		const wpa = await fetchOptionalU8(`${baseUrl}/data/wpa.u8`, n);
+
 		return {
 			nPoints: n,
 			meta,
@@ -78,6 +86,8 @@ export async function loadFieldData(baseUrl: string): Promise<FieldData> {
 			cumRuns,
 			bowlerPlane,
 			inningsTotal,
+			stateCell,
+			wpa,
 			synthetic: false
 		};
 	} catch (err) {

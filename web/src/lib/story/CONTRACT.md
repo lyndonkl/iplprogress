@@ -1,4 +1,4 @@
-# Story Shell Contract — R1a (+ R1b field capabilities: §11 picking · §12 filtering; + R2a Ch 2: §13 worm-space · §14 run-out cascade; + R2b Ch 3: §15 frontier plane · §16 dismissal rivers; + MF §17 mobile "read, then watch" captions; + R3a Ch 4: §18 tide skyline + waterline)
+# Story Shell Contract — R1a (+ R1b field capabilities: §11 picking · §12 filtering; + R2a Ch 2: §13 worm-space · §14 run-out cascade; + R2b Ch 3: §15 frontier plane · §16 dismissal rivers; + MF §17 mobile "read, then watch" captions; + R3a Ch 4: §18 tide skyline + waterline; + R3b-2 Ch 5: §19 worth grid + pricelens · §20 over rail · §21 WPA highlight)
 
 The scene system every scene builder codes against. The shell (this directory +
 `lib/field/` + `lib/state/`) is owned by the story-shell architect; **scene
@@ -52,19 +52,23 @@ scrubs the field from the previous scene's `fieldState` to this scene's
 
 ```ts
 {
-  layout: 'free' | 'columns' | 'wall' | 'assembly' | 'worms' | 'frontier';
+  layout: 'free' | 'columns' | 'wall' | 'assembly' | 'worms' | 'frontier'
+        | 'tide' | 'worth';
   reveal?: number;    // assembly stream-in 0..1 (chronological by point index)
   dim?: number;       // global luminance ×, 1 = full (default 1)
   wplDim?: number;    // WPL-points luminance × (C1-2 shelf staging; default 1)
   labels?: number;    // season-columns DOM label plane opacity (default 0)
   highlight?: {       // uniform-driven subset: lift/tint points matching a class
-    class: 'dot'|'single'|'twoThree'|'four'|'six'|'other'|'wicket';
+    class: 'dot'|'single'|'twoThree'|'four'|'six'|'other'|'wicket'|'wpa';
     lift: number;     // world-units vertical lift (frustum y ∈ [-1,1])
     boost: number;    // brightness boost for matches (0..1)
     othersDim: number;// luminance × for everything else (1 = none)
     skipWpl?: boolean;// WPL points never match — they take the others path
                       //   (C1-5: the IPL's sixes lift; the WPL's stay shelved)
+    wpaThreshold?: number; // ONLY with class 'wpa': min |ΔWP| 0..1 to match (§21)
   } | null;
+  pricelens?: PriceLens | null; // per-cell price recolor over the worth grid (§19)
+  overrail?: OverRail | null;   // the set-piece six-ball lift to rail slots (§20)
   teamIgnite?: boolean; // default true — the picked team STAYS lit (§2 rule)
   wallHeatMix?: number; // C1-2 thesis beat: 0 = outcome colour · 1 = era-relative
                         //   heat recolor (§10). Default 0. Drive 0→1 in the HOLD
@@ -86,7 +90,12 @@ cumulative innings runs from `cumruns.u8`, settled as a low-alpha density haze;
 fixed data aspect ratio + letterbox — §13) · `frontier` = Ch 3 economy ×
 bowling-strike-rate plane (x = bowler-season economy, y = bowler-season strike
 rate, both from the interleaved `bowlerplane.u8`, settled as a low-alpha density
-haze of dense bowler-season clouds; fixed data aspect ratio + letterbox — §15).
+haze of dense bowler-season clouds; fixed data aspect ratio + letterbox — §15) ·
+`tide` = Ch 4 innings-total skyline (x = season block + within-season packing,
+y = a column filled to the innings total from `innings_total.u8`; reservoir haze
+for non-first-innings balls — §18) · `worth` = Ch 5 state grid (every ball
+condenses to the (over × wickets-down) cell it was bowled in, from `restate.u8`;
+20 × 10, 0 wickets at the TOP; cell luminance = the pricelens price — §19).
 All scalar fields lerp during the morph; highlight lift/boost/dim lerp so subsets
 glide in and out.
 
@@ -1351,3 +1360,257 @@ only applies to first-innings columns; reservoir balls are already dim.
   lock-step with the `innings_total.u8` encoding.
 - The tide position + the waterline drown live in the shared `computeCore()` /
   visual shader, so the pick pass is registered to the visible skyline.
+
+---
+
+## 19. The worth grid + the pricelens — Ch 5's controlling morph (R3b-2 `worth` layout + `pricelens` color state)
+
+Chapter 5's single controlling morph (free→worth, analogous to free→wall /
+free→worms / free→frontier / free→tide). Every ball condenses to the **cell of
+the match situation it was bowled in**: **x = the over of the innings** (over
+index 0 at the left → 19 at the right) and **y = wickets fallen when the ball
+was bowled** (0 at the **TOP** → 9 at the bottom), from `restate.u8` (one byte
+per point, cell = over×10 + wicketsDown, 0..199; both innings packed — filter
+via the columnar `innings` array if a scene needs one innings only). Points
+pack the cell body with deterministic in-shader jitter (`WORTH_CELL_FILL` of
+the pitch; the gutter keeps cells readable). Positions are **in-shader**; no
+positions cross the wire. Add nothing yourself — the shell owns the layout.
+
+**Cell COLOR is the price.** Cell luminance encodes the expected runs still to
+come for the displayed era — a **200-entry lookup table the scene feeds** (the
+`pricelens`), never a hue (hue stays identity: team color, WPL family). The
+era flip and the difference lens are COLOR states over the held grid — the
+grid never moves after the morph lands (the Ch 4 fixed-columns/moving-water
+discipline).
+
+### 19.1 Declaring it
+
+```ts
+fieldState: { layout: 'worth', pricelens: { table: 'early' } }
+```
+
+`free→worth` is the morph. A scene declaring **no** `pricelens` renders the
+grid under the NEUTRAL ramp (density gain only — §19.4). The reader's **team
+stays ignited** through the flight and resists the density gain one stop
+(personalization survives). The morph is the chapter's ONE layout morph; the
+era flip / difference lens / WPL recolor are `pricelens` color states, the
+six-ball lift is the §20 over rail, and the WPA lift is a §21 highlight — all
+compose with `worth` and spend no second morph.
+
+### 19.2 Feeding the tables — `field.setWorthTables()` (READ THIS)
+
+The scene feeds the per-era tables ONCE (from `scenes/ch5.json`), then selects
+them declaratively:
+
+```ts
+// once, when the scene mounts (tables from scenes/ch5.json — the SCENE
+// normalizes raw engine runs to 0..1 luminance, because the scale choice is
+// editorial: the two era maps share one scale, the rise lens has its own):
+field.setWorthTables({
+  early:  earlyLum,   // 200 entries, cell = over×10 + wicketsDown, 0..1
+  recent: recentLum,  // (same scale as early — the flip must be honest)
+  rise:   riseLum,    // the difference lens, its own scale
+  wpl:    wplLum      // evidenced WPL cells (mask hatching is the scene's SVG)
+});
+```
+
+Up to **7 tables** per call; re-calling replaces the whole set; a table id the
+field hasn't been fed renders the neutral ramp (dev-warned). Feeding order is
+insertion order (deterministic). O(1) per frame afterwards — demand mode holds.
+
+### 19.3 Selecting + flipping — `SceneFieldState.pricelens`
+
+```ts
+pricelens?: {
+  table: string;         // the active table id ('early' | 'recent' | 'rise' | 'wpl')
+  from?: string | null;  // optional mix SOURCE: render mix(from, table, mix)
+  mix?: number;          // 0 = pure `from` · 1 = pure `table` (default 1)
+} | null;
+```
+
+- **The C5-6a era flip** is `{ from: 'early', table: 'recent', mix }` with
+  `mix` driven 0→1 across the HOLD from `SceneDef.dynamicState` (a post-morph
+  field change, exactly like the C1-5 tint / cascade sweep / waterline level).
+- **The lens landing (dip-to-dark re-light)** is the same `dynamicState`
+  swapping the pair to `{ from: 'recent', table: 'rise' }` while driving the
+  scene's `dim` down to near-black and back — no extra capability.
+- **Cross-scene transitions:** the active descriptor (preferring the `to`
+  side) fixes the table pair; `mix` lerps between the sides' declared mixes.
+  A cross-TABLE release (C5-6b: rise → recent on entry) is the entering
+  scene's job: declare `{ from: 'rise', table: 'recent', mix: 0 }` and drive
+  `mix` up across the entry morph via `dynamicState` (declare
+  `reducedMotionEndState` with `mix: 1`).
+- The recolor is **gated on the worth layout's share of the A/B morph mix**,
+  so it rides free→worth in and worth→free out automatically, and is a shader
+  no-op for every prior layout (byte-identical R1–R3b-1).
+
+### 19.4 Density normalization (§0.1 BINDING — do not fight it)
+
+Perceived cell brightness = point density × per-point luminance, and cell
+populations run 1 → ~15k, so uncorrected luminance would encode CROWD, not
+price. The field derives a per-cell **density gain** ONCE from the restate.u8
+cell populations — `clamp((WORTH_GAIN_TARGET / cellCount)^WORTH_GAIN_POW,
+WORTH_GAIN_MIN, 1)` in `layout.ts`, owner-tunable — and bakes it beside every
+table row (a 200×8 RG float data texture), so a cell's INTEGRATED brightness
+tracks the active price table and **a dense cheap cell never outshines a
+sparse expensive one**. The scene ships only prices; the gain is the shell's.
+
+### 19.5 Honesty lock + anchoring — `field.getWorthLayout()` / `worthCell()`
+
+The plot's **data aspect ratio is FIXED** (`WORTH_ASPECT`) and viewport-
+independent — the frame **letterboxes**, never stretches (the Ch 2/3/4 lock),
+so "brightest at the top-left" reads identically on desktop and portrait.
+Axis labels, the persistent axis tag, cell tap-reads, the C5-6b hero rings,
+and the **WPL mask hatching are the scene's SVG on the annotation plane**
+(hatched is never a dimness — a thin cell must never read as a cheap one),
+registered to GL cells via:
+
+```ts
+import { worthCell } from '$lib/field/layout';
+const wl = field.getWorthLayout();          // null before first resize — guard
+if (wl) {
+  const c = worthCell(wl, 6, 2);            // over 7, two down (0-indexed over)
+  const css = field.projectToCss(c.x, c.y); // ring/hatch/readout anchor
+}
+```
+
+`getWorthLayout()` returns `{ left, width, bottom, height, overs, wkts, cellW,
+cellH, cellHalfW, cellHalfH }` (the letterboxed box + cell pitches, rebuilt on
+resize); `worthCell(layout, over, wicketsDown)` is the **exact** shader mapping
+(0 wickets at the TOP), so annotation-plane geometry can never drift from the
+GL cells. A cell's rect is centre ± (cellW/2, cellH/2).
+
+### 19.6 Reduced motion & pipeline dependency
+
+Reduced motion jump-cuts free→worth live (settled grid, active table, team glow
+intact) — `reducedMotionEndState` defaults to `fieldState`; color states swap
+instantly (declare the end-state `pricelens`). **Pipeline dependency:**
+`restate.u8` (`FieldData.stateCell`, one byte/point; any byte > 199 clamps to
+cell 199 defensively). The loader auto-detects it; until it ships, every ball
+reads cell 0 (graceful — prior releases never use `worth`). `hasStateAttr`
+flips true when loaded. The state-cell byte is packed with the WPA byte into
+ONE GL attribute `aPrice` (cell + wpaByte×256 — the vertex-attribute budget,
+exactly like `aTide`).
+
+---
+
+## 20. The over rail — Ch 5's set-piece six-ball lift (R3b-2 `overrail`)
+
+A **reversible** subset modifier for the C5-2/C5-3 set piece (like `resort` /
+`cascade` / `rivers`: it composes with any base layout and spends **NO**
+controlling morph): the **six(+) deliveries of ONE over** — a tiny index set
+from `scenes/ch5.json`, never client-derived — lift out of the field and fly
+to **viewport-anchored rail slots** as `progress` scrubs 0→1, enlarging to
+hero size, while the REST of the field dims hard behind them (set-piece
+dimming rides the lift). Scrubbing back returns every ball to its exact field
+position (the reverse leg is free — the next scene declares no `overrail`).
+
+### 20.1 Declaring it — `SceneFieldState.overrail`
+
+```ts
+overrail?: {
+  indices: readonly number[];  // field point indices, bowling order (≤ 8)
+  slots?: readonly [number, number][]; // per-ball anchors as VIEWPORT FRACTIONS
+                               //   (x 0 left→1 right, y 0 top→1 bottom; default =
+                               //    an evenly-spaced row across the middle)
+  progress: number;            // 0 = in the field · 1 = at the slots
+  dimRest?: number;            // rest-of-field luminance×alpha at progress 1 (default 0.06;
+                               //   alpha dims saturate on dense layouts — stay ≤ ~0.1 to dim hard)
+  scale?: number;              // hero point-size multiplier (default 7)
+  lift?: number;               // world-units flight-arc peak (default 0.35)
+} | null;
+```
+
+Drive `progress` from `SceneDef.dynamicState` — C5-3's GSAP scrub maps its
+scroll progress straight onto it, so a stray scroll re-application can never
+desync the rail from the chips/worm (the §12.2 orchestrator-caveat pattern).
+The flight is staggered per slot (ball 1 leads — a readable left-to-right
+wave, object constancy). Indices/slots/config are discrete from the active
+descriptor; only `progress` lerps.
+
+### 20.2 The implementation choice (documented — why GL fly-out, not DOM heroes)
+
+The rail is **GL points flying to slots, with a dedicated OVERLAY draw**, not
+DOM hero balls over dimmed GL originals:
+
+- **The lift must be literal.** "Six balls lift OUT of the field" is the beat;
+  only the real points give one continuous path from each ball's true field
+  position (object constancy, same grammar as the C1-5 fireworks arc), and the
+  reverse scrub returns them exactly. A DOM double would teleport identity.
+- **No registration drift.** Slots are viewport fractions; the same fractions
+  position the scene's DOM chips (via `projectToCss` on the slot), so chip and
+  ball agree by construction on every viewport.
+- **Draw-order honesty.** The main 316k draw renders in point order, so a
+  lifted 2019 ball would be fogged by ~40k later-indexed points. The shell
+  therefore CULLS rail members from the main pass while the rail is engaged
+  and draws them in a second `THREE.Points` pass (same geometry, same uniforms
+  object, `RAIL_OVERLAY` shader define, renderOrder 1) that culls everything
+  BUT the members — ≤8 vertices survive, zero fragment cost, on top of the
+  whole field. The overlay is `visible` only while the rail is engaged and is
+  pre-compiled at load, so prior scenes pay nothing and the first scrub frame
+  never hitches.
+- **The hero ball reads as THE OBJECT.** As `railT → 1` an overlay ball
+  resists the scene dim and the §19 pricelens luminance/density gain (a
+  lifted ball is the drama's object, not its cell's price — a death-over
+  cell would otherwise render its hero near-black). Compiled only under
+  `RAIL_OVERLAY` (`railKeep` is constant 0 in the main pass), so every
+  non-rail scene renders byte-identically. This is what lets the C5-11
+  payoff ignite a single ball IN PLACE on the worth grid: one index, the
+  slot set to the ball's own cell centre, `dimRest: 1` so the rest of the
+  field keeps the scene dim.
+- **Hybrid contract holds.** Names and numbers are DOM: the scene's ball chips
+  anchor at the slots; the WP worm is the scene's SVG on the annotation plane.
+  The GL ball is the object; the chip is the label.
+
+Membership is a **uniform index set** (≤ `RAIL_MAX_SLOTS` = 8) — no per-point
+attribute, no wire cost, nothing baked.
+
+### 20.3 Staging, reduced motion, picking, nav
+
+- A cross-cutting POSITION modifier: the shell dev-warns if the rail engages
+  while a `resort` / `cascade` / `rivers` is also engaged (stage them apart).
+- **Reduced motion:** the resolved end state renders the balls AT their slots
+  instantly (live-rendered, never baked); the C5-3 six-panel DOM strip is the
+  scene's mandated fallback content.
+- **Picking:** rail members are not pickable while lifted (they leave the main
+  + pick passes; the chips are the tap surface — ≥44px, richer content).
+- **Nav dimming (integration note):** the shell's structural set-piece
+  detection (§6) keys on layout/reveal changes and does NOT see the rail; if
+  the ☰ should dim through C5-2/C5-3, extend that detection to "either side
+  declares an `overrail`" in Story.svelte (shell change, one clause) — the
+  field-side dimming (`dimRest`) is already carried by this capability.
+
+---
+
+## 21. The WPA subset-highlight — Ch 5's biggest-swing lift (R3b-2 `'wpa'` class)
+
+The existing §2 subset highlight, extended with one class: `'wpa'` matches the
+balls whose **win-chance swing** (WPA, batting-team perspective, from
+`wpa.u8`) is at least `wpaThreshold` in ABSOLUTE size. Reuses the whole
+highlight pipeline — lift, boost, othersDim, skipWpl, lerped engagement — so
+it composes with any layout (dim the worth grid, lift the decisive balls) and
+spends nothing.
+
+```ts
+fieldState: {
+  layout: 'worth',
+  pricelens: { table: 'recent' },
+  highlight: { class: 'wpa', wpaThreshold: 0.3,   // |ΔWP| ≥ 30 in 100
+               lift: 0.12, boost: 0.8, othersDim: 0.25 }
+}
+```
+
+- **Encoding (mirrors the pipeline's `wpa_buffer` decode spec):** byte = 127 +
+  round(wpa×127) clamped 0..254 (127 = zero swing; decode (byte−127)/127,
+  resolution ≈ 0.008); **byte 255 = sentinel** "no honest tag" (D/L,
+  undecided, short-target matches — exactly what the win grids exclude).
+  Constants `WPA_ZERO_BYTE` / `WPA_SENTINEL_BYTE` in `field/types.ts`.
+- `wpaThreshold` (0..1) resolves to byte units as max(1, round(t×127)) — a
+  threshold of 0 can never match the whole field, and **sentinel balls never
+  match** (they take the others path silently; never surface them as swings).
+- **Pipeline dependency:** `wpa.u8` (`FieldData.wpa`); auto-detected,
+  `hasWpaAttr` flips true. Absent → every ball bakes the sentinel and the
+  class matches nothing (graceful). Packed into `aPrice` with the state cell
+  (§19.6).
+- The highlight class is position-affecting only via its lift (shared
+  `computeCore()`), so the pick pass tracks lifted swings exactly.

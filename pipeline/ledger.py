@@ -84,6 +84,17 @@ CH4_SET_FILES = ("scenes/ch4.json", "innings_total.u8")
 # tables it reads are counted in the engines check, not here. Lazy-loaded at the
 # interlude; held to the per-chapter budget.
 INTERLUDE_SET_FILES = ("scenes/interlude.json",)
+# R3b-2 Chapter 5 "What a Ball Is Worth": the whole chapter — the defended-band
+# contrast, RE-surface drift + third-wicket validation, linear weights + the
+# per-season price board, the Wicket Value Index, the finisher cliff, the 2019
+# final scrub over + WP worm, league WPA headlines, the 20 franchise payoff
+# cards, the WPL beats and the footnote layer — ships in one scene doc
+# (scenes/ch5.json), plus two per-point buffers: wpa.u8 (signed-quantized WPA,
+# batting-team perspective, 1 byte/point) and restate.u8 (the RE-grid state
+# cell over*10+wickets, 1 byte/point, the controlling-morph coordinate). The
+# engine grids it reads are counted in the engines check, not here. All
+# lazy-loaded at Ch 5 entry; held to the per-chapter budget.
+CH5_SET_FILES = ("scenes/ch5.json", "wpa.u8", "restate.u8")
 # Engine tables under engines/: R2a's engine #1 (par/SR+) + engine #5 (entry
 # states) consumed by Chapter 2, plus the parallel-track engine #2 (re288) +
 # engine #3 (wp_grid) built during R2/R3a and consumed in R3b. All lazy-loaded
@@ -130,6 +141,7 @@ def build_ledger(out_root: Path = canon.OUT_ROOT) -> dict:
     ch3_files = [n for n in CH3_SET_FILES if n in artifacts]
     ch4_files = [n for n in CH4_SET_FILES if n in artifacts]
     interlude_files = [n for n in INTERLUDE_SET_FILES if n in artifacts]
+    ch5_files = [n for n in CH5_SET_FILES if n in artifacts]
     engine_files = sorted(n for n in artifacts if n.startswith(ENGINES_PREFIXES))
 
     checks = [
@@ -183,6 +195,13 @@ def build_ledger(out_root: Path = canon.OUT_ROOT) -> dict:
             "actual_gz": gz_sum(INTERLUDE_SET_FILES),
             "pass": bool(interlude_files)
             and gz_sum(INTERLUDE_SET_FILES) <= BUDGET_CHAPTER_GZ,
+        },
+        {
+            "name": "chapter ch5 (scene + wpa/restate buffers)",
+            "files": ch5_files,
+            "budget_gz": BUDGET_CHAPTER_GZ,
+            "actual_gz": gz_sum(ch5_files),
+            "pass": bool(ch5_files) and gz_sum(ch5_files) <= BUDGET_CHAPTER_GZ,
         },
         {
             "name": "engines (ch2 par/entry + R3b parallel-track re288/wp_grid)",

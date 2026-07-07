@@ -354,6 +354,84 @@ export const FOOTNOTES = {
 			'When we say the same chase came off about twenty-three in a hundred in 2008 to 2012 and about thirty-one in a hundred now, that is the win rate over every chase at least that hard in each era, not one square of the table, so it does not jump around the way a single square would. One honesty note: the counts behind each era are ball-by-ball states inside a short window near the same point of the chase, not separate matches, so the number of distinct games behind them is smaller than the raw counts suggest, and an eight-in-a-hundred gap on that base is less nailed down than it looks. So we say “about”, and the part we stand behind is the direction: the same chase is easier now than it was.',
 			'The women’s league has played 88 matches, so most spots have too few real chases to say anything honest about. Any WPL square built on fewer than a dozen chases, or fewer than fifteen innings for the runs table, is marked and shown hatched with “not enough WPL cricket yet”, instead of a smoothed number that would look like a finding. As the WPL plays more cricket, more of the table fills in.'
 		]
+	},
+	'ch5-over': {
+		title: 'How the worm is read',
+		paragraphs: [
+			'The worm is a lookup, not a guess. For each spot in the over (runs needed, balls left, wickets in hand) its height is how often chasing sides win from that kind of spot, out of a hundred, read from the same win table the Net Session put under your fingers. The final anchor is pinned to what actually happened: Chennai finished one run short, so the worm ends at zero.',
+			'The table buckets the ask (how many an over you still need), so two neighbouring balls can land in the same square and the worm holds flat between them. That is the table being honest, not the drama being flattened. And the raw history behind each spot lives here, one click deep on purpose: out of every time that exact endgame has ever come up in the league, how many chasing sides actually won. Needing 9 off 6 has come up 26 times; 17 of those chases got home.',
+			'Inside a final over no single era holds enough of these exact endgames to read honestly, so those raw reads lean on the league’s whole last-over history there. Everywhere else in the chapter, prices are stamped with their own era. We treat “inside the last over, the ask matters far more than the era” as a working assumption and say so plainly here rather than as a fact.',
+			'The swing on each chip is simply the worm after the ball minus the worm before it. Ball four carries one price for one delivery: the completed single and the run out are the same ball. And a single ball can cross both a wicket boundary and an ask boundary at once, which is how a late delivery can post a huge swing out of a thinly-stocked square; every readout is the locked table verbatim.',
+			'The over is the same for every reader, on purpose. It is the chapter’s shared-culture moment, and the worm prices the spot, not the players standing on it. Naming whose moment it was is the payoff card’s job, and your own team’s biggest ball is waiting at the end of the chapter.',
+			'One more thing this table quietly gives us: for every delivery ever bowled, how hard the match COULD swing at that moment. The sandbox will use it to flag “decision balls”, the deliveries bowled when everything was on the line. The technical name is Leverage Index.'
+		]
+	},
+	'ch5-wpa': {
+		title: 'How every ball gets its tag',
+		paragraphs: [
+			'Every delivery’s tag is its before-and-after read on the win table: the chance the batting side wins from the spot after the ball, minus the chance from the spot before it. The tables are built per era from the ball-by-ball record of 1,331 matches, because identical totals carry wildly different win chances in different eras; the era stamp is not optional, it is the finding. Each row is also nudged so a harder ask never prints as easier than a softer one.',
+			'6,579 deliveries carry no honest tag and are left out rather than fudged: the 23 rain-rule matches, games with no decided winner, and chases set less than a full 20-over target. The tie matches count for the side that won the super over. When the chapter says “every ball here carries that tag”, this is the fine print that keeps it honest.',
+			'Who gets the credit is a choice, and we say so. Each ball’s swing is credited to the striker and debited to the bowler; run outs go to the fielding side. The swing itself is the measured fact, but the split is our accounting convention: the non-striker and most fielders are invisible to it, and other honest splits exist. The payoff cards use exactly these credits.',
+			'The 170-to-189 pair, reconciled: the on-screen 73 and 39 are the raw defended shares of real 170-to-189 first innings, from 41 matches then and 54 now. The engine’s smoothed curve reads the same band at about 70 and about 40; it exists so every total, even rare ones, has a stable read. Raw carries the scene, smoothed lives here.',
+			'And the check that makes the whole system trustworthy: group every real chase by the chance the table gave it and see how often those groups actually won. Across the full history the table’s stated chances match reality to about one in a hundred. The technical name is calibration.'
+		]
+	},
+	'ch5-worth': {
+		title: 'How the runs-left map is built',
+		paragraphs: [
+			'A cell is a match situation: the over of the innings across, wickets already down going down the side. Its price is the average runs a first innings still scored from that spot, smoothed so thin cells borrow from their neighbours; a single season’s cells run as thin as 26 to 77 innings, which is why era bands and pooling are mandatory and the map never quotes one season alone.',
+			'Chase balls sit on the map too, placed by their real over-and-wickets state. The price painted on their cell is the first-innings “what a batting side usually still gets from here”, exactly the number the Net Session’s runs meter used. Chases get their own currency everywhere it matters: the worm, the finisher chart, and the payoff card all read the win table instead.',
+			'Brightness honesty: a cell’s brightness tracks its price, never its crowd. The first over with nobody out holds thousands of times more balls than the deep late rows, so per-ball brightness is rebalanced cell by cell before the price is painted. A crowded cheap cell can never outshine a sparse expensive one.',
+			'One demoted exhibit lives here: the same innings priced under another era’s physics. Gilchrist’s 109 off 47 in the 2008 final chased a target of 155. That chase opens at 71 in 100 on the 2008-2010 table and at 84 in 100 on the 2023-2026 table: a knock that was a massive swing in its own time reads as merely a very good day at today’s prices. It is a re-pricing of the record, never a simulation of play.'
+		]
+	},
+	'ch5-drift': {
+		title: 'The rise, cell by cell',
+		paragraphs: [
+			'The rise lens is a subtraction: each cell’s new price minus its old one, 2023-2026 minus 2008-2010. Where it burns brightest, the price rose most, which is why the map glows hardest along its left edge: the very first over’s column rose most of anywhere on the map (about 29 runs), because from there the whole richer innings still lay ahead. Averaged cell by cell, the middle overs (7 to 15) rose by about 3.7 runs, the only stretch of the innings that rose at all.',
+			'Not every cell rose, and none are hidden. The first six overs read about 1.2 runs LOWER per cell on average across the eras, and the last five about 0.2 lower; under the rise lens those fallen cells simply render dark. Nothing is clipped to make the map look more uniformly brighter than it is.',
+			'The third-wicket readout is a two-cell subtraction: the price of losing your third wicket at over seven is the gap between the 2-down and 3-down cells at that over. On the locked, calibration-checked era tables the gap reads about 12 runs then and about 6 now.',
+			'How big that collapse looks depends on the window and the smoothing, so here is the full spread. The raw, unsmoothed reads at that exact spot: 11.8 runs then (53 and 33 innings behind the two cells) and 3.5 across 2023-2026 (68 and 39 innings). A probe on the newest three seasons alone puts it near 1 run, which is where an earlier draft’s “nearly free” teaser came from. The number on screen is the gate-checked table’s answer, the more conservative one, on purpose.'
+		]
+	},
+	'ch5-prices': {
+		title: 'The price board, and both wicket numbers',
+		paragraphs: [
+			'How a price is computed: take the runs-left table before the ball and after it, subtract, add the runs the ball itself scored, and average over every ball of that kind in the era. That is the whole recipe. The board’s prices are derived from the locked era tables in the pipeline and shipped as data; nothing is fitted in your browser.',
+			'Why a single can cost runs at all: it moves the total by one but spends one of a limited 120 balls. In a league scoring quicker than a run a ball, that trade now loses ground, about a quarter of a run on average. It used to be almost exactly a fair swap.',
+			'A price is an average, not a ruling. The single’s price is averaged over the situations singles actually happen in; a single that keeps a set batter on strike can still be the right ball. The board prices habits, not decisions.',
+			'The chapter shows two wicket numbers and both are true. The board’s wicket price (about 7.0 runs then, 7.6 now) includes the scoring chance the ball itself wasted. The price-tag scene’s number (4.2 to 5.1) is the state change alone, priced at the moment each real bowler-credited wicket fell, with run outs set aside for the fielding side. Two honest accountings of one event.',
+			'And the pair that looks like a contradiction: the third wicket at a calm over-seven spot got dramatically cheaper, while the average wicket’s removed-runs value ROSE. Both hold, because modern wickets fall in bigger, hotter moments at higher scoring rates. The spot got cheap; the moments got expensive. That reconciliation is the chapter’s sharpest nugget.',
+			'The catalog’s “+33%” wicket appreciation is the same table on a newer window: measured on 2024-2026 alone the wicket removes about 5.5 runs, roughly a third up on the early era. The chapter’s own era bands (2023-2026) give the more conservative +23% against scoring’s +20%. Same recipe, different window, both shown.',
+			'A death-over dot is not a powerplay dot; prices split by phase are a sandbox view to come.'
+		]
+	},
+	'ch5-finisher': {
+		title: 'The finisher cohort, pinned',
+		paragraphs: [
+			'The cohort definition, exactly: chases read at the moment exactly 30 balls remain (the start of the final five overs), full 20-over targets only, rain-hit chases excluded, the tie matches counted for the side that won the super over, and one read per match so a stalling team cannot vote twice. The bands are the required rate at that moment.',
+			'The raw counts behind the headline: needing 8 to 10 an over from there, 17 of 31 such chases came off in 2008-2010 and 35 of 41 in 2023-2026. Small cohorts, printed on the chart rather than hidden behind a rate.',
+			'The rest of the curve: at 10 to 12 an over the win rate roughly jumped from 35 in 100 to 50, and past twelve both eras still sit near 12 in 100. That last part is why the chapter says the cliff MOVED rather than crumbled: beyond the new fatal rate, chases die exactly like they always did.',
+			'One demoted exhibit lives here: the wider chase-difficulty map. Needing 30 to 42 runs off the last 24 balls with five or more wickets in hand went from 68 in 100 (25 of 37 chases) in 2008-2010 to 88 in 100 (37 of 42) in 2023-2026. The full state-by-state map, with famous chases crawling across it, is a sandbox view to come.'
+		]
+	},
+	'ch5-wpl': {
+		title: 'The mask, and a cohort of eleven',
+		paragraphs: [
+			'The evidence mask is the same rule the Net Session taught, at the same thresholds: any WPL runs-left cell built on fewer than 15 innings renders hatched, “not enough WPL cricket yet”, never a smoothed number dressed as a finding. That is 155 of the 200 cells today. The hatch is a texture laid over the map, never a dimming, so a thin cell can never be misread as a cheap one.',
+			'Where the mask bites and any cricket HAS been played, the honest alternative to a fitted surface is the observed record itself: the actual runs-to-come from the real innings that passed through that spot. Real outcomes as real marks, never a curve pretending to be one.',
+			'The finisher cohort is forming live: 9 of 11 is about 82 in 100, but eleven chases is a young list. The direction is the finding; the digit will move as the league plays. It lands above the IPL’s early-era rate and below its modern one, on the WPL’s own clock.',
+			'A league can sit between two IPL eras on one dial and off the IPL’s map entirely on another. That is not a contradiction, it is the whole thesis of the next chapter, and the tightest-finishes line is its opening argument.'
+		]
+	},
+	'ch5-payoff': {
+		title: 'How your most valuable ball is found',
+		paragraphs: [
+			'Every delivery in your franchise’s history gets its before-and-after win read on its own era’s table, credited by the chapter’s accounting: the striker credited, the bowler debited, run outs to the fielding side. The card shows the single biggest swing the pipeline found, and the release checks assert the card’s number equals the emitted maximum, so what you read is what the data says.',
+			'Why a defended last ball or a run out can out-swing a six: late in a tight chase, one delivery carries the whole match. The swing measures the match, not the shot’s beauty. Some of the biggest balls in history are scrambled twos and lbw shouts.',
+			'WPL cards are priced on the evidenced WPL and pooled tables, and four seasons is a short list. The card says so on its face: a young history is a promise, not a deficit.',
+			'The replay’s worm reads YOUR team’s win chance, which may be the defending side. The canonical over earlier in the chapter reads the chasing side. Same method, different referent, which is why the two worms can quote different numbers for similar spots.'
+		]
 	}
 } as const satisfies Record<string, FootnoteEntry>;
 
