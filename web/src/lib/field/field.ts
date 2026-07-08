@@ -601,6 +601,51 @@ export function createField(opts: FieldOptions): FieldHandle {
 	const groupSeason = new Array<number>(groupCount).fill(0);
 	for (const g of data.groups) groupSeason[g.gi] = g.season;
 
+	/* ---- per-group data texture (uGroupTex) ---------------------------------
+	 * SEVEN per-group uniform ARRAYS (uCols/uStar/uFlow/uResortX/uRiverX/uTideX/
+	 * uGroupSeason) collapsed into ONE RGBA-float data texture so the shared vertex
+	 * program links under the WebGL2 256-vertex-uniform-vector floor on mobile GPUs
+	 * (array elements never pack, so 189 uniform rows were hard rows → link failure
+	 * on a phone, blacking out every scene). The uWorthTex / uMatchTex precedent —
+	 * a highp sampler2D texelFetch'd in the vertex shader, proven on the target GPUs.
+	 * Width = groupCount, height = 4 ROWS (row·gi·channel index = (row*groupCount +
+	 * gi)*4 + channel; mirrors ivec2(gi, row) in-shader):
+	 *   row 0 = uCols        RGBA = (colX, wallRowY, 0, 0)
+	 *   row 1 = uStar        RGBA = (phaseA.x, phaseA.y, phaseB.x, phaseB.y)
+	 *   row 2 = uFlow        RGBA = (seasonX, baselineY, trueY, slope)
+	 *   row 3 = packed       RGBA = (resortX, riverX, tideX, groupSeason-as-float)
+	 * A full re-upload is groupCount*16 floats (~368) — cheap; each feed site writes
+	 * ITS slice and flags needsUpdate. */
+	const GROUP_TEX_ROWS = 4;
+	const groupData = new Float32Array(groupCount * 4 * GROUP_TEX_ROWS);
+	const groupTex = new THREE.DataTexture(
+		groupData,
+		groupCount,
+		GROUP_TEX_ROWS,
+		THREE.RGBAFormat,
+		THREE.FloatType
+	);
+	groupTex.minFilter = THREE.NearestFilter;
+	groupTex.magFilter = THREE.NearestFilter;
+	groupTex.needsUpdate = true;
+	/** Write the four RGBA channels of (row, gi) into uGroupTex and flag a re-upload. */
+	function writeGroupRow(row: number, gi: number, r: number, g: number, b: number, a: number): void {
+		const o = (row * groupCount + gi) * 4;
+		groupData[o] = r;
+		groupData[o + 1] = g;
+		groupData[o + 2] = b;
+		groupData[o + 3] = a;
+		groupTex.needsUpdate = true;
+	}
+	/** Write a single channel (0..3) of the packed-scalars row 3 for gi and flag it. */
+	function writeGroupScalar(gi: number, channel: number, value: number): void {
+		groupData[(3 * groupCount + gi) * 4 + channel] = value;
+		groupTex.needsUpdate = true;
+	}
+	// groupSeason is static (gi → season year) — write row 3 channel w (3) once. Years
+	// 2008-2026 are exact in float32; the shader reads them back with int(grpRow(gi,3).w).
+	for (let gi = 0; gi < groupCount; gi++) writeGroupScalar(gi, 3, groupSeason[gi]);
+
 	// gi → the NEXT same-league season's gi (or -1), for the Ch 7 twin-rivers slope
 	// (§23): each river segment tilts toward its next season so the band flows. Static
 	// (the season groups never change), computed once.
@@ -652,16 +697,13 @@ export function createField(opts: FieldOptions): FieldHandle {
 	camera.position.set(0, 0, 5);
 	camera.lookAt(0, 0, 0);
 
-	// per-group table: x = column centre x · y = wall row centre y
-	const colVectors: THREE.Vector2[] = data.groups.map(() => new THREE.Vector2());
+	// per-group column centre x + wall row centre y now live in uGroupTex row 0
+	// (writeGroupRow(0, gi, colX, wallRowY, 0, 0)); the re-sort column x (row 3.x),
+	// dismissal-rivers strip x (row 3.y) and tide season-block x (row 3.z) likewise
+	// live in the packed-scalars row — no separate backing arrays needed.
 
-	// per-point re-sort ordinal (filled on demand, §7) and per-group column x
+	// per-point re-sort ordinal (filled on demand, §7)
 	const subOrd = new Float32Array(n);
-	const resortX = new Float32Array(groupCount);
-	// per-group dismissal-rivers strip centre x (filled on resize, §16)
-	const riverX = new Float32Array(groupCount);
-	// per-group tide season-block centre x (filled on resize, §18)
-	const tideX = new Float32Array(groupCount);
 
 	/* ---- constellation star tables (§22 — the Ch 6 season map) --------------
 	 * The per-phase 23×(x,y) NORMALIZED star tables, fed once via setStarTables.
@@ -669,8 +711,7 @@ export function createField(opts: FieldOptions): FieldHandle {
 	 * the shader lerps them by uStarMix. No per-point position ever crosses the
 	 * wire — the render reads uStar off the ball's group id (position.y). */
 	const starTables = new Map<ConstellationPhase, Float32Array>();
-	const starVectors: THREE.Vector4[] = data.groups.map(() => new THREE.Vector4());
-	// which (phaseA, phaseB) pair is currently copied into starVectors — so a
+	// which (phaseA, phaseB) pair is currently copied into uGroupTex row 1 — so a
 	// phase LERP (A/B fixed, mix moving) only touches uStarMix, never re-copies.
 	let appliedStarKey = '';
 	let appliedPhaseA: ConstellationPhase = 'all';
@@ -831,10 +872,10 @@ export function createField(opts: FieldOptions): FieldHandle {
 		invalidate();
 	}
 
-	// Copy the (phaseA, phaseB) tables into the packed uStar vec4 array (xy = A,
-	// zw = B) and set the lerp. The copy runs only when the phase PAIR changes;
-	// a pure phase glide (A/B fixed, mix moving) only updates uStarMix, so the
-	// toggle is a minimal per-frame touch (demand mode preserved).
+	// Copy the (phaseA, phaseB) tables into uGroupTex row 1 (xy = A, zw = B) and set
+	// the lerp. The copy runs only when the phase PAIR changes; a pure phase glide
+	// (A/B fixed, mix moving) only updates uStarMix, so the toggle is a minimal
+	// per-frame touch (demand mode preserved).
 	function applyStarArrays(a: ConstellationPhase, b: ConstellationPhase, mix: number): void {
 		const key = `${a}>${b}`;
 		if (key !== appliedStarKey) {
@@ -842,14 +883,15 @@ export function createField(opts: FieldOptions): FieldHandle {
 			const ta = starTables.get(a);
 			const tb = starTables.get(b);
 			for (let gi = 0; gi < groupCount; gi++) {
-				starVectors[gi].set(
+				writeGroupRow(
+					1,
+					gi,
 					ta ? ta[gi * 2] : 0,
 					ta ? ta[gi * 2 + 1] : 0,
 					tb ? tb[gi * 2] : 0,
 					tb ? tb[gi * 2 + 1] : 0
 				);
 			}
-			uniforms.uStar.value = starVectors;
 		}
 		uniforms.uStarMix.value = mix;
 		appliedPhaseA = a;
@@ -945,7 +987,12 @@ export function createField(opts: FieldOptions): FieldHandle {
 			const dx = flowVectors[ng].x - flowVectors[gi].x;
 			flowVectors[gi].w = Math.abs(dx) > 1e-6 ? (flowVectors[ng].z - flowVectors[gi].z) / dx : 0;
 		}
-		uniforms.uFlow.value = flowVectors;
+		// flowVectors stays the working store (the slope pass above + getFlowLayout
+		// readback read it); mirror it into uGroupTex row 2 (seasonX, baselineY, trueY, slope).
+		for (let gi = 0; gi < groupCount; gi++) {
+			const v = flowVectors[gi];
+			writeGroupRow(2, gi, v.x, v.y, v.z, v.w);
+		}
 		uniforms.uFlowHalfPitch.value = flowLayout.cellHalfW;
 		uniforms.uFlowBandHalf.value = riverTable.bandThickness * 0.5 * flowLayout.height;
 	}
@@ -1271,7 +1318,10 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uColBottom: { value: -0.68 },
 		uColUsableH: { value: 1.38 },
 		uInvMaxCount: { value: 1 },
-		uCols: { value: colVectors },
+		// per-group data texture (uCols row 0 · uStar row 1 · uFlow row 2 · packed
+		// scalars row 3) — collapses the 7 per-group uniform arrays into ONE sampler
+		// so the shared vertex program links under the mobile 256-vector floor.
+		uGroupTex: { value: groupTex },
 		uWallLeft: { value: -0.84 },
 		uWallWidth: { value: 1.68 },
 		uWallCellHalfW: { value: 0.02 },
@@ -1290,14 +1340,14 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uResortTint: { value: 0 },
 		uResortOthersDim: { value: 1 },
 		uResortInvMax: { value: 1 },
-		uResortX: { value: resortX },
+		// uResortX → uGroupTex row 3 channel x
 		uPickedTeam: { value: -1 },
 		uTeamColor: { value: new THREE.Color('#ffffff') },
 		uWallHeatMix: { value: 0 },
 		// facet filter (§12) — all inactive by default (R1a scenes unaffected)
 		uFilterTeam: { value: -1 },
 		uFilterSeason: { value: -1 },
-		uGroupSeason: { value: groupSeason },
+		// uGroupSeason → uGroupTex row 3 channel w (written once at init)
 		uFilterRangeLo: { value: 0 },
 		uFilterRangeHi: { value: 0 },
 		uFilterMatch: { value: -1 },
@@ -1336,7 +1386,7 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uRiverBottom: { value: 0 },
 		uRiverHeight: { value: 1 },
 		uRiverHalfW: { value: 0.01 },
-		uRiverX: { value: riverX },
+		// uRiverX → uGroupTex row 3 channel y
 		// tide skyline (§18) — geometry set on every resize (letterboxed box); the
 		// packed per-point record (aTide) is baked on demand when tide first engages
 		uTideBottom: { value: -0.5 },
@@ -1345,7 +1395,7 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uTideBlockHalfW: { value: 0.02 },
 		uTideCellHalfW: { value: 0.002 },
 		uTideReservoirH: { value: 0.15 },
-		uTideX: { value: tideX },
+		// uTideX → uGroupTex row 3 channel z
 		// waterline (§18) — inactive by default (uWaterLevel < 0), so R1/R2 render
 		// byte-identically (the drown branch is a shader no-op)
 		uWaterLevel: { value: -1 },
@@ -1377,7 +1427,7 @@ export function createField(opts: FieldOptions): FieldHandle {
 		// + the phase-toggle lerp + the letterboxed box geometry (set on resize).
 		// Zero until setStarTables is fed, so the map collapses to the origin
 		// (graceful; R1..R5 never use the constellation layout — byte-identical).
-		uStar: { value: starVectors },
+		// uStar → uGroupTex row 1 (phaseA.xy, phaseB.zw)
 		uStarMix: { value: 0 },
 		uConstHalfExtent: { value: 0.82 },
 		uConstStarR: { value: 0.045 },
@@ -1386,7 +1436,7 @@ export function createField(opts: FieldOptions): FieldHandle {
 		// (the rivers collapse to the origin — graceful; R1..R6 never use flow), and
 		// the lift defaults to 1 (true heights). Read only while the flow layout is
 		// in the mix, so every prior scene renders byte-identically.
-		uFlow: { value: flowVectors },
+		// uFlow → uGroupTex row 2 (seasonX, baselineY, trueY, slope)
 		uFlowHalfPitch: { value: 0.02 },
 		uFlowBandHalf: { value: 0.05 },
 		uFlowLift: { value: 1 },
@@ -1616,11 +1666,11 @@ export function createField(opts: FieldOptions): FieldHandle {
 		// per-column x jitter < the column pitch (2·blockHalfW / nCols) so the
 		// densest season's thin columns stay separated, sparser seasons a touch more.
 		uniforms.uTideCellHalfW.value = (tideLayout.blockHalfW / Math.max(1, tideMaxCols)) * 0.7;
+		// per-group tide season-block centre x → uGroupTex row 3 channel z (2)
 		for (let gi = 0; gi < groupCount; gi++) {
 			const x = tideLayout.xs[gi];
-			tideX[gi] = Number.isNaN(x) ? 0 : x;
+			writeGroupScalar(gi, 2, Number.isNaN(x) ? 0 : x);
 		}
-		uniforms.uTideX.value = tideX;
 	}
 
 	// Identify first-innings innings as maximal contiguous runs of equal
@@ -1887,11 +1937,11 @@ export function createField(opts: FieldOptions): FieldHandle {
 	function rebuildResortColumns(): void {
 		if (resortColumnsMode === null) return;
 		const rl = computeResortColumns(data.groups, halfWCache, halfHCache, resortColumnsMode);
+		// per-group re-sort column centre x → uGroupTex row 3 channel x (0)
 		for (let gi = 0; gi < groupCount; gi++) {
 			const x = rl.xs[gi];
-			resortX[gi] = Number.isNaN(x) ? 0 : x;
+			writeGroupScalar(gi, 0, Number.isNaN(x) ? 0 : x);
 		}
-		uniforms.uResortX.value = resortX;
 		const entry = resortCache.get(resortKey);
 		resortInfo = {
 			xs: rl.xs,
@@ -2425,11 +2475,11 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uniforms.uRiverBottom.value = riversLayout.bottom;
 		uniforms.uRiverHeight.value = riversLayout.height;
 		uniforms.uRiverHalfW.value = riversLayout.stripHalfW;
+		// per-group dismissal-rivers strip centre x → uGroupTex row 3 channel y (1)
 		for (let gi = 0; gi < groupCount; gi++) {
 			const rx = riversLayout.xs[gi];
-			riverX[gi] = Number.isNaN(rx) ? 0 : rx;
+			writeGroupScalar(gi, 1, Number.isNaN(rx) ? 0 : rx);
 		}
-		uniforms.uRiverX.value = riverX;
 		// tide skyline (§18): the fixed-aspect letterboxed box + season-block x's
 		applyTideGeometry();
 		// worth grid (§19): the fixed-aspect letterboxed 20×10 box
@@ -2465,8 +2515,9 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uniforms.uWallWidth.value = wallLayout.width;
 		uniforms.uWallCellHalfW.value = wallLayout.cellHalfW;
 		uniforms.uWallRowHalfH.value = wallLayout.rowHalfH;
+		// per-group column centre x + wall row centre y → uGroupTex row 0 (colX, wallRowY, 0, 0)
 		for (let gi = 0; gi < groupCount; gi++)
-			colVectors[gi].set(columnLayout.xs[gi], wallLayout.rowYs[gi]);
+			writeGroupRow(0, gi, columnLayout.xs[gi], wallLayout.rowYs[gi], 0, 0);
 
 		// re-sort column x's follow the width; rebuild if a re-sort is live
 		if (resortColumnsMode !== null) rebuildResortColumns();
@@ -2495,6 +2546,68 @@ export function createField(opts: FieldOptions): FieldHandle {
 		dprQuery.addEventListener('change', onDprChange, { once: true });
 	}
 	watchDpr();
+
+	// ---- On-phone GL diagnostic (?gldebug=1) --------------------------------
+	// Captures any shader compile/LINK failure + the GPU caps into a fixed DOM
+	// overlay so, if the persistent field ever renders black on a device with no
+	// console, the exact cause (e.g. a program that failed to link because it
+	// exceeded MAX_VERTEX_UNIFORM_VECTORS) is readable ON THE PHONE. Installed
+	// BEFORE the first compile/render so onShaderError catches a link failure.
+	// PROD-safe (NOT gated on import.meta.env.DEV) and a complete no-op when the
+	// param is absent.
+	if (
+		typeof location !== 'undefined' &&
+		new URLSearchParams(location.search).get('gldebug') === '1'
+	) {
+		const errs: string[] = [];
+		let glDebugEl: HTMLPreElement | null = null;
+		const paint = (): void => {
+			const gl = renderer.getContext() as WebGL2RenderingContext;
+			const lines: string[] = [];
+			lines.push(`field points: ${n}`);
+			lines.push(`GL_VERSION: ${gl.getParameter(gl.VERSION)}`);
+			lines.push(`GLSL_VERSION: ${gl.getParameter(gl.SHADING_LANGUAGE_VERSION)}`);
+			lines.push(`MAX_VERTEX_UNIFORM_VECTORS: ${gl.getParameter(gl.MAX_VERTEX_UNIFORM_VECTORS)}`);
+			lines.push(`MAX_FRAGMENT_UNIFORM_VECTORS: ${gl.getParameter(gl.MAX_FRAGMENT_UNIFORM_VECTORS)}`);
+			lines.push(
+				`MAX_VERTEX_TEXTURE_IMAGE_UNITS: ${gl.getParameter(gl.MAX_VERTEX_TEXTURE_IMAGE_UNITS)}`
+			);
+			const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+			if (dbg) {
+				lines.push(`UNMASKED_VENDOR: ${gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL)}`);
+				lines.push(`UNMASKED_RENDERER: ${gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)}`);
+			} else {
+				lines.push('WEBGL_debug_renderer_info: unavailable');
+			}
+			lines.push(
+				`EXT_color_buffer_float: ${gl.getExtension('EXT_color_buffer_float') ? 'present' : 'absent'}`
+			);
+			lines.push(
+				`OES_texture_float_linear: ${gl.getExtension('OES_texture_float_linear') ? 'present' : 'absent'}`
+			);
+			lines.push('');
+			lines.push(
+				errs.length ? `SHADER ERRORS (${errs.length}):` : 'shader errors: none captured'
+			);
+			for (const e of errs) lines.push(e);
+			if (!glDebugEl) {
+				glDebugEl = document.createElement('pre');
+				glDebugEl.style.cssText =
+					'position:fixed;left:0;top:0;max-width:100vw;max-height:100vh;overflow:auto;' +
+					'z-index:2147483647;margin:0;padding:8px;background:rgba(0,0,0,0.85);color:#0f0;' +
+					'font:11px/1.35 ui-monospace,monospace;white-space:pre-wrap;word-break:break-word;';
+				document.body.appendChild(glDebugEl);
+			}
+			glDebugEl.textContent = lines.join('\n');
+		};
+		renderer.debug.onShaderError = (gl, program): void => {
+			errs.push(gl.getProgramInfoLog(program as WebGLProgram) || 'link failed, no log');
+			paint();
+		};
+		// paint the caps once now (covers the success path); onShaderError repaints
+		// with the captured log if a compile/link fails during the first render.
+		paint();
+	}
 
 	// Pre-compile every program in the visible scene — including the (invisible
 	// until Ch 5) rail overlay — so engaging the rail never hitches the set-piece
@@ -2551,6 +2664,7 @@ export function createField(opts: FieldOptions): FieldHandle {
 			pickMaterial.dispose();
 			pickTarget.dispose();
 			worthTex.dispose();
+			groupTex.dispose();
 			matchTex.dispose();
 			matchBoundsTex.dispose();
 			renderer.dispose();

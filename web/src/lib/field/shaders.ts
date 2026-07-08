@@ -146,7 +146,18 @@ uniform float uColHalfWidth;  // column body half-width (world)
 uniform float uColBottom;     // column base y (world)
 uniform float uColUsableH;    // tallest column height (world)
 uniform float uInvMaxCount;   // 1 / max group count
-uniform vec2 uCols[GROUP_COUNT]; // per-group: (column centre x, wall row centre y)
+// Per-group data texture (GROUP_COUNT × 4 RGBA float; texelFetch'd via grpRow()).
+// Collapses SEVEN per-group uniform ARRAYS (uCols/uStar/uFlow/uResortX/uRiverX/
+// uTideX/uGroupSeason — 189 hard vertex-uniform rows, since array elements never
+// pack) into ONE sampler so the shared program links under the WebGL2 256-vertex-
+// uniform-vector floor on mobile GPUs (desktop reports 1024, so it linked there;
+// a phone at the floor failed to LINK and blacked out every scene). Rows:
+//   row 0 = uCols        RGBA = (colX, wallRowY, 0, 0)
+//   row 1 = uStar        RGBA = (phaseA.x, phaseA.y, phaseB.x, phaseB.y)
+//   row 2 = uFlow        RGBA = (seasonX, baselineY, trueY, slope)
+//   row 3 = packed       RGBA = (resortX, riverX, tideX, groupSeason-as-float)
+// The uWorthTex / uMatchTex vertex-texture precedent — proven on the target GPUs.
+uniform highp sampler2D uGroupTex;
 uniform float uWallLeft;      // wall left edge (world)
 uniform float uWallWidth;     // wall width (world)
 uniform float uWallCellHalfW; // balls-faced cell jitter half-width (world)
@@ -165,7 +176,7 @@ uniform float uResortLift;    // world-units peak of the flight arc
 uniform float uResortTint;    // two-tone recolor strength 0..1 (top-10 vs rest)
 uniform float uResortOthersDim; // luminance × for non-matching points while engaged
 uniform float uResortInvMax;  // 1 / max per-group subset count (column height norm)
-uniform float uResortX[GROUP_COUNT]; // per-group re-sort column centre x (world)
+// per-group re-sort column centre x → uGroupTex row 3.x (grpRow(gi,3).x)
 uniform float uPickedTeam;    // ignite: picked-team id (-1 = none)
 uniform vec3 uTeamColor;      // picked team's color
 uniform float uWallHeatMix;   // 0 = outcome colour · 1 = era-relative heat (C1-2 thesis beat)
@@ -174,7 +185,7 @@ uniform float uWallHeatMix;   // 0 = outcome colour · 1 = era-relative heat (C1
 //      facet; failing points are hidden/ghosted (uFilterDim) and never pickable.
 uniform float uFilterTeam;    // team id to keep, or -1 = team facet inactive
 uniform int uFilterSeason;    // season YEAR to keep, or -1 = season facet inactive
-uniform int uGroupSeason[GROUP_COUNT]; // gi → season year (season-facet lookup)
+// gi → season year (season-facet lookup) → uGroupTex row 3.w (int(grpRow(gi,3).w))
 uniform float uFilterRangeLo; // point-index range lo (inclusive); range facet
 uniform float uFilterRangeHi; //   active iff uFilterRangeHi > uFilterRangeLo
 uniform float uFilterMatch;   // match index to keep, or -1 (needs aMatchIndex)
@@ -223,7 +234,7 @@ uniform float uRiversMute;      // team-glow desaturation 0..1 through the river
 uniform float uRiverBottom;     // world y at 0% share (the flat baseline)
 uniform float uRiverHeight;     // world height spanning 0 → 100% share
 uniform float uRiverHalfW;      // in-strip x jitter half-width (fills the strip)
-uniform float uRiverX[GROUP_COUNT]; // per-group season strip centre x (world)
+// per-group season strip centre x → uGroupTex row 3.y (grpRow(gi,3).y)
 
 // ---- Tide skyline (Ch 4, §18). Fixed-aspect, letterboxed box; x = season block
 //      (uTideX[gi]) + within-season packing, y = a column filled to the innings
@@ -235,7 +246,7 @@ uniform float uTideInvCap;      // 1 / TIDE_TOTAL_CAP (decoded-total → 0..1)
 uniform float uTideBlockHalfW;  // half-width of a season block (columns pack within ±)
 uniform float uTideCellHalfW;   // per-column x jitter half-width (< the column pitch)
 uniform float uTideReservoirH;  // world height of the reservoir haze band (non-first-inn)
-uniform float uTideX[GROUP_COUNT]; // per-group season block centre x (world)
+// per-group season block centre x → uGroupTex row 3.z (grpRow(gi,3).z)
 
 // ---- Waterline (Ch 4, §18). A LEVEL over the held tide layout: a first-innings
 //      column whose innings total (runs) is below uWaterLevel drowns (LUMINANCE
@@ -290,7 +301,7 @@ uniform float uRailLift;           // world-units peak of the flight arc
 //      at the origin, half-size uConstHalfExtent). A small radial jitter of
 //      radius uConstStarR makes each star a glowing disc of its own balls.
 //      Inactive for every prior layout (never code 8), so they render identically.
-uniform vec4 uStar[GROUP_COUNT];   // per-gi star: xy = phase A · zw = phase B (normalized [-1,1])
+// per-gi star (xy = phase A · zw = phase B, normalized [-1,1]) → uGroupTex row 1 (grpRow(gi,1))
 uniform float uStarMix;            // 0 = phase A · 1 = phase B (the phase-toggle lerp)
 uniform float uConstHalfExtent;    // world half-size of the [-1,1] star frame (letterboxed)
 uniform float uConstStarR;         // world radius of a star's jitter disc
@@ -305,7 +316,7 @@ uniform float uConstStarR;         // world radius of a star's jitter disc
 //      own balls (NOT a ball-count encoding). x jitters ±uFlowHalfPitch so adjacent
 //      seasons meet and the ribbon reads continuous. Inactive for every prior layout
 //      (never code 9), so R1..R6 render byte-identically.
-uniform vec4 uFlow[GROUP_COUNT];   // per-gi: (seasonX, baselineY, trueY, slope) in world units
+// per-gi (seasonX, baselineY, trueY, slope) in world units → uGroupTex row 2 (grpRow(gi,2))
 uniform float uFlowHalfPitch;      // in-season x jitter half-width (half the year pitch, world)
 uniform float uFlowBandHalf;       // decorative band half-thickness (world; constant, not ball count)
 uniform float uFlowLift;           // 0 = baseline heights · 1 = true run-rate heights (the reveal)
@@ -404,6 +415,13 @@ const float INV32 = 1.0 / 4294967296.0;
 // row 0). Shared by the centroid (uMatchTex) and bounds (uMatchBoundsTex) fetches.
 ivec2 mtexel(int id) { return ivec2(id % uMatchTexW, id / uMatchTexW); }
 
+// per-group data-texture fetch: row 0 = uCols (colX, wallRowY) · row 1 = uStar
+// (phaseA.xy, phaseB.zw) · row 2 = uFlow (seasonX, baselineY, trueY, slope) ·
+// row 3 = packed scalars (resortX, riverX, tideX, groupSeason). Replaces the 7
+// per-group uniform ARRAYS (189 vertex-uniform rows) with ONE texelFetch so the
+// program links under the WebGL2 256-vertex-uniform-vector floor on mobile GPUs.
+vec4 grpRow(int gi, int row) { return texelFetch(uGroupTex, ivec2(gi, row), 0); }
+
 vec3 pickLayout(int id, vec3 pFree, vec3 pCols, vec3 pWall, vec3 pWorms, vec3 pFrontier, vec3 pTide, vec3 pWorth, vec3 pConst, vec3 pFlow, vec3 pMatch) {
 	if (id == 1) return pCols;
 	if (id == 2) return pWall;
@@ -425,7 +443,7 @@ bool isHazeLayout(int id) { return id == 4 || id == 5; }
 // Facet filter (R1b §12): true iff the point passes every ACTIVE facet.
 bool passesFilter(int gi) {
 	if (uFilterTeam >= 0.0 && abs(aTeam - uFilterTeam) >= 0.5) return false;
-	if (uFilterSeason >= 0 && uGroupSeason[gi] != uFilterSeason) return false;
+	if (uFilterSeason >= 0 && int(grpRow(gi, 3).w) != uFilterSeason) return false;
 	if (uFilterRangeHi > uFilterRangeLo &&
 		(position.x < uFilterRangeLo || position.x >= uFilterRangeHi)) return false;
 #ifdef HAS_MATCH
@@ -525,7 +543,7 @@ Core computeCore() {
 	}
 
 	// season columns
-	vec2 col = uCols[gi];
+	vec2 col = grpRow(gi, 0).xy; // uCols[gi] → uGroupTex row 0 (colX, wallRowY)
 	vec3 posCols = vec3(
 		col.x + (h4 * 2.0 - 1.0) * uColHalfWidth,
 		uColBottom + (ord + h2 * 1.5) * uInvMaxCount * uColUsableH,
@@ -583,14 +601,14 @@ Core computeCore() {
 	if (o.tideFirst) {
 		// h1 fills the column uniformly from the floor to the total (the top ≈ total)
 		posTide = vec3(
-			uTideX[gi] + tideColPos * uTideBlockHalfW + (h4 * 2.0 - 1.0) * uTideCellHalfW,
+			grpRow(gi, 3).z + tideColPos * uTideBlockHalfW + (h4 * 2.0 - 1.0) * uTideCellHalfW,
 			uTideBottom + h1 * tideNorm * uTideHeight,
 			(h3 - 0.5) * 0.25
 		);
 	} else {
 		// reservoir haze: spread across the season block, low near the floor
 		posTide = vec3(
-			uTideX[gi] + (h4 * 2.0 - 1.0) * uTideBlockHalfW,
+			grpRow(gi, 3).z + (h4 * 2.0 - 1.0) * uTideBlockHalfW,
 			uTideBottom + h1 * uTideReservoirH,
 			(h3 - 0.5) * 0.25
 		);
@@ -621,7 +639,8 @@ Core computeCore() {
 	// (centred at the origin), matching constellationPoint() exactly so the SVG
 	// worm / threads / labels can never drift. A radial jitter (h4 angle, h1
 	// radius; linear radius → a centre-dense glow) makes the star a disc of balls.
-	vec2 starN = mix(uStar[gi].xy, uStar[gi].zw, uStarMix);
+	vec4 starV = grpRow(gi, 1); // uStar[gi] → uGroupTex row 1 (phaseA.xy, phaseB.zw)
+	vec2 starN = mix(starV.xy, starV.zw, uStarMix);
 	float starAng = h4 * 6.28318530718;
 	float starRad = uConstStarR * h1;
 	vec3 posConstellation = vec3(
@@ -641,7 +660,7 @@ Core computeCore() {
 	// year, so the two rivers coexist on one time axis and diverge at 2023. This
 	// matches flowSeasonToX / flowRateToY in layout.ts exactly, so the SVG
 	// centrelines / axis / fork marker can never drift from the GL ribbons.
-	vec4 fv = uFlow[gi];
+	vec4 fv = grpRow(gi, 2); // uFlow[gi] → uGroupTex row 2 (seasonX, baselineY, trueY, slope)
 	float flowXOff = (h4 * 2.0 - 1.0) * uFlowHalfPitch;
 	float flowCy = mix(fv.y, fv.z, clamp(uFlowLift, 0.0, 1.0)) + fv.w * flowXOff;
 	vec3 posFlow = vec3(
@@ -734,7 +753,7 @@ Core computeCore() {
 		float re = clamp(uResortEngage * 1.55 - delay, 0.0, 1.0);
 		re = re * re * (3.0 - 2.0 * re);
 		vec3 posCol = vec3(
-			uResortX[gi] + (h4 * 2.0 - 1.0) * uColHalfWidth,
+			grpRow(gi, 3).x + (h4 * 2.0 - 1.0) * uColHalfWidth,
 			uColBottom + (aSubOrd + 0.5 + h2 * 0.6) * uResortInvMax * uColUsableH,
 			(h3 - 0.5) * 0.25
 		);
@@ -755,7 +774,7 @@ Core computeCore() {
 		float rv = clamp(uRiversEngage * 1.55 - delay, 0.0, 1.0);
 		rv = rv * rv * (3.0 - 2.0 * rv);
 		vec3 posBand = vec3(
-			uRiverX[gi] + (h4 * 2.0 - 1.0) * uRiverHalfW,
+			grpRow(gi, 3).y + (h4 * 2.0 - 1.0) * uRiverHalfW,
 			uRiverBottom + aRiverPos * uRiverHeight,
 			(h3 - 0.5) * 0.25
 		);
@@ -829,7 +848,7 @@ Core computeCore() {
 	o.cascadeFall = 0.0;
 	o.cascadeFlash = 0.0;
 	if (uCascadeClass >= 0.0 && o.runOut) {
-		float seasonPos = clamp((float(uGroupSeason[gi]) - uCascadeMinSeason) * uCascadeInvSpan, 0.0, 1.0);
+		float seasonPos = clamp((grpRow(gi, 3).w - uCascadeMinSeason) * uCascadeInvSpan, 0.0, 1.0);
 		// carry the sweep just past 1 so the final season fully falls at sweep 1
 		float effSweep = uCascadeSweep * (1.0 + CASCADE_FLASH_W);
 		float local = (effSweep - seasonPos) / CASCADE_FLASH_W;

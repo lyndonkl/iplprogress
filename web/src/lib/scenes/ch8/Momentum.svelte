@@ -138,9 +138,6 @@
 		return panelCaptionStyle(panel);
 	});
 
-	const residSeq = $derived(
-		mo ? Object.values(mo.summary.boundary_residuals).map((v) => pct0((v - 1) * 100)) : []
-	);
 	const stamped = $derived(reduced || step >= 6 ? 4 : 3);
 
 	function pick(claim: string): void {
@@ -216,44 +213,50 @@
 			{#if step === 1}
 				<div class="scene-card">
 					<p>
-						Pick a momentum claim. The needle is what really happened. The shaded band behind it is
-						those same balls dealt back in random order, hundreds of times, what pure chance looks
-						like. Clear the band, the needle turns green, something real. Land inside, it stays grey,
-						just a feeling.
+						Every commentator swears by momentum. So let us test it. The tall needle is what really
+						happens on the field. The grey band behind it is those same balls shuffled into a random
+						order, hundreds of times over, so it shows what pure luck would look like. If a belief is
+						real, the needle breaks clear of the band. If it is just a feeling, it sits inside.
 					</p>
 				</div>
 			{:else if step === 2}
 				<div class="scene-card">
 					<p>
-						A wicket brings the next wicket. Commentary gospel. The needle lands dead inside the band,
-						grey. Lately it even sits on the wrong side of the no-effect line.
+						First belief: one wicket brings another. The dreaded collapse. But the needle sits dead
+						inside the grey. After a wicket falls, the next ball is no likelier to take one than any
+						other ball. The collapse is a story we tell, not a thing the data does.
 					</p>
 				</div>
 			{:else if step === 3}
 				<div class="scene-card">
-					<p>Now, hitting begets hitting. After a boundary, the next is a touch likelier. The needle clears the band, green.</p>
+					<p>
+						Second belief: hitting begets hitting. Middle a boundary and the next comes easier. And
+						here the needle does break clear of the grey. At first glance, this one looks real.
+					</p>
 				</div>
 			{:else if step === 4}
 				<div class="scene-card">
 					<p>
-						But hold the same batter fixed, their own balls reshuffled. Most of that edge was good
-						batters batting. The band grows, the needle barely clears, and a bracket labels what is
-						left: the real part, about {chart?.residPct ?? 7} in 100.
+						But watch. Freeze it to one batter and shuffle only his own balls. Nearly all of the edge
+						vanishes. The boundaries came in a bunch because a good batter was in and set, not because
+						one shot fed the next. Kohli middles three fours in an over because he is Kohli, not
+						because the over had momentum.
 					</p>
 				</div>
 			{:else if step === 5}
 				<div class="scene-card">
 					<p>
-						And the real part has held steady. About {residSeq[0] ?? 7} in 100, season after season
-						({residSeq.join(', ')}). What shrank is the bigger raw number, and that was mostly good
-						batters batting all along.
+						A thin sliver is left, and it is real: about {chart?.residPct ?? 7} more boundaries in
+						every 100 than pure luck alone. And it has held steady, era after era. That sliver is the
+						only true momentum in the game. The rest was a good batter batting.
 					</p>
 				</div>
 			{:else}
 				<div class="scene-card">
 					<p>
-						Belief four: momentum. Graded on the whole record: mostly a feeling. The wicket half is a
-						myth, and the hitting half is nearly all good batting, with a sliver of something real.
+						Belief four: momentum. Graded on the whole record: mostly a feeling. The collapse is a
+						myth. The hot streak is nearly all just a good batter in form, with a sliver of something
+						real underneath.
 					</p>
 					<button class="fn" onclick={() => footnotesOpen.set('ch8-momentum')}>ⓘ how we graded momentum</button>
 				</div>
