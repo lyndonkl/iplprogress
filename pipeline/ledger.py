@@ -130,6 +130,19 @@ CH7_SET_FILES = ("scenes/ch7.json",)
 # per-point buffer (pairing.u16 belongs to Ch 9). Lazy-loaded at Ch 8 entry; held
 # to the per-chapter budget.
 CH8_SET_FILES = ("scenes/ch8.json",)
+# R5b Chapter 9 "The Living League": the whole chapter — the duel-web controlling-
+# morph tables (nodes[277] + duels[1,691] with per-duel ball-by-ball replays), the
+# auction-heartbeat per-season squad-overlap series (IPL + WPL) with its min-max
+# envelope and five mega-auction troughs, the loyalty spectrum (the vanishing one-club
+# player + the most-shirts record), the WPL age-matched comparison, the 16 payoff
+# variants, the Collapse Contagion footnote figure, and the ch9-* footnote strings —
+# ship in one scene doc (scenes/ch9.json), PLUS the one new per-point buffer pairing.u16
+# (per delivery the duel id 0..1690 or the 0xFFFF dust sentinel, in flatten season-
+# blocked point order aligned with group_ids.u16). The pairing is delivered to the field
+# as a DATA TEXTURE (uPairingTex indexed by point-index in-shader), NOT a 15th vertex
+# attribute, so the field holds at 14. Lazy-loaded at Ch 9 entry; held to the per-
+# chapter budget (pairing.u16 measures about 95 KB gz).
+CH9_SET_FILES = ("scenes/ch9.json", "pairing.u16")
 # Engine tables under engines/: R2a's engine #1 (par/SR+) + engine #5 (entry
 # states) consumed by Chapter 2, plus the parallel-track engine #2 (re288) +
 # engine #3 (wp_grid) built during R2/R3a and consumed in R3b. All lazy-loaded
@@ -180,6 +193,7 @@ def build_ledger(out_root: Path = canon.OUT_ROOT) -> dict:
     ch6_files = [n for n in CH6_SET_FILES if n in artifacts]
     ch7_files = [n for n in CH7_SET_FILES if n in artifacts]
     ch8_files = [n for n in CH8_SET_FILES if n in artifacts]
+    ch9_files = [n for n in CH9_SET_FILES if n in artifacts]
     engine_files = sorted(n for n in artifacts if n.startswith(ENGINES_PREFIXES))
 
     checks = [
@@ -261,6 +275,13 @@ def build_ledger(out_root: Path = canon.OUT_ROOT) -> dict:
             "budget_gz": BUDGET_CHAPTER_GZ,
             "actual_gz": gz_sum(ch8_files),
             "pass": bool(ch8_files) and gz_sum(ch8_files) <= BUDGET_CHAPTER_GZ,
+        },
+        {
+            "name": "chapter ch9 (Living League scene doc + pairing.u16 buffer)",
+            "files": ch9_files,
+            "budget_gz": BUDGET_CHAPTER_GZ,
+            "actual_gz": gz_sum(ch9_files),
+            "pass": bool(ch9_files) and gz_sum(ch9_files) <= BUDGET_CHAPTER_GZ,
         },
         {
             "name": "engines (ch2 par/entry + R3b parallel-track re288/wp_grid)",

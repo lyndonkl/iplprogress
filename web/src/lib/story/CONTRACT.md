@@ -1,4 +1,4 @@
-# Story Shell Contract — R1a (+ R1b field capabilities: §11 picking · §12 filtering; + R2a Ch 2: §13 worm-space · §14 run-out cascade; + R2b Ch 3: §15 frontier plane · §16 dismissal rivers; + MF §17 mobile "read, then watch" captions; + R3a Ch 4: §18 tide skyline + waterline; + R3b-2 Ch 5: §19 worth grid + pricelens · §20 over rail · §21 WPA highlight; + R4a Ch 6: §22 constellation + phase toggle; + R4b Ch 7: §23 twin rivers `flow` + impact-sub sparks; + R5a Ch 8: §24 match-dots `matchdots` + toss lanes · §25 review chips)
+# Story Shell Contract — R1a (+ R1b field capabilities: §11 picking · §12 filtering; + R2a Ch 2: §13 worm-space · §14 run-out cascade; + R2b Ch 3: §15 frontier plane · §16 dismissal rivers; + MF §17 mobile "read, then watch" captions; + R3a Ch 4: §18 tide skyline + waterline; + R3b-2 Ch 5: §19 worth grid + pricelens · §20 over rail · §21 WPA highlight; + R4a Ch 6: §22 constellation + phase toggle; + R4b Ch 7: §23 twin rivers `flow` + impact-sub sparks; + R5a Ch 8: §24 match-dots `matchdots` + toss lanes · §25 review chips; + R5b Ch 9: §26 duel web `duelweb`)
 
 The scene system every scene builder codes against. The shell (this directory +
 `lib/field/` + `lib/state/`) is owned by the story-shell architect; **scene
@@ -140,7 +140,8 @@ scene's held `fieldState` isn't the right jump-cut target, declare
 ## 3. Field states you may NOT invent
 
 - One controlling morph per chapter (morph budget). Ch 1's is free→wall …
-  Ch 8's is free→matchdots (§24). Everything else is a subset-highlight (e.g.
+  Ch 8's is free→matchdots (§24), Ch 9's is free→duelweb (§26). Everything else
+  is a subset-highlight (e.g.
   Ch 8's 988 review chips, §25) or a 2D annotation-plane scene (e.g. Ch 8's
   belief-reality crossover, scene-authored SVG) — the review chips and the
   crossover spend no morph.
@@ -2058,8 +2059,10 @@ monotone block-start point indices) as a second data texture (`uMatchBoundsTex`,
 binary search of `position.x`** against it (~11 `texelFetch`, morph-frames only),
 then `texelFetch`es that match's centroid + toss + result from `uMatchTex`.
 `match_bounds` ships **inside `scenes/ch8.json`**, never as a separate `.u16`
-buffer. Keep any future flag packed the same way — do not reach for the 15th
-attribute (that slot is Ch 9's `aPairing`, §26).
+buffer. Keep any future flag packed the same way — do not reach for a 15th
+attribute. (Ch 9's duel web was the last capability that might have needed one;
+it too holds the line at 14, delivering its per-point `pairing` through a data
+texture indexed by `position.x`, not an attribute — §26.)
 
 ### 24.3 The toss lanes — `SceneFieldState.matchSplit` (a held scalar, NOT a re-sort, NOT a second morph)
 
@@ -2313,11 +2316,229 @@ cognitive-design must-fix. Rebuilt on resize; re-read after each `applyState`.
 
 ---
 
-## 26. The duel web — Ch 9's controlling morph (R5b `duelweb` layout) — RESERVED
+## 26. The duel web — Ch 9's controlling morph (R5b `duelweb` layout)
 
-**Reserved for Chapter 9 (The Living League, R5b); NOT built in R5a.** The
-`duelweb` layout (LayoutId code 11) is the sole future capability that adds the
-**15th vertex attribute** (`pairing.u16` → `aPairing`), whose on-target program
-compile is the release-blocking check flagged in §24.2. `duelweb` is already
-folded into the §2 layout union so the type is forward-declared, but its section
-is intentionally left as a reservation — do not implement it until R5b.
+Chapter 9's single controlling morph (free→duelweb, analogous to Ch 1's free→wall
+… Ch 8's free→matchdots). Every ball condenses onto its **rivalry strand**: the
+field of 316,199 deliveries becomes a **duel web** of **277 player nodes** (244
+IPL + 33 WPL) and **1,691 duel strands** (every ≥30-ball batter-vs-bowler
+pairing). The **79,378 balls (25.1%)** that live inside a ≥30-ball duel cluster
+onto their duel's **strand-midpoint** — a contested duel reads as one bright dense
+**knot** on its strand, the knot spreading with the duel's ball count (honest
+cardinality, not a sized dot) — while the other **236,821 balls (74.9%)** are
+**DUST**, held in a diffuse low-alpha background scatter. Node positions are a
+**build-time force layout** baked into `scenes/ch9.json`; the field **never
+re-embeds the graph live** (the §22 constellation precedent, §26.3). Positions are
+read **in-shader from data textures indexed by point-index** — there is **no new
+per-point buffer bound as a vertex attribute** and no positions cross the wire
+(§26.2). The field **STAYS at 14 vertex attributes** (this supersedes the §24.2
+reservation of a 15th `aPairing` attribute — Ch 9 holds the line at 14). Add
+nothing yourself — the shell owns the layout.
+
+### 26.1 Declaring it
+
+```ts
+fieldState: {
+  layout: 'duelweb',
+  duelReveal: 1,      // web drawn (duel balls condensed onto their strands)
+  duelDominance: 0,   // identity colour (no dominance hue yet)
+  duelDustDim: 1,     // dust at full luminance
+  strandRecede: 0     // every duel present (no hero isolation)
+}   // free→duelweb is the morph
+```
+
+Each duel ball flies to its duel's strand-midpoint + a **deterministic in-shader
+jitter that grows with the duel's ball count** (the constellation
+`posConstellation` / match-dots disc precedent), so a duel reads as one soft KNOT
+of its own deliveries; dust settles into a diffuse haze. Hue stays identity
+(outcome colours, the WPL teal shift, the picked team lit on top — the reader's
+**team stays ignited**, its rivalries glowing inside the web). The morph is the
+chapter's ONE layout morph.
+
+**The four scalars (held over the web, driven from `dynamicState`).** Each lerps
+like any scalar (the §24 `matchSplit` / §23 `flowLift` precedent) and lands as a
+**post-morph caption STEP** — drive it 0→1 across the hold from
+`SceneDef.dynamicState(progress, held)`, and per the §12.2 orchestrator caveat
+surface it through `dynamicState` so a stray scroll re-application cannot revert
+it. All four default to their inert value, so the whole duel branch is a shader
+no-op and **every prior scene renders byte-identically**:
+
+| scalar | 0 | 1 | drives |
+|---|---|---|---|
+| `duelReveal` | duel balls dispersed into a diffuse cloud (web erased) | condensed onto their strands (web drawn) | the reveal — **and the closing "the web re-draws across the flatline years" beat**, a scalar re-engage (dip, then re-raise), NOT a second morph |
+| `duelDominance` | identity colour | each duel ball recoloured by its duel's dominance on a **batter-red ↔ bowler-blue** diverging ramp | the gated dominance hue (§26.3) |
+| `duelDustDim` | dust dimmed away | dust at full luminance | recede the dust so the strands pop (luminance ×, default 1) |
+| `strandRecede` | every duel present | every **non-focused** duel's knot recedes | hero isolation, with `setDuelFocus` (§26.2) |
+
+Because the reveal is a scalar (not the shell's layout `t`), the closing beat can
+**dissolve and re-draw the same web** — and hero isolation can push all but one
+duel away — **without spending a second controlling morph**, exactly as
+`matchSplit` / `flowLift` are post-morph scalars over their held layout.
+
+### 26.2 Feeding the tables — `field.setDuelGraph` + `field.setDuelFocus` (READ THIS)
+
+The web is fed ONCE from `scenes/ch9.json` + `pairing.u16`, before the morph
+engages, exactly like `setMatchTable` / `setStarTables` / `setWorthTables`:
+
+```ts
+const ch9 = /* scenes/ch9.json */;
+field.setDuelGraph({
+  pairing,   // pairing.u16: per-point duel_id (0xFFFF = DUST); flatten
+             //   season-blocked point order, aligns 1:1 with group_ids.u16 (~93 KB gz)
+  duels,     // ch9.duels[1691]: per-duel { px, py (strand-midpoint), color, dom, span, … }
+  nodes,     // ch9.nodes[277]: player-node { x, y, name, deg, era, league }
+  edges      // the duel edge list (a, b node indices + balls + dom) for readback
+});
+```
+
+- **`pairing` → `uPairingTex`** (an R32F data texture, ~2048 wide, one duel id per
+  point). The shader recovers a ball's duel by `texelFetch(uPairingTex,
+  position.x)` — **`position.x` already carries the point index 0..316198** (the
+  same index the §24 match binary search reads), so pairing rides **NO new vertex
+  attribute**. **`0xFFFF` is the dust sentinel.**
+- **`duels` → `uDuelTex`** (an RGBA-float per-duel table, `texelFetch` by
+  `duel_id` — the `uMatchTex` precedent): each row is the duel's **strand-midpoint
+  `(px, py)`** in the common `[-1, 1]` frame plus its **dominance colour** (−1
+  bowler-blue … +1 batter-red, Engine #6 EB-shrunk).
+- **`nodes` / `edges`** are stored for `getDuelWebLayout()` readback (§26.4) so the
+  SCENE can draw the SVG strands + player dots + tap targets; the field draws no
+  lines.
+
+```ts
+field.setDuelFocus([duelId]);   // hero isolation: focus one (or more) duels
+field.setDuelFocus(null);       // clear — every duel present again
+```
+
+`setDuelFocus` bakes **`uDuelFocusTex`** (a per-duel focus flag, `texelFetch` by
+`duel_id`); with `strandRecede` > 0 every **non-focused** duel's knot recedes,
+leaving the hero duel's knot bright while the scene fades the other SVG strands
+(§26.4). Both `setDuelGraph` and `setDuelFocus` bake ONCE — no per-frame cost,
+demand mode preserved.
+
+**Attribute-ceiling requirement (release-blocking — the §24.2 note, now discharged
+for good).** The single BufferGeometry binds **every** per-point attribute at once,
+and the field is at its ceiling of **14 attributes** — a 15th threw
+`THREE.WebGLProgram … Too many attributes` on the ANGLE/Metal build machine and
+**blacked out the WHOLE field**, not just this layout. The RESERVED §26 stub had
+earmarked the 15th slot for an `aPairing` attribute; **that plan is superseded.**
+Pairing is delivered by the `uPairingTex` **data texture indexed by `position.x`**,
+the per-duel table by `uDuelTex`, and the focus flags by `uDuelFocusTex` — all
+`texelFetch`ed (the `uMatchTex` / `uMatchBoundsTex` / `uGroupTex` precedent), so
+the field **STAYS AT 14 attributes** and the release-blocking program-compile risk
+is retired for the whole piece. The tables are **textures, not uniform arrays**,
+so they add no uniform slots either — the mobile uniform ceiling (just cleared at
+148/256) is untouched.
+
+### 26.3 Honesty lock (do not fight it)
+
+The 277 node positions are a **build-time artifact**, not a live browser embed.
+The pipeline runs a deterministic **ForceAtlas2 layout** (seed 42, `kr=0.02`,
+`kg=0.30`, 550 iterations, degree-scaled repulsion) **per connected component,
+then packs the components** — the IPL giant component centred (−0.18, 0) at scale
+0.78, the disjoint WPL component at (0.66, 0.62) at scale 0.30. The two leagues
+**share no players and are NEVER normalized together**. The web is
+**byte-deterministic** and identical every load; the field reads the precomputed
+`px/py` from `uDuelTex` and **never re-fits the graph client-side** (the §22
+"never a live re-embed in the browser" invariant). The plot's **aspect is FIXED
+and viewport-independent** — the frame **LETTERBOXES** rather than stretching, so
+the web (and its separate top-right WPL web) reads identically on desktop and
+portrait phone.
+
+- **Dust is deliberately diffuse + low-alpha** so the strands separate; carry the
+  strands by driving `duelDustDim` **down**, never by brightening dust into a
+  competing cloud.
+- **A knot is honest cardinality** (more balls → denser knot), but a **player-node
+  dot is constant radius** and a **strand's hue is dominance while its opacity is
+  ball-weight** — node size/brightness never encodes a stat (the §24
+  preattentive-honesty rule).
+- **Dominance hue is the ONE gated place hue encodes a quantity** (the §10 heat /
+  §16 rivers precedent), gated entirely to `duelDominance`; hue is identity
+  everywhere else and in every prior scene.
+- **Ship the honest deltas straight** (every on-screen number data-bound to
+  `ch9.json`, never hardcoded): **232** duels span 8+ seasons (strict recount, not
+  235); the one-club loyalists roughly halve **~27% → ~12%** (not 28→15); the five
+  mega-auction seasons flatline at a mean squad-overlap of **0.186**.
+
+### 26.4 Drawing the strands / nodes / replay / heartbeat / loyalty — `field.getDuelWebLayout()`
+
+The SVG **player-to-player strands**, the **player-node dots**, the **tap-a-duel
+replay** strip, the **axes / era legend**, and the two supporting 2D scenes are the
+**scene's job on the annotation plane** (SVG registered to field coordinates) —
+**never** GL geometry (the cardinality rule; 1,691 GL polylines is a hairball —
+the field is the dust + knots, the strands are crisp SVG on top, the §13 / §15 /
+§22 "field draws no lines" precedent). Register them with:
+
+```ts
+const dw = field.getDuelWebLayout();     // null before first resize OR before setDuelGraph — guard
+if (dw) {
+  const a = field.projectToCss(dw.nodes[edge.a].x, dw.nodes[edge.a].y);  // strand endpoint + tap target
+  const b = field.projectToCss(dw.nodes[edge.b].x, dw.nodes[edge.b].y);
+  // draw strand a→b: colour = edge.dom (batter-red ↔ bowler-blue), opacity = ball-weight
+}
+```
+
+`getDuelWebLayout()` returns (rebuilt on resize, re-read after each `applyState`):
+
+```ts
+{
+  nodes: { x, y, name, deg, era, league }[];  // per-player WORLD position, by node index
+  edges: { id, a, b, bat, bowl, balls, dom, color, span }[]; // duels: strands, tap targets, replay
+  left, width, bottom, height, halfExtent;    // the fixed-aspect letterboxed box (map arbitrary coords)
+}
+```
+
+Scene-authored, spending no §, no field change beyond the four scalars above:
+- **The strands** are drawn **opacity-weighted by ball count**
+  (`log1p(balls)/log1p(30)`, the layout's own edge weight) and coloured by
+  dominance; by default only the **top ~60** strands render (the whole 1,691-edge
+  web at once is an unreadable hairball).
+- **Hero isolation:** tap/select a duel → `setDuelFocus([id])` + drive
+  `strandRecede` → 1; the field recedes every other knot while the scene fades the
+  non-focus strands, leaving one bright strand + its dense knot.
+- **Tap-a-duel replay:** a strand's tap target (or `field.pickAt` on a knot → read
+  its `duel_id` from the held `pairing`, §11) opens a duel-replay strip naming the
+  pairing (`bat` vs `bowl`, balls · runs · dismissals, `span`). Interaction adds
+  depth — reduced-motion and no-tap readers still get the thesis (§26.5).
+- **"Condense on filter"** reuses the §12 facet filter (your team's duels light,
+  the rest ghost).
+- **The auction heartbeat** (five synchronized mega-auction flatlines, mean
+  squad-overlap **0.186**) and the **loyalty spectrum** (one-club loyalists **~27%
+  → ~12%**) are **separate 2D SVG scenes** — the particles carry no meaning in an
+  EKG or a spectrum, so these are 2D annotation-plane scenes, **NOT field morphs**
+  (the morph budget; the §24 belief-reality-crossover precedent). The field draws
+  no lines for them.
+
+### 26.5 Reduced motion & what the platform added (for the pipeline / other agents)
+
+- **Reduced motion** jump-cuts free→duelweb live (the settled web at
+  `duelReveal: 1`, the strands + player dots drawn, dust dimmed, team glow intact)
+  — declare `reducedMotionEndState: { layout: 'duelweb', duelReveal: 1,
+  duelDominance: <beat>, duelDustDim: <beat>, strandRecede: 0 }` (or let it default
+  to `fieldState`). There is no motion to watch and **no beat requires a tap**; the
+  heartbeat and loyalty 2D scenes render their static end states.
+- **New `LayoutId` `duelweb`** (code 11) + **new `FieldRenderState` fields**
+  `duelReveal`, `duelDominance`, `duelDustDim`, `strandRecede` (set by
+  `resolveRenderState`). All default inert (`duelweb` is never a layout in R1..R5a;
+  the duel branch is a shader no-op at the inert defaults) — so **R1a…R5a scenes
+  render BYTE-IDENTICALLY** (cold open, ch1-8, interlude, sandbox verified
+  unchanged; the discarded `posDuelWeb` compute never changes a prior layout's
+  returned position). `'ch9'` is already in the `ChapterId` union (added in R5a)
+  and `duelweb` is already folded into the `SceneFieldState` layout union (§2).
+- **No new per-point attribute, zero wire cost, 14 attributes held** (§26.2): the
+  render reads a ball's duel by `texelFetch`ing `uPairingTex` at `position.x`
+  (`0xFFFF` = dust → diffuse scatter, dimmed by `uDuelDustDim`), then `texelFetch`es
+  the strand-midpoint + dominance colour from `uDuelTex`; `uDuelFocusTex` +
+  `uStrandRecede` drive hero isolation, `uDuelReveal` the web draw, `uDuelDominance`
+  the gated hue. `pickLayout` returns the duel-web position at `id == 11` (both call
+  sites, both shaders).
+- **Pipeline dependency (R5b):** `scenes/ch9.json` (`nodes[277]`, `duels[1691]`
+  with `px/py/dom/color/span`, plus the `heartbeat`, `loyalty`, `payoff` and
+  footnote roll-ups) and **`pairing.u16`** (per-point duel id, `0xFFFF` dust,
+  flatten season-blocked point order, aligns with `group_ids.u16`, ~93 KB gz —
+  inside the 2 MB/chapter budget). Both **byte-deterministic** (seed 42, sorted
+  keys, gzip `mtime=0`). The force layout is a **build-time roll-up** (pure-stdlib
+  ForceAtlas2, ~6 s, no numpy, no WASM, no live re-embed); dominance is from
+  **Engine #6** (`pipeline/h2h.py`, EB-shrunk).
+- The duel-web position lives in the shared `computeCore()` (`posDuelWeb`), so the
+  pick pass tracks the knots and can never drift from the visual field (tap-a-knot
+  → `pairing` → duel).

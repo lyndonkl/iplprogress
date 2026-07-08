@@ -21,8 +21,9 @@ export const FUTURE_CHAPTERS: string[] = [
 	// 'Chapter 5: What a Ball Is Worth', 'Chapter 6: Two Dialects' and
 	// 'Chapter 7: The Twelfth Man' and 'Chapter 8: The Captain’s Brain' are now
 	// LIVE (their scenes declare a navLabel; see src/lib/scenes/ch2..ch8,
-	// interlude), so they appear as live nav items.
-	'Chapter 9: The Living League',
+	// interlude), so they appear as live nav items. 'Chapter 9: The Living
+	// League' is now LIVE too (its title scene declares the navLabel; see
+	// src/lib/scenes/ch9), so it is a live nav item, not a `soon`.
 	'Chapter 10: The Era Machine'
 	// 'The Field Is Yours' is now LIVE (the Bowl scene declares it as a navLabel;
 	// see src/lib/scenes/sandbox), so it appears as a live nav item, not a `soon`.

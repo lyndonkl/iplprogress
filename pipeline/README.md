@@ -24,6 +24,7 @@ python3 pipeline/flatten.py \
   && python3 pipeline/ch6.py \
   && python3 pipeline/ch7.py \
   && python3 pipeline/ch8.py \
+  && python3 pipeline/ch9.py \
   && python3 pipeline/payoff_harness.py \
   && python3 pipeline/ledger.py \
   && python3 -m unittest discover -s pipeline/tests -q
@@ -79,6 +80,31 @@ adoption curve, the 16 payoff variants, and the footnote layer. It imports `h2h`
 for the demoted Matchup Engineering footnote lead ONLY (the usable head-to-head history grew
 12.4%→42.1%). No new per-point buffer (`pairing.u16` belongs to Ch 9); it runs **after**
 `flatten`/`scenes` for manifest order (it registers `scenes/ch8.json` in `meta.json`);
+`ch9.py` (R5b) does its own single corpus pass in flatten's exact season-blocked point
+order (never reading an R1–R5a artifact) and imports `h2h` (Engine #6) for the person
+registry, striker-dismissal resolution, and the empirical-Bayes dominance shrinkage
+(mu 1.3322, k 51.2). It reproduces the validated **duel-web force layout** (players as
+nodes, duels as edges, ForceAtlas2-style with degree-scaled repulsion kr=0.02, linear
+attraction weight=log1p(balls)/log1p(30), gravity kg=0.30, 550 iters, **seed 42**, laid
+out per connected component then packed — the IPL giant centred, the disjoint WPL web in
+a corner) and emits `scenes/ch9.json`: the `nodes[277]` (244 men + 33 women) and
+`duels[1,691]` (≥30-ball pairings, id stable by balls-desc, each with dominance color =
+clamp((EB-shrunk runs/ball − mu)/half, ±1); +1 batter-red, −1 bowler-blue) tables and
+their per-duel ball-by-ball `replays`, the **auction heartbeat** (per-season league-mean
+squad overlap with a min-max envelope: IPL resting 0.461, the five mega-auction troughs
+2011/2014/2018/2022/2025 averaging **0.186**, plus the WPL series 2024 .476/2025 .536/2026
+.257), the **loyalty spectrum** (one-club share among 4th-plus-season players, ~27 in 100
+at its 2012 peak → ~12 at the 2022 trough, then an honest expansion-driven uptick; max
+shirts AJ Finch 9), the **WPL age-matched comparison**, the **16 payoff variants** (10 IPL
+"through the churn" + 5 WPL forming-fast + neutral), the **Collapse Contagion** footnote
+figure (aftershock ~0.95, a wicket makes the next less likely), and the `ch9-*` footnote
+strings. It ALSO emits the one new per-point buffer **`pairing.u16`** (per delivery the
+duel id 0..1690 or the `0xFFFF` dust sentinel, in flatten season-blocked point order,
+aligned with `group_ids.u16`), delivered to the field as a DATA TEXTURE (`uPairingTex`
+indexed by point-index in-shader), **NOT a 15th vertex attribute — the field holds at
+14**. Three honest deltas ship straight (232 duels ran 8+ seasons not 235; loyalty ~27→~12
+not 28→15; mega trough 0.186 not 0.185). It must run **after** `flatten`/`scenes` for
+byte-determinism (it registers `scenes/ch9.json` + `pairing.u16` in `meta.json`);
 `payoff_harness.py` emits `payoff/ch1.json`;
 `ledger.py` audits everything on disk against the blueprint §2 budgets. The harness and
 the ledger exit non-zero on failure. The whole build runs in seconds and is **byte-for-byte
@@ -102,6 +128,7 @@ verified by rebuilding and diffing checksums.
 | `ch6.py` | **R4a — Chapter 6 "Two Dialects" (IPL × WPL, beside the path not on it).** Its own corpus pass (no engine, no per-point buffer — the controlling morph reuses `group_ids.u16`) plus a pure-Python linear-algebra core (Jacobi eigensolver, classical MDS, 2×2 orthogonal-Procrustes/polar factor, Jensen-Shannon divergence). Emits `scenes/ch6.json`: the **Season Constellation Map** — each of the 23 season-groups placed by the JS distance between its 7-way per-ball outcome distribution (dot/single/two-or-three/four/six/wicket/extras), classical MDS to the all-phase MASTER star layout, each per-phase layout (PP 1-6 / middle 7-15 / death 16-20) Procrustes-aligned to it so the WPL never flips sides; emits star (x,y) per phase (stable box), the IPL chronological worm, each WPL star's nearest-IPL neighbour per phase (dotted threads) and the two-truths pairing (outcome-mix twin IPL 2008 vs run-rate twin IPL 2022); the **League Maturity Clock** (WPL yr4 8.54 == IPL yr15), **Run DNA** helix (four 46.8 vs 33.9, six 15.5 vs 29.0), **Stumping Signature** (WPL 5.2-7.9% vs IPL 2026 1.4%), **Photo-Finish** rate (WPL 24.1% the tightest league), the batting ladder + depth (WPL 2025 pos-7+ 15.3%), the 16 sister-franchise payoff variants, and the footnote layer (Star Gravity/Gini, Competitive Balance win-HHI, Powerplay Fear, Twos Culture). Registers `scenes/ch6.json` in `meta.json`. |
 | `ch7.py` | **R4b — Chapter 7 "The Twelfth Man" (the Impact Player rule as a natural experiment).** Its own corpus pass (no engine, no per-point buffer — the twin-rivers controlling morph reuses `group_ids.u16` + `attrs.u8`) in flatten's exact season-blocked point order. Emits `scenes/ch7.json`: the **natural experiment** (IPL run rate range-bound 7.5-8.7 for 2008-2022 then 8.99/9.56/9.63/9.88, vs the rule-free WPL 8.08→8.54; diff-in-diff ≈ +0.9 RPO with disclosed confounds — on screen "the control group", "diff-in-diff" one click deep), the **License Index** (at ≥4 down / overs 7-16: SR 116.8→129.9 while the dismissal rate held ~flat 4.88→4.95; top order took the licence most, +18.0% vs +11.0% for 6-8), the **event-study placebo grid** (every candidate season 2012-2025's before/after level shift + SE + t, emitted whole so the placebo cursor is a lookup; the true 2023 date clears the entire pre-rule placebo cloud, with the honest disclosure that 2024's raw magnitude edges it as the break deepens), the **Playbook Decoder** (subs at the innings break 51.8%→35.7%), the **honest null** (entry entropy flat; top-3 SR 131.5→155.3; bowlers/innings 5.79→6.12), and the **impact-sub extraction**: 556 Impact Player events across 517 distinct deliveries (WPL 0 — the control arm), the bat-vs-bowl reinforcement split (256/300), and the **spark index list** (the 517 field point indices carrying an event, the render's subset-highlight membership). 16 team-playbook payoff variants (10 IPL playbook cards + 5 WPL control-arm cards + neutral). Registers `scenes/ch7.json` in `meta.json`. |
 | `ch8.py` | **R5a — Chapter 8 "The Captain's Brain" (the belief audit, report card FFFFP).** Its own corpus pass in flatten's exact season-blocked point order (no engine, no per-point buffer). Imports `h2h` (Engine #6) for the demoted Matchup Engineering footnote lead ONLY. Emits `scenes/ch8.json`: the **match-dots** controlling-morph table (1,331 match centroids `[x, y, toss_class, result]` + `match_bounds`, the 1,331 monotone block-start point indices the field binary-searches in-shader — NO per-point attribute, the field holds at 14), the **988-chip review subset** (`indices`/`team`/`outcome`, reusing `aDismissal`/`aTeam`/`aRiverPos`), **Belief 1 toss** FAIL (field-first 42.9→77.1 while the chase never paid better 54.3/59.6/52.8; the two crossing lines + crossing point; toss-to-win ~50% every era), **Belief 2 reviews** FAIL (988 reviews 29.6% upheld; the honest delta — the success rate DEGRADED 32.8→28.1, a free fall to 16.9 by 2026, at 1.26→1.87/match), **Belief 3 spells** FAIL (one-over share 54.7→64.1, WPL 75.3; the honest delta — the cold-return tax GREW +0.16→+0.30, strict +0.18→+0.41; near-median example strips), **Belief 4 momentum** FAIL-with-a-residual (the wicket myth collapses 0.93 anti; hitting is mostly good batters batting with a FLAT ~1.07 real sliver; the raw edge 1.21→1.16 that fades is kept off the sliver claim; all shuffle nulls precomputed, fixed seed), **Belief 5 required-rate** PASS (chase powerplay 7.62→9.19 now above the middle overs, ahead-at-halfway 31.7→37.5, with the honest caveat that chasing still wins ~53%), the **WPL transmission** (a two-season adoption curve 54.5→~100, reviews 30.5 vs 29.6, out-fragments at 75.3; analytics-native, never "behind"), the **16 payoff variants** (10 IPL "your captains' report card" incl. RCB 96%/38.7% and CSK 13%/Chepauk and DC last 19.4% + 5 WPL bespoke transmission cards + neutral), and the footnote layer (`ch8-matchdots`/`toss`/`review`/`spell`/`momentum`/`required`/`wpl`/`payoff`/`matchup`/`dew`). Byte-deterministic. Registers `scenes/ch8.json` in `meta.json`. |
+| `ch9.py` | **R5b — Chapter 9 "The Living League" (institutions churn, the human fabric persists).** Its own single corpus pass in flatten's exact season-blocked point order; imports `h2h` (Engine #6) for person resolution + striker-dismissal + empirical-Bayes dominance (mu 1.3322, k 51.2). Reproduces the validated **duel-web force layout** (277 players as nodes, 1,691 ≥30-ball duels as edges; ForceAtlas2-style, degree-scaled repulsion kr=0.02, linear attraction log1p(balls)/log1p(30), gravity kg=0.30, 550 iters, **seed 42**, per connected component then packed — IPL giant centred, disjoint WPL web in a corner; the two leagues share no players so they are never normalized together — byte-identical to `scratchpad/ch9_layout.json`). Emits `scenes/ch9.json`: `duel_web` (`nodes[277]` {id,name,x,y,deg,era,league} + `duels[1691]` {id,a,b,bat,bowl,balls,runs,dis,seasons,span,dom,color,px,py} sorted by balls-desc so duel_id is stable + a `meta` block with the balls split 79,378 in-duel / 236,821 dust and the dominance-color constants), the `replays` (per-duel faced-ball code list + season run-length for the tap-a-duel strip), the `heartbeat` (per-season league-mean squad overlap + min-max envelope, IPL + WPL, the five mega-auction troughs), the `loyalty` spectrum (one-club share among 4th-plus-season players + the Finch 9-shirt record), the `wpl` age-matched comparison, the `collapse` figure (Collapse Contagion aftershock), the 16 `payoff` variants, and the `footnotes` (`ch9-duel`/`heartbeat`/`loyalty`/`payoff`/`collapse`). ALSO emits the one new per-point buffer **`pairing.u16`** (duel id or 0xFFFF dust per delivery, delivered as a data texture `uPairingTex`, holding the field at 14 vertex attributes). Byte-deterministic (seed 42, gzip mtime=0, sorted keys). Registers both artifacts in `meta.json`. |
 | `payoff_harness.py` | Payoff-card snapshot harness: emits + asserts the 16 Chapter-1 variants (R1a full spec). |
 | `ledger.py` | Payload ledger vs the §2 budgets; prints the table; writes `ledger.json`. |
 | `tests/` | `unittest` snapshot tests (see below). |
@@ -160,6 +187,8 @@ index, over, delivery index):
 | `restate.u8` **(R3b-2)** | Per-point buffer, 1 byte/point in field point order: the ball's RE-grid state cell packed `over*10 + wickets_down` (0..199). `over` = the delivery's over index 0..19 (wides/no-balls carry the over they were bowled in); `wickets_down` = dismissals before this delivery (0..9). Both innings packed; filter with the columnar `innings` array if a scene wants first innings only. Drives the Chapter 5 controlling morph (balls arrayed on the 20-over × 10-wicket grid, colored by the era RE surfaces in `scenes/ch5.json` / `engines/re288.json`). |
 | `scenes/ch5.json` **(R3b-2)** | Chapter 5 "What a Ball Is Worth": `defended_band` (170-189, raw + fitted, per era), `re_drift` (both engine surfaces + diff + the third-wicket validation), `linear_weights` (per era) + `price_board` (per season), `wicket_value` (+ the 2024-26 window + run-inflation context), `finisher` (the moving cliff), `scrub` (the 2019 final last over, ball-by-ball, WP worm + observed endgame dots + `point_indices`, the six field point indices the over-rail lifts — never client-derived), `wpa` (league headlines, top-10 swings, `season_gallery` — one ball per league-season for the neutral payoff gallery — closure + coverage; swing rows carry `point_index` + `state_cell`), `payoff` (20 franchise cards: most valuable ball ever + tappable over replay + 4 runners-up, WPL short-history state; every ball row carries `point_index` + `state_cell` for the C5-11 single-point ignite), `wpl_beat` (RE evidence mask + observed-outcome dots + finisher cohort + `match_counts`, the corpus-counted 88/1,331 the C5-10 captions bind to), `footnotes` (crediting, tie rule, first-innings WP view, smoothing, chase-difficulty + era-swap demoted exhibits), and both buffer decode specs. |
 | `scenes/ch8.json` **(R5a)** | Chapter 8 "The Captain's Brain" (the belief audit). `match_dots` (the controlling-morph table: `centroids` = 1,331 × `[x, y, toss_class, result]` — x normalized start date, y a fixed low-discrepancy spread, toss_class 0 bat-first / 1 field-first, result 1 chase-won / 0 bat-first-won / −1 undecided; `bounds` = 1,331 monotone block-start point indices in flatten point order the field binary-searches in-shader; `season`/`league` per match; `axis_ticks`), `review_subset` (the 988 IPL review deliveries: `indices`/`team`/`outcome` for `field.setReviews`, reusing `aDismissal`/`aTeam`/`aRiverPos`), `toss` (FAIL: per-era field-first 42.9→77.1 + chase-win 54.3/59.6/52.8, the two crossing lines + crossing point, the captain-sim lookup), `review` (FAIL: 988/29.6% + the DEGRADED delta 32.8→28.1 free-falling to 16.9, per-team chip lanes + leaderboard), `spell` (FAIL: one-over 54.7→64.1 WPL 75.3, the GROWN cold-return tax +0.16→+0.30 / strict +0.18→+0.41, near-median example strips), `momentum` (FAIL-with-residual: 7 claims × 4 groups with precomputed shuffle-null histograms + the batter-stratified residuals, wicket 0.93 anti + boundary residual FLAT ~1.07), `required_rate` (PASS: chase PP 7.62→9.19, ahead-at-halfway 31.7→37.5), `wpl` (the two-season adoption curve 54.5→~100, reviews 30.5, one-over 75.3), `payoff` (16 variants), `footnotes` (10 `ch8-*` strings). Engine- and buffer-free; no per-point buffer (`match_bounds` is inline, holding the field at 14 attributes). |
+| `scenes/ch9.json` **(R5b)** | Chapter 9 "The Living League". `controlling_morph` (free→duelweb: layout code 11, the pairing delivered as `uPairingTex`, four inert-default scalars duelReveal/duelDominance/duelDustDim/strandRecede), `duel_web` (`meta` {n_duels 1691, n_nodes 277, n_men 244, n_women 33, balls_split {total 316,199 · in-duel 79,378 · dust 236,821 · faced_total · faced_in_duel 77,125}, dominance_color {center_mu 1.3322, half_range}, eb {mu,sigma2,tau2,k 51.2}, force {seed 42, kr 0.02, kg 0.30}, legibility}; `nodes[277]` {id, name, x, y ∈[-1,1], deg, era, league}; `duels[1691]` sorted by balls-desc {id, a, b (node indices), bat, bowl (names), balls, runs, dis, seasons, span:[first,last], dom, color ∈[-1,1] (+1 batter-red/−1 bowler-blue), px, py (strand-midpoint cluster centre)}), `replays[1691]` (per duel {c:[ball codes 0..6 runs / 7 wicket], sb:[[season,count]] run-length} for the tap-a-duel strip; codes sum to 77,125), `heartbeat` (`ipl` {series [{season,mean,lo,hi,n}] 2009-2026 with a min-max envelope, mega_years {2011,2014,2018,2022,2025}, mega_mean **0.186**, nonmega_mean 0.461, sixth_lowest 2024=.419}, `wpl` {series 2024 .476/2025 .536/2026 .257, first_reset}), `loyalty` (series [{season,pct,one_club,veterans}], peak 2012≈26.9, trough 2022≈12.5, start/end, max_shirts {name "AJ Finch", n 9, teams, shorts}), `wpl` (n_players 33, n_duels, age_matched {wpl_duels_by_season3, ipl_duels_by_season3}, heartbeat), `collapse` (aftershock ≈0.95 — a wicket makes the next less likely), `payoff` (16 variants: 10 IPL "through the churn" {rivalry, reset, loyalist} + 5 WPL forming-fast {rivalry, duel_count} + neutral), `footnotes` (`ch9-duel`/`heartbeat`/`loyalty`/`payoff`/`collapse`). Every on-screen number reads from here; three honest deltas ship straight (232 duels 8+ seasons, loyalty ~27→~12, mega trough 0.186). |
+| `pairing.u16` **(R5b)** | The one new per-point buffer, **little-endian Uint16 per delivery** in flatten season-blocked point order (aligned with `group_ids.u16` / `attrs.u8`): value = the duel id `0..1690` the ball belongs to, or `0xFFFF` (65,535) the DUST sentinel for a ball not in any ≥30-ball duel. 316,199 entries, 632,398 B raw, ~95 KB gz; 79,378 non-dust. Delivered to the field as a DATA TEXTURE (`uPairingTex` texelFetch'd by point-index in-shader, since `position.x` already holds the point index), NOT a 15th vertex attribute, so the field holds at 14. Reproduces `scratchpad/ch9_pairing.u16` byte-for-byte. |
 | `ledger.json` | the payload audit (build report, excluded from its own budget math) |
 
 ## R1a recipe pins (metric definitions that reconcile with the catalog teasers)
@@ -472,6 +501,55 @@ the on-screen source, and where the recount differs from a blueprint teaser the 
   (2009) → 42.1% (2019) → ~32% post-2022**; the score itself is weak (~1.2×, no adoption ramp),
   kept off screen.
 
+## Chapter 9 recipe pins (R5b — "The Living League")
+
+Every number reads from the emitted `scenes/ch9.json` (ARTIFACT WINS). The force layout is
+byte-identical to the scout's validated `scratchpad/ch9_layout.json`; the dominance is Engine
+#6's (`h2h.py`) empirical-Bayes shrinkage. Three honest deltas ship straight, never fudged
+toward a teaser.
+
+- **The duel web.** A duel = a batter-bowler pairing that faced ≥ **30** legal balls (wides
+  excluded, the `h2h` convention). **1,691 duels** between **277 players (244 men + 33 women)**.
+  Players are nodes, duels are edges (weight = balls). Layout: **ForceAtlas2-style**, repulsion
+  `kr·(deg_i+1)(deg_j+1)/d` (degree-scaled — the de-hairballer), attraction linear
+  `log1p(balls)/log1p(30)`, gravity `kg·(deg+1)·pos`, **kr=0.02, kg=0.30, 550 iters, seed 42**,
+  laid out **per connected component then packed** (the IPL giant centred at (−0.18, 0) scale
+  0.78; the disjoint 33-player WPL web at (0.66, 0.62) scale 0.30 — the two leagues share no
+  players so they are never normalized together). Duel ids are stable (balls desc, then the pair
+  key). Node/duel arrays reproduce `ch9_layout.json` field-for-field.
+- **The balls split.** Of the **316,199** balls, **79,378 (25.1%)** land in one of the 1,691
+  duels and **236,821 (74.9%)** stay as dust (77,125 of the faced-ball total sit in a duel).
+- **Dominance color.** Per duel, `color = clamp((shrunk_runs_per_ball − mu) / half, ±1)`, +1
+  batter-red / −1 bowler-blue, `mu = 1.3322`, `half = 2·sd` of the shrunk per-duel values. EB
+  constants match `h2h.eb_constants` (`k = 51.2`). Because the value is shrunk, most strands land
+  pale (near-even). **Kohli vs Jadeja = duel 0: 160 balls, 179 runs, 3 dismissals, 14 seasons
+  (2009-2025); shrunk 1.17 → bowler-blue color −0.539** (Jadeja edged it).
+- **Honest delta 1 — long duels.** **232** duels ran eight seasons or longer, by a strict recount
+  counting only seasons the pair actually faced a ball (not the teaser's 235).
+- **Auction heartbeat.** Per-season league-mean squad overlap (intersection/union of each
+  franchise's roster vs the prior season, canonical identity so renames collapse), with a min-max
+  envelope across franchises. IPL resting mean **0.461**; the five mega-auction years
+  **{2011, 2014, 2018, 2022, 2025}** are the five lowest, mean **0.186** (honest delta 2 — not
+  the teaser's 0.185), a clean gap to the sixth-lowest (2024 = .419). WPL series 2024 .476 /
+  2025 .536 / 2026 .257 (its first big reset).
+- **Honest delta 3 — loyalty.** One-club share among players in their 4th+ IPL season (only ever
+  one franchise, measured season by season): peaks at **~27 in 100 (2012, 26.9)** and falls to a
+  trough of **~12 (2022, 12.5)**, roughly a halving (not the teaser's 28→15); it then ticks back
+  up honestly as the two newest franchises' four-season players are one-club by definition. Most
+  shirts: **AJ Finch, 9** (DC/GL/KKR/MI/PWI/PBKS/RR/RCB/SRH).
+- **WPL age-matched.** By its third season the WPL had formed **51** ≥30-ball duels vs the IPL's
+  **62** in its own first three seasons — forming fast at the same age, never "behind".
+- **Collapse Contagion (demoted footnote).** Pooled wicket-after-wicket lift **≈ 0.95**, below
+  one — a wicket makes the next ball slightly *less* likely to be another, consistent with
+  Chapter 8's wicket-after-wicket 0.93.
+- **Payoff (16).** 10 IPL "through the churn" cards (longest-spanning own duel + squad churn at
+  the last mega-auction + longest-serving one-club player), 5 WPL forming-fast cards (longest
+  rivalry so far + duel count), 1 neutral. No "behind" in any WPL copy; every read data-bound.
+- **`pairing.u16`.** Per delivery the duel id 0..1690 or the `0xFFFF` dust sentinel, flatten
+  season-blocked point order (aligned with `group_ids.u16`); delivered as a data texture
+  `uPairingTex`, NOT a 15th vertex attribute (the field holds at 14). Reproduces
+  `scratchpad/ch9_pairing.u16` byte-for-byte.
+
 ## Budgets (ledger) — actuals
 
 - **Cold-open critical set** (`meta.json` + `groups.json` + `group_ids.u16` +
@@ -511,8 +589,14 @@ the on-screen source, and where the recount differs from a blueprint teaser the 
   block-start indices + the 988-delivery review subset + the precomputed momentum shuffle-null
   histograms (small binned counts, not raw shuffles, so they compress hard) + the 16 payoff
   variants + the 10 footnote strings, all in one scene doc. `pairing.u16` belongs to Ch 9.
-- Full read-through ≤ 25 MB gz → actual ~1.83 MB gz (R2a engines + the parallel track + the
-  R2b/R3a/R3b/R5a chapter buffers and scene docs).
+- **Chapter 9** (`scenes/ch9.json` + `pairing.u16`, lazy-loaded at Ch 9 entry): ≤ 2 MB gz →
+  actual **213,147 B gz**. pairing.u16 632,398 B raw / **95,109 B gz** (the duel id per point,
+  0xFFFF dust — long dust runs and repeated ids compress well), ch9.json 612,442 B raw /
+  **118,038 B gz** (the 277-node + 1,691-duel tables, the per-duel ball-by-ball replays, the
+  heartbeat + envelope, the loyalty spectrum, the WPL comparison, the 16 payoff variants, and
+  the footnotes — the replays dominate the raw size and gzip hard, small integer codes).
+- Full read-through ≤ 25 MB gz → actual ~2.07 MB gz (R2a engines + the parallel track + the
+  R2b/R3a/R3b/R5a/R5b chapter buffers and scene docs).
 - The `ledger.py` rows enumerate exactly the shipped filenames (no phantom
   `draw/truth.json` / `ch1/outrate.json` rows — those never shipped; the R1a scene
   data lives in `scenes/coldopen.json` + `scenes/ch1.json`).

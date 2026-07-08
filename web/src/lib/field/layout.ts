@@ -1176,3 +1176,89 @@ export function computeReviewChips(nLanes: number, halfW: number, halfH: number)
 		slotW
 	};
 }
+
+/* ---------------------------------------------------------------------------
+ * The duel web (Ch 9 controlling morph, CONTRACT §26). Every ball condenses onto
+ * its DUEL's strand-midpoint cluster centre (px, py each in [-1,1], where that
+ * batter-vs-bowler pairing's deliveries pile) + a small radial jitter disc, so a
+ * strand reads as a glowing band of its own balls; balls in no tracked pairing
+ * scatter as low-alpha DUST. The per-duel cluster centre + dominance color + ball
+ * weight lives in a `uDuelTex` data texture; the ball's duel id is recovered
+ * in-shader by a texelFetch of `uPairingTex` (indexed by point index; 0xFFFF =
+ * dust) — both fed once via field.setDuelGraph. NO new per-point buffer, NO new
+ * vertex attribute — the field holds at 14 attributes.
+ *
+ * This layout.ts function owns only the letterboxed SQUARE box (the half-extent
+ * that maps the normalized [-1,1] node / strand-midpoint frame to world) + the
+ * constant jitter-disc radius. The per-node world coordinates are re-derived on
+ * `getDuelWebLayout()` so the scene's SVG strands, player dots and tap targets can
+ * never drift from the GL clusters.
+ *
+ * HONESTY LOCK (mirroring constellation): the pipeline emits the node + strand-
+ * midpoint coordinates PRE-NORMALIZED into ONE aspect-preserving [-1,1] frame, so
+ * the box is a true SQUARE (1 unit of x = 1 unit of y) and maps that frame into the
+ * largest square that fits, LETTERBOXING on portrait — the web reads identically on
+ * desktop and phone. NEVER a live re-embed (a browser re-fit could distort the
+ * force layout). The consts below are owner-tunable (storyboard §7); changing them
+ * keeps the fixed-aspect + letterbox invariant intact.
+ * ------------------------------------------------------------------------- */
+
+/** Fixed world width : world height for the duel-web box. 1 (square) — the node /
+ *  strand coordinates are already aspect-preserved in a common [-1,1] frame. */
+export const DUELWEB_ASPECT = 1;
+/** Fraction of the frame the fixed-aspect box fills (letterbox + label/legend room). */
+export const DUELWEB_FILL = 0.86;
+/** A strand cluster's jitter-disc radius as a fraction of the box half-extent (constant — no data). */
+export const DUELWEB_DOT_RADIUS = 0.02;
+
+export interface DuelWebLayout {
+	/** world x of the box's left edge (normalized x = -1) */
+	left: number;
+	/** world width of the box (normalized x span -1 → 1) */
+	width: number;
+	/** world y of the box's bottom edge (normalized y = -1) */
+	bottom: number;
+	/** world height of the box (== width; the data box aspect is 1) */
+	height: number;
+	/** world half-size of the [-1,1] normalized frame (== width/2 == height/2) */
+	halfExtent: number;
+	/** world radius of a strand cluster's jitter disc (mirrors the shader's uDuelDotR) */
+	dotRadius: number;
+}
+
+/**
+ * Fixed-aspect (square), letterboxed duel-web box for the current frame — the largest
+ * square that fits, centred at the origin. The node / strand-midpoint [-1,1] frame maps
+ * into it via `duelWebPoint`. Rebuilt on resize.
+ */
+export function computeDuelWeb(halfW: number, halfH: number): DuelWebLayout {
+	const frameW = 2 * halfW * DUELWEB_FILL;
+	const frameH = 2 * halfH * DUELWEB_FILL;
+	let width = frameH * DUELWEB_ASPECT;
+	if (width > frameW) width = frameW;
+	const height = width / DUELWEB_ASPECT;
+	const halfExtent = width / 2;
+	return {
+		left: -width / 2,
+		width,
+		bottom: -height / 2,
+		height,
+		halfExtent,
+		dotRadius: halfExtent * DUELWEB_DOT_RADIUS
+	};
+}
+
+/**
+ * World coordinate for a NORMALIZED duel-web position (nx, ny each in [-1,1], from
+ * `scenes/ch9.json` node / strand-midpoint coords) in the given box — the EXACT
+ * centre mapping the shader uses (the frame is centred at the origin, so world =
+ * n × halfExtent with no jitter). Scenes call this to register the SVG strands,
+ * player dots and tap targets to the GL clusters via `field.projectToCss`.
+ */
+export function duelWebPoint(
+	layout: DuelWebLayout,
+	nx: number,
+	ny: number
+): { x: number; y: number } {
+	return { x: nx * layout.halfExtent, y: ny * layout.halfExtent };
+}

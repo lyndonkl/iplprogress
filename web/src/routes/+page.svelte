@@ -17,6 +17,7 @@
 	import { scenes as ch6Scenes } from '$lib/scenes/ch6';
 	import { scenes as ch7Scenes } from '$lib/scenes/ch7';
 	import { scenes as ch8Scenes } from '$lib/scenes/ch8';
+	import { scenes as ch9Scenes } from '$lib/scenes/ch9';
 	import { scenes as endCardScenes } from '$lib/scenes/endcard';
 	import { scenes as sandboxScenes } from '$lib/scenes/sandbox';
 
@@ -45,6 +46,9 @@
 		// The Captain's Brain: the belief audit grades five analytics-era beliefs
 		// against the whole record (four fails, one pass) over the 1,331 match-dots.
 		...ch8Scenes,
+		// The Living League: institutions churn (squads, careers), the human fabric
+		// (the rivalries) persists straight through every mega-auction reset.
+		...ch9Scenes,
 		...endCardScenes,
 		...sandboxScenes
 	];

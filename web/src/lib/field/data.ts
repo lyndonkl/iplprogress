@@ -72,6 +72,13 @@ export async function loadFieldData(baseUrl: string): Promise<FieldData> {
 		const stateCell = await fetchOptionalU8(`${baseUrl}/data/restate.u8`, n);
 		const wpa = await fetchOptionalU8(`${baseUrl}/data/wpa.u8`, n);
 
+		// OPTIONAL per-point duel id (Ch 9 §26 duel web): one u16 per point (duel id
+		// 0..n_duels-1, or 0xFFFF = dust). Fed to the field as a data texture so the
+		// field holds at 14 vertex attributes. Absent until the pipeline ships
+		// pairing.u16 — fetch non-fatally so R0..R8 keep rendering; the duel web
+		// collapses to the free scatter until it arrives.
+		const pairing = await fetchOptionalU16(`${baseUrl}/data/pairing.u16`, n);
+
 		return {
 			nPoints: n,
 			meta,
@@ -88,6 +95,7 @@ export async function loadFieldData(baseUrl: string): Promise<FieldData> {
 			inningsTotal,
 			stateCell,
 			wpa,
+			pairing,
 			synthetic: false
 		};
 	} catch (err) {

@@ -112,6 +112,10 @@ interface ResolvedSceneState {
 	sparks: SparkSubset | null;
 	matchSplit: number;
 	reviews: ReviewSubset | null;
+	duelReveal: number;
+	duelDominance: number;
+	duelDustDim: number;
+	strandRecede: number;
 	teamIgnite: boolean;
 	wallHeatMix: number;
 }
@@ -135,6 +139,10 @@ export function withDefaults(s: SceneFieldState): ResolvedSceneState {
 		sparks: s.sparks ?? null,
 		matchSplit: s.matchSplit ?? 0,
 		reviews: s.reviews ?? null,
+		duelReveal: s.duelReveal ?? 0,
+		duelDominance: s.duelDominance ?? 0,
+		duelDustDim: s.duelDustDim ?? 1,
+		strandRecede: s.strandRecede ?? 0,
 		teamIgnite: s.teamIgnite ?? true,
 		wallHeatMix: s.wallHeatMix ?? 0
 	};
@@ -386,7 +394,15 @@ export function resolveRenderState(
 		reviewClass: rev ? 0 : -1,
 		reviewEngage: lerp(fromRev?.engage ?? 0, toRev?.engage ?? 0, clampedT),
 		reviewTint: rev ? rev.tint ?? 1 : 0,
-		reviewOthersDim: rev ? rev.othersDim ?? 0.12 : 1
+		reviewOthersDim: rev ? rev.othersDim ?? 0.12 : 1,
+		// duel web (§26): the four held scalars lerp like any scalar from their inert
+		// defaults (reveal 0, dominance 0, dustDim 1, recede 0), so the web draws in and
+		// settles back out; read in-shader only while the duelweb layout is in the mix, so
+		// a non-duelweb scene equals DEFAULT_RENDER_STATE.
+		duelReveal: lerp(f.duelReveal, g.duelReveal, clampedT),
+		duelDominance: lerp(f.duelDominance, g.duelDominance, clampedT),
+		duelDustDim: lerp(f.duelDustDim, g.duelDustDim, clampedT),
+		strandRecede: lerp(f.strandRecede, g.strandRecede, clampedT)
 	};
 }
 

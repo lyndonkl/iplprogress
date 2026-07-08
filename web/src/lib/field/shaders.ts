@@ -127,6 +127,15 @@ export const RAIL_STAGGER = 0.05;
  */
 export const MATCHDOTS_ALPHA = 0.5;
 
+/**
+ * Base alpha multiplier the STRAND (non-dust) points settle to in the Ch 9 duel web
+ * (§26): the ~316k balls collapse into ~1,691 strand clusters, so a moderate base
+ * alpha lets each cluster read as a soft glowing band rather than a blown-out blob.
+ * Team-ignited points resist it (personalization survives). No-op outside the duelweb
+ * layout. Owner-tunable; baked into the shader as DUELWEB_ALPHA.
+ */
+export const DUELWEB_ALPHA = 0.5;
+
 /* ---------------------------------------------------------------------------
  * Shared GLSL — the position + visibility core. Used verbatim by BOTH the
  * visual and the pick vertex shaders so their geometry can never drift.
@@ -366,6 +375,29 @@ uniform float uReviewBottom;        // world y at the stack baseline (0%)
 uniform float uReviewHeight;        // world height spanning 0 → the busiest lane
 uniform float uReviewLaneHalfW;     // in-lane x jitter half-width (fills the column)
 uniform float uReviewChipJitter;    // small in-slot y jitter (chips read as a soft stack)
+
+// ---- Duel web (Ch 9, §26). Every ball condenses to its DUEL's strand-midpoint
+//      cluster centre (px, py normalized [-1,1]) + a small radial jitter disc, so a
+//      strand reads as a glowing band of its own balls; balls in no tracked pairing
+//      scatter as low-alpha DUST. NO new per-point attribute + NO new buffer: the
+//      ball's duel id rides uPairingTex (indexed by point index; 0xFFFF = dust), and
+//      the duel's cluster centre + dominance color + ball weight is read from uDuelTex.
+//      Per-duel focus (0..1, for the strand recede) rides uDuelFocusTex (fed via
+//      setDuelFocus). The whole block is gated on the duelweb layout (code 11) being in
+//      the mix, so the fetches run ONLY on duelweb frames and every prior scene renders
+//      byte-identically.
+uniform highp sampler2D uPairingTex;   // per-point: R = duel id (0xFFFF = dust), indexed by point index
+uniform int uPairingTexW;              // pairing-texture width (point index → texel wrapping)
+uniform highp sampler2D uDuelTex;      // per-duel: (px, py normalized [-1,1], dominance color -1..1, ballWeight)
+uniform int uDuelTexW;                 // duel-texture width (id → texel wrapping)
+uniform highp sampler2D uDuelFocusTex; // per-duel: R = focus 0..1 (1 = lit · 0 = recede candidate)
+uniform int uDuelFocusTexW;            // duel-focus-texture width (id → texel wrapping)
+uniform float uDuelHalfExtent;         // world half-extent: world = normalized × this (square box)
+uniform float uDuelDotR;               // world radius of a strand cluster's constant jitter disc
+uniform float uDuelReveal;             // 0 = strand points hidden · 1 = fully drawn (the web draw)
+uniform float uDuelDominance;          // 0 = outcome colour · 1 = full red/white/blue dominance recolor
+uniform float uDuelDustDim;            // luminance × for the dust balls (1 = no dimming)
+uniform float uStrandRecede;           // 0 = every knot lit · 1 = non-focus knots receded to neutral
 `;
 
 /** Core per-point attributes (both shaders read these). */
@@ -422,7 +454,7 @@ ivec2 mtexel(int id) { return ivec2(id % uMatchTexW, id / uMatchTexW); }
 // program links under the WebGL2 256-vertex-uniform-vector floor on mobile GPUs.
 vec4 grpRow(int gi, int row) { return texelFetch(uGroupTex, ivec2(gi, row), 0); }
 
-vec3 pickLayout(int id, vec3 pFree, vec3 pCols, vec3 pWall, vec3 pWorms, vec3 pFrontier, vec3 pTide, vec3 pWorth, vec3 pConst, vec3 pFlow, vec3 pMatch) {
+vec3 pickLayout(int id, vec3 pFree, vec3 pCols, vec3 pWall, vec3 pWorms, vec3 pFrontier, vec3 pTide, vec3 pWorth, vec3 pConst, vec3 pFlow, vec3 pMatch, vec3 pDuel) {
 	if (id == 1) return pCols;
 	if (id == 2) return pWall;
 	if (id == 4) return pWorms;
@@ -432,6 +464,7 @@ vec3 pickLayout(int id, vec3 pFree, vec3 pCols, vec3 pWall, vec3 pWorms, vec3 pF
 	if (id == 8) return pConst;
 	if (id == 9) return pFlow;
 	if (id == 10) return pMatch;
+	if (id == 11) return pDuel;
 	return pFree; // 0 free · 3 assembly share the free-field scatter
 }
 
@@ -486,6 +519,10 @@ struct Core {
 	float matchWeight;   // 0..1 amount of the matchdots layout in the A/B mix (§24 settle alpha)
 	float matchGain;     // per-match density gain (§24 constant-brightness discs; 1 outside matchdots)
 	bool reviewMember;   // review-chip subset member (aDismissal >= 0 while reviews engaged, §25)
+	float duelWeight;    // 0..1 amount of the duel-web layout in the A/B mix (§26 settle / hue / recede gate)
+	float duelColor;     // per-duel dominance color -1..1 (+1 batter-red / -1 bowler-blue; 0 outside duelweb)
+	float duelFocus;     // per-duel focus 0..1 (1 = lit · 0 = recede candidate; 1 outside duelweb)
+	bool duelDust;       // true when this ball is in no tracked pairing (dust scatter) — §26
 };
 
 Core computeCore() {
@@ -712,13 +749,49 @@ Core computeCore() {
 		);
 	}
 
+	// duel web (Ch 9, §26): every ball condenses to its DUEL's strand-midpoint cluster.
+	// GATED on the duelweb layout (code 11) being in the mix, so the pairing / duel
+	// texelFetches run ONLY on duelweb frames — every prior scene skips them, and posDuel
+	// stays the cheap free scatter (pickLayout returns it only for id == 11, which never
+	// happens off the duelweb layout, so it is never USED). This keeps R0..R8 byte-
+	// identical AND spends the fetch cost only where the layout is live. NO new attribute:
+	// the ball's duel id rides uPairingTex, indexed by its own point index (position.x).
+	vec3 posDuel = posFree;
+	o.duelColor = 0.0;
+	o.duelFocus = 1.0;
+	o.duelDust = true;
+	if (uLayoutA == 11 || uLayoutB == 11) {
+		int pidx = int(position.x + 0.5);
+		int did = int(texelFetch(uPairingTex, ivec2(pidx % uPairingTexW, pidx / uPairingTexW), 0).r + 0.5);
+		if (did >= 65534) {
+			// dust: a ball in no tracked pairing → a diffuse low-alpha scatter (reuse posFree)
+			posDuel = posFree;
+			o.duelDust = true;
+		} else {
+			vec4 dv = texelFetch(uDuelTex, ivec2(did % uDuelTexW, did / uDuelTexW), 0); // (px, py, color, ballWeight)
+			o.duelColor = dv.z;
+			o.duelDust = false;
+			o.duelFocus = texelFetch(uDuelFocusTex, ivec2(did % uDuelFocusTexW, did / uDuelFocusTexW), 0).r;
+			// constant radial jitter disc (linear radius → a centre-dense glow, the
+			// constellation / match-dots precedent) so a strand reads as a disc of balls;
+			// nothing about the disc encodes a stat (design gate).
+			float dAng = h4 * 6.28318530718;
+			float dRad = uDuelDotR * h1;
+			posDuel = vec3(
+				dv.x * uDuelHalfExtent + cos(dAng) * dRad,
+				dv.y * uDuelHalfExtent + sin(dAng) * dRad,
+				(h3 - 0.5) * 0.25
+			);
+		}
+	}
+
 	// morph with per-point stagger so the field streams, not teleports
 	float delay = h3 * 0.55;
 	float t = clamp(uProgress * 1.55 - delay, 0.0, 1.0);
 	t = t * t * (3.0 - 2.0 * t);
 	vec3 pos = mix(
-		pickLayout(uLayoutA, posFree, posCols, posWall, posWorms, posFrontier, posTide, posWorth, posConstellation, posFlow, posMatch),
-		pickLayout(uLayoutB, posFree, posCols, posWall, posWorms, posFrontier, posTide, posWorth, posConstellation, posFlow, posMatch),
+		pickLayout(uLayoutA, posFree, posCols, posWall, posWorms, posFrontier, posTide, posWorth, posConstellation, posFlow, posMatch, posDuel),
+		pickLayout(uLayoutB, posFree, posCols, posWall, posWorms, posFrontier, posTide, posWorth, posConstellation, posFlow, posMatch, posDuel),
 		t
 	);
 
@@ -742,6 +815,11 @@ Core computeCore() {
 	// alpha + the per-match density gain + the size/glow flatten (§24). No-op for
 	// every prior layout (matchWeight is 0, never code 10), so R0..R7 are byte-identical.
 	o.matchWeight = (uLayoutA == 10 ? (1.0 - t) : 0.0) + (uLayoutB == 10 ? t : 0.0);
+
+	// how much of the duel-web layout (code 11) is in the mix — gates the settle alpha
+	// + the dominance hue + the strand recede + the dust dim (§26). No-op for every prior
+	// layout (duelWeight is 0, never code 11), so R0..R8 are byte-identical.
+	o.duelWeight = (uLayoutA == 11 ? (1.0 - t) : 0.0) + (uLayoutB == 11 ? t : 0.0);
 
 	// impact-sub spark lift (§23) — the POSITION change lives here so the pick pass
 	// tracks the lifted spark; the brighten/glow is per-shader (visual). Gated on
@@ -928,6 +1006,7 @@ export function makeVertexShader(
 #define RAIL_STAGGER_W ${RAIL_STAGGER.toFixed(6)}
 #define FLOW_RIBBON_A ${FLOW_RIBBON_ALPHA.toFixed(6)}
 #define MATCHDOTS_ALPHA ${MATCHDOTS_ALPHA.toFixed(6)}
+#define DUELWEB_ALPHA ${DUELWEB_ALPHA.toFixed(6)}
 ${hasMatch ? '#define HAS_MATCH' : ''}
 ${railOverlay ? '#define RAIL_OVERLAY' : ''}
 
@@ -971,6 +1050,17 @@ const vec3 C_RIVER_STUMPED = vec3(0.878, 0.373, 0.847); // #e05fd8 — stumped
 // WPL teal. Owner-tunable (storyboard §7) — the exact hues are the remaining sign-off.
 const vec3 C_REVIEW_GREEN = vec3(0.659, 0.925, 0.753); // #a8ecc0 — upheld / paid off (LIGHTER)
 const vec3 C_REVIEW_RED   = vec3(0.937, 0.353, 0.267); // #ef5a44 — struck down / call stood (DARKER)
+
+// duel-web dominance palette (C9, §26): a DIVERGING bowler-blue (-1) · neutral (0) ·
+// batter-red (+1) ramp for "who came out on top". Deliberately red-vs-blue (not
+// red-vs-green) so the read survives red-green colorblindness; a near-even (EB-shrunk)
+// duel stays pale near the neutral gray. Mirrors dominanceColor() in the ch9 scene so
+// the GL clusters and the SVG strands share one palette. C_DUEL_RECEDE is the neutral
+// low luminance non-focus knots sink toward under strandRecede.
+const vec3 C_DUEL_RED     = vec3(1.000, 0.416, 0.302); // #ff6a4d — batter came out on top
+const vec3 C_DUEL_BLUE    = vec3(0.290, 0.639, 1.000); // #4aa3ff — bowler came out on top
+const vec3 C_DUEL_NEUTRAL = vec3(0.592, 0.631, 0.722); // #97a1b8 — an even fight (pale)
+const vec3 C_DUEL_RECEDE  = vec3(0.235, 0.259, 0.325); // #3c4253 — receded non-focus knot
 
 ${coreBodyGlsl()}
 
@@ -1112,6 +1202,33 @@ void main() {
 	//      shortened match is no dimmer or brighter than a full one (the design gate).
 	//      No-op outside the matchdots layout (matchWeight 0), so R0..R7 are byte-identical.
 	alphaMul *= mix(1.0, MATCHDOTS_ALPHA * core.matchGain, core.matchWeight);
+
+	// ---- Duel web (§26): the rivalry web. Gated on the duelweb layout being in the
+	//      mix (duelWeight 0 for every prior layout → every branch below is a no-op and
+	//      R0..R8 render byte-identically). HUE stays identity until uDuelDominance > 0.
+	if (core.duelWeight > 0.0) {
+		float dw = core.duelWeight;
+		if (core.duelDust) {
+			// dust: the ~236k balls in no tracked pairing sink so the strands pop.
+			alphaMul *= mix(1.0, uDuelDustDim, dw);
+		} else {
+			// dominance hue: a diverging bowler-blue (-1) · neutral (0) · batter-red (+1)
+			// ramp, mixed in by uDuelDominance so a strand reads WHO came out on top. A
+			// near-even (EB-shrunk) duel stays pale near the neutral gray.
+			float dc = clamp(core.duelColor, -1.0, 1.0);
+			vec3 pole = dc >= 0.0 ? C_DUEL_RED : C_DUEL_BLUE;
+			vec3 domC = mix(C_DUEL_NEUTRAL, pole, abs(dc));
+			c = mix(c, domC, uDuelDominance * dw);
+			// strand recede: non-focus knots (uDuelFocusTex < 1, written by setDuelFocus)
+			// sink toward a neutral low luminance so only the focused strand(s) stay lit.
+			c = mix(c, C_DUEL_RECEDE, uStrandRecede * (1.0 - core.duelFocus) * dw);
+			// web draw: strand points fade in as uDuelReveal rises (0 → 1).
+			alphaMul *= mix(1.0, uDuelReveal, dw);
+		}
+		// settle alpha: the 316k balls collapse into ~1,691 clusters, so a moderate base
+		// alpha lets each strand read as a soft band rather than a blown-out blob.
+		alphaMul *= mix(1.0, DUELWEB_ALPHA, dw);
+	}
 
 	// ---- Worth-grid pricelens (§19): the cell's price LUMINANCE rides the
 	//      color (hue stays identity — a scalar multiply is luminance only) and
@@ -1335,6 +1452,7 @@ export function makePickVertexShader(groupCount: number, teamCount: number, hasM
 #define RAIL_MAX ${RAIL_MAX_SLOTS}
 #define RAIL_STAGGER_W ${RAIL_STAGGER.toFixed(6)}
 #define MATCHDOTS_ALPHA ${MATCHDOTS_ALPHA.toFixed(6)}
+#define DUELWEB_ALPHA ${DUELWEB_ALPHA.toFixed(6)}
 ${hasMatch ? '#define HAS_MATCH' : ''}
 
 ${UNIFORMS_GLSL}

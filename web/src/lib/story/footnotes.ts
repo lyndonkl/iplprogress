@@ -637,6 +637,63 @@ export const FOOTNOTES = {
 			'Part of why captains choose to field is not belief at all, it is the weather. In day-night matches the evening dew makes the ball skid wet and hard to grip, so bowling second is genuinely harder, which is exactly why a captain who wins the toss puts the other side in and takes the chase. The Double-Header Dew Ledger tracks how much of the field-first surge sits in dew-prone evening slots and double-headers, and it grows with the schedule.',
 			'We keep this off the main grade because it does not change the verdict (the chase-win rate stayed flat whether or not dew was in play), but it is the honest caveat on Belief 1: not every captain choosing to field is chasing a myth, some are just reading the sky. The WPL plays many day-night double-headers, so it is especially exposed to dew, part of why its field-first curve ramped so fast.'
 		]
+	},
+
+	/* ---- Chapter 9 · The Living League (r5b) ---------------------------------
+	 * The chapter's single point: institutions churn, the human fabric persists.
+	 * On screen every device wears a fan name; the technical names (the
+	 * force-directed player-duel graph, empirical-Bayes shrinkage, Jaccard squad
+	 * overlap, distinct franchises across a career, the Hawkes aftershock) live
+	 * here, one click deep (the glossary rule). Prose numbers track
+	 * scenes/ch9.json EXACTLY (the artifact wins: the three honest deltas ship
+	 * straight, 232 duels over eight seasons not 235, one-club players ~27 in 100
+	 * to ~12 not 28 to 15, and the mega-auction trough mean 0.186 not 0.185). */
+	'ch9-duel': {
+		title: 'What a duel is, and who came out on top',
+		paragraphs: [
+			'A duel is a batter and a bowler who faced each other at least thirty legal balls across the whole history. There are 1,691 of them, between 277 players, 244 in the men’s league and 33 in the women’s. Wides do not count toward those thirty balls; no-balls do, the same rule the rest of the piece uses. The technical name for the whole picture is a force-directed player-duel graph: the 277 players are its points and each duel is a link between two of them.',
+			'Of the 316,199 balls, 79,378 land in one of those duels, about a quarter of every ball ever bowled. The other 236,821 stay as dust, the deliveries that never became a lasting rivalry.',
+			'The busiest players sit dead centre, because everyone has a rivalry with them: Kohli has 76 duels, then Dhawan 65, Jadeja 59, and Rohit 57. Players also spread out by era, the 2008 crowd drifting to one edge and today’s stars to the other, so the layout itself reads as a timeline. It is computed once in the pipeline from a fixed seed, so it is the same web for every reader, and never re-fitted in your browser.',
+			'A strand’s color is how many runs a ball the batter scored against that bowler, measured against the league average of 1.3322 runs a ball. The value is pulled toward that average until the pair has faced enough balls to earn its own read, about fifty, so a thirty-ball duel never out-shouts a hundred-and-sixty-ball one. It is then clamped to a scale from plus one (all batter, deep red) to minus one (all bowler, deep blue), where a pale strand was an even fight. The technical name for that pull toward the average is empirical-Bayes shrinkage.',
+			'The headline rivalry, Kohli and Jadeja: 160 balls, 179 runs, 3 dismissals, across 14 seasons from 2009 to 2025. The shrunk read comes out to about 1.17 runs a ball, below the league average, so the strand runs bowler-blue, about minus a half on that scale. Jadeja edged it.',
+			'232 duels have run eight seasons or longer, counting only the seasons a pair actually faced a ball. That strict recount ships 232 rather than an earlier teaser’s 235, a difference of about one in a hundred. The thirty-ball cutoff is not load-bearing: dropping it adds shorter, noisier duels without changing the web’s shape, and raising it thins the tail but keeps every central player. See Collapse Contagion (ch9-collapse) for the wicket-brings-a-wicket read that Chapter 8 tested.',
+			'The men’s and women’s leagues share no players, so they are laid out as two separate webs and never mixed. The women’s web has its own 33 players, and its rivalry structure is compared to the men’s only at a matched age: how many decade-scale rivalries each league had formed by its third season, the WPL against the IPL’s first three years, so the comparison is fair by age and not by calendar.'
+		]
+	},
+	'ch9-heartbeat': {
+		title: 'How the auction heartbeat is counted',
+		paragraphs: [
+			'For each team we ask what share of last season’s squad is back this season, then average that across the league. A full re-auction resets almost everyone at once, so the line falls off a cliff. The technical name for one team’s share is the Jaccard overlap of its two squads; the line drawn on screen is the league mean of it, season over season.',
+			'The full per-season series: 2009 .421, 2010 .523, 2011 .175, 2012 .474, 2013 .471, 2014 .191, 2015 .484, 2016 .430, 2017 .479, 2018 .179, 2019 .468, 2020 .426, 2021 .504, 2022 .196, 2023 .430, 2024 .419, 2025 .190, 2026 .458. The five mega-auction years, 2011, 2014, 2018, 2022, and 2025, are the five lowest, averaging 0.186 against 0.461 in every other year. The gap is clean: the sixth-lowest season, 2024, sits all the way up at .419.',
+			'Franchises are tracked by their canonical identity, so a team that only changed its name keeps one identity and is never counted as a fresh squad.',
+			'The season scrub in the synthesis scene is built the same way: each strand knows the seasons its two players actually faced a ball, so scrubbing lights a strand only in those years, and the five reset markers are the mega-auction years from this heartbeat. The web positions never move during the scrub, only which strands are lit, so the survival is honest: the rivalries genuinely span the reset years, they are not redrawn to look continuous.',
+			'The women’s league has its own pulse: a steady squad through its early seasons, 2024 at .476 and 2025 at .536, then its first big reset in 2026 at .257. That is a young league’s compressed auction cycle, never a league behind.'
+		]
+	},
+	'ch9-loyalty': {
+		title: 'How a one-club player is counted',
+		paragraphs: [
+			'A one-club player is a player in their fourth season or later who has only ever appeared for one franchise, counted season by season. Requiring a fourth season keeps out one-season cameos, so the measure is about players with real careers, not passers-through.',
+			'That share fell from about 27 in 100 to about 12 across the seasons, roughly a halving. It ships straight, rather than an earlier teaser’s roughly 28 in 100 down to 15, a couple of points off.',
+			'At the other extreme, Aaron Finch appeared for nine different franchises, the most of any player: Delhi Capitals, Gujarat Lions, Kolkata Knight Riders, Mumbai Indians, Pune Warriors India, Punjab Kings, Rajasthan Royals, Royal Challengers Bengaluru, and Sunrisers Hyderabad.',
+			'A franchise that only changed its name counts as one club, so a player who stayed through a rename is still a one-club player. The technical name for what this counts is distinct franchises across a career.'
+		]
+	},
+	'ch9-payoff': {
+		title: 'How your team’s card is built',
+		paragraphs: [
+			'Each card carries your franchise’s own three reads. The longest rivalry is the team’s duel that spans the most seasons; the reset row counts who left and who arrived in the team’s mega-auction years; the loyal player is its longest-serving one-club player. All three come straight from the per-franchise tables the pipeline emits, and every number on the card equals those tables exactly.',
+			'A young franchise has had fewer years to grow decade-scale rivalries, so its longest may be shorter than an older club’s. That is a fact about its age, never a deficit.',
+			'The women’s-league card is the forming-fast beat made personal, never a deficit card. If you have not picked a team, the neutral card carries the league-wide reads instead: the single longest rivalry of all, Kohli and Jadeja; the five mega-auction resets; and the vanishing one-club player.'
+		]
+	},
+	'ch9-collapse': {
+		title: 'Collapse Contagion, the aftershock that isn’t',
+		paragraphs: [
+			'The dressing-room belief is that one wicket brings another, a collapse. The record says the opposite. Right after a wicket falls, the next ball is a touch safer, not more dangerous: a second wicket comes at about 0.94 times its usual rate, below one.',
+			'That lines up with the belief audit in Chapter 8, where a wicket after a wicket ran about 0.93 (ch8-momentum). So the collapse is a story, not a mechanism: wickets do not summon more wickets. The technical name for a does-an-event-trigger-more-of-itself read is a Hawkes aftershock model, and here the ratio sits below one, meaning a wicket dampens the next rather than exciting it.',
+			'It is the contrarian companion to Chapter 8’s momentum beat, demoted to this footnote on purpose: the chapter’s on-screen budget is two heroes and one supporting beat, so Collapse Contagion earns a mention here, not a scene of its own.'
+		]
 	}
 } as const satisfies Record<string, FootnoteEntry>;
 

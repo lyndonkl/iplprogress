@@ -100,6 +100,17 @@ export interface FieldData {
 	 */
 	inningsTotal?: Uint8Array;
 	/**
+	 * per-delivery duel id (pairing.u16), length nPoints — OPTIONAL, drives the Ch 9
+	 * `duelweb` layout (CONTRACT §26). One u16 per point in field point order: the id
+	 * (0..n_duels-1) of the tracked batter-vs-bowler pairing this ball belongs to, or
+	 * 0xFFFF (65535) = DUST (a ball in no tracked pairing). Fed to the field as a DATA
+	 * TEXTURE (uPairingTex) so the ball's duel id is recovered in-shader by point index
+	 * with NO new vertex attribute (the field holds at 14). Present only when the pipeline
+	 * ships pairing.u16; absent until then, so the duel web collapses to the free scatter
+	 * (graceful — R0..R8 never use `duelweb`).
+	 */
+	pairing?: Uint16Array;
+	/**
 	 * per-delivery match-state cell byte (restate.u8), length nPoints — OPTIONAL,
 	 * drives the Ch 5 `worth` layout (CONTRACT §19). One raw byte per point in
 	 * field point order: byte = over × 10 + wicketsDown (0..199), where over is
@@ -149,7 +160,8 @@ export type LayoutId =
 	| 'worth'
 	| 'constellation'
 	| 'flow'
-	| 'matchdots';
+	| 'matchdots'
+	| 'duelweb';
 
 /**
  * Which per-innings-phase star map is active in the Ch 6 constellation
@@ -227,7 +239,20 @@ export const LAYOUT_CODE: Record<LayoutId, number> = {
 	// match is never bigger or brighter (design gate). Hue stays identity (the toss
 	// rivers read POSITIONALLY by lane, never by hue). Fixed data aspect, letterboxed
 	// like the others. See CONTRACT §24.
-	matchdots: 10
+	matchdots: 10,
+	// Ch 9 controlling morph (free→duelweb): every ball condenses to its DUEL's
+	// strand-midpoint cluster (px, py normalized [-1,1]) + a small radial jitter disc,
+	// so a strand reads as a glowing band of its own deliveries; balls in no tracked
+	// pairing scatter as low-alpha DUST. NO new per-point buffer + NO new vertex
+	// attribute (the field holds at 14): the ball's duel id is recovered in-shader by
+	// a texelFetch of pairing.u16 (a `uPairingTex` DATA TEXTURE indexed by point index,
+	// 0xFFFF = dust), then its cluster centre + dominance color + ball weight is fetched
+	// from a per-duel `uDuelTex` (both fed once via field.setDuelGraph — the setMatchTable
+	// precedent). `duelDominance` mixes in the red/white/blue "who came out on top" hue,
+	// `strandRecede` sinks non-focus knots to neutral, `duelDustDim` sinks the dust, and
+	// `duelReveal` draws the web in. Fixed data aspect (square), letterboxed like the
+	// others. See CONTRACT §26.
+	duelweb: 11
 };
 
 /**
@@ -650,6 +675,25 @@ export interface FieldRenderState {
 	reviewTint: number;
 	/** luminance × for non-review points while the chips are engaged (1 = no dimming) */
 	reviewOthersDim: number;
+
+	/* ---- duel web (§26 capability — the Ch 9 controlling morph) ---------------
+	 * Four HELD SCALARS ride over the held `duelweb` layout (the flowLift / matchSplit
+	 * precedent — they spend NO second controlling morph). Read in-shader ONLY while the
+	 * `duelweb` layout (code 11) is in the A/B mix, so every prior scene renders byte-
+	 * identically regardless of these values. `duelReveal` fades the strand points in
+	 * (the web draw); `duelDominance` mixes in the diverging bowler-blue↔batter-red "who
+	 * came out on top" hue (0 = outcome colour); `duelDustDim` is the luminance × on the
+	 * DUST balls (the ones in no tracked pairing) so the strands pop; `strandRecede`
+	 * sinks non-focus strand knots toward a neutral low luminance (weighted per-duel by
+	 * uDuelFocusTex, fed via field.setDuelFocus) so only the focused strand(s) stay lit. */
+	/** 0 = strand points hidden · 1 = fully drawn (the web draw). Default 0. */
+	duelReveal: number;
+	/** 0 = outcome colour · 1 = full dominance red/white/blue recolor. Default 0. */
+	duelDominance: number;
+	/** luminance × for the dust balls (1 = no dimming). Default 1. */
+	duelDustDim: number;
+	/** 0 = every knot lit · 1 = non-focus knots fully receded to neutral. Default 0. */
+	strandRecede: number;
 }
 
 export const DEFAULT_RENDER_STATE: FieldRenderState = {
@@ -716,5 +760,9 @@ export const DEFAULT_RENDER_STATE: FieldRenderState = {
 	reviewClass: -1,
 	reviewEngage: 0,
 	reviewTint: 0,
-	reviewOthersDim: 1
+	reviewOthersDim: 1,
+	duelReveal: 0,
+	duelDominance: 0,
+	duelDustDim: 1,
+	strandRecede: 0
 };

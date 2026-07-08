@@ -27,6 +27,7 @@ import {
 	flowSeasonToX,
 	flowRateToY,
 	computeMatchDots,
+	computeDuelWeb,
 	computeReviewChips,
 	CONSTELLATION_PHASES,
 	basePointPx,
@@ -50,6 +51,7 @@ import {
 	type ConstellationLayout,
 	type FlowLayout,
 	type MatchDotsLayout,
+	type DuelWebLayout,
 	type ReviewChipsLayout
 } from './layout';
 import { makeVertexShader, fragmentShader, makePickVertexShader, pickFragmentShader } from './shaders';
@@ -336,6 +338,33 @@ export interface FieldHandle {
 	 */
 	getMatchDotsLayout(): MatchDotsLayoutInfo | null;
 	/**
+	 * Feed the duel graph for the Ch 9 duel web (§26 — the controlling morph). The graph
+	 * carries `pairing` (the per-point duel id, 0xFFFF = dust), the `duels` (each duel's
+	 * strand-midpoint cluster centre px/py in [-1,1], dominance color and ball count), and
+	 * the `nodes` + `edges` (stored for `getDuelWebLayout` readback). The field bakes the
+	 * pairing into a `uPairingTex` data texture (indexed by point index) and the duels into
+	 * a `uDuelTex` data texture (the uMatchTex precedent — NO new per-point buffer, NO new
+	 * vertex attribute, so the field holds at 14 attributes), and initializes the per-duel
+	 * focus texture to all-lit. Fed once by the scene before the duelweb layout engages;
+	 * re-calling replaces the graph. See CONTRACT §26.
+	 */
+	setDuelGraph(input: DuelGraphInput): void;
+	/**
+	 * Set the focused duel subset for the Ch 9 strand recede (§26). Pass the duel ids to
+	 * keep LIT (focus 1); every other duel recedes toward neutral low luminance weighted by
+	 * `strandRecede` (via `uDuelFocusTex`). Pass `null` to clear (all lit). Fed at runtime
+	 * (the setDismissals / setSparks precedent); invalidates + renders on demand.
+	 */
+	setDuelFocus(focusIds: number[] | null): void;
+	/**
+	 * current duel-web geometry (§26 — Ch 9's controlling morph): the fixed-aspect,
+	 * letterboxed SQUARE box + the per-node WORLD coordinates (so the scene's SVG strands,
+	 * player dots and tap targets track the GL clusters) + the duel edge list. Map an
+	 * arbitrary normalized coord through `duelWebPoint(layout, nx, ny)` (layout.ts). null
+	 * before the first resize OR before a duel graph is fed; rebuilt on resize.
+	 */
+	getDuelWebLayout(): DuelWebLayoutInfo | null;
+	/**
 	 * Set the review-chip subset for the Ch 8 review beat (§25). Pass `{ indices, team,
 	 * outcome }` — `indices` the 988 review-delivery point indices, `team` each chip's
 	 * franchise LANE index (0-based; the scene's own franchise→lane mapping), `outcome`
@@ -507,6 +536,105 @@ export interface MatchDotsLayoutInfo extends MatchDotsLayout {
 	toss: number[];
 	/** per-match world centroid for the LIVE `matchSplit` (length count) */
 	centres: { x: number; y: number }[];
+}
+
+/**
+ * One duel strand for `field.setDuelGraph` (§26 — the Ch 9 duel web). Baked into the
+ * per-duel `uDuelTex` (the strand-midpoint cluster centre px/py + dominance color + a
+ * ball-count weight); indexed by duel id (the pairing.u16 value). Straight from
+ * `scenes/ch9.json` `duel_web.duels` (already normalized [-1,1], NO remap).
+ */
+export interface DuelGraphDuel {
+	id: number;
+	a: number;
+	b: number;
+	bat: string;
+	bowl: string;
+	balls: number;
+	runs: number;
+	dis: number;
+	seasons: number;
+	span: [number, number];
+	dom: number;
+	/** dominance color in [-1,1] (+1 batter-red / -1 bowler-blue) */
+	color: number;
+	/** strand-midpoint cluster centre x in [-1,1] */
+	px: number;
+	/** strand-midpoint cluster centre y in [-1,1] */
+	py: number;
+}
+
+/** One player node for `field.setDuelGraph` — stored for `getDuelWebLayout` readback. */
+export interface DuelGraphNode {
+	id: string;
+	name: string;
+	/** normalized world x in [-1,1] (the field's shader frame, NO remap) */
+	x: number;
+	/** normalized world y in [-1,1] */
+	y: number;
+	deg: number;
+	era: number;
+	league: 'ipl' | 'wpl';
+}
+
+/** One duel edge for `field.setDuelGraph` — stored for `getDuelWebLayout` readback. */
+export interface DuelGraphEdge {
+	id: number;
+	a: number;
+	b: number;
+	bat: string;
+	bowl: string;
+	balls: number;
+	dom: number;
+	color: number;
+	span: [number, number];
+}
+
+/**
+ * The duel graph for `field.setDuelGraph` (§26 — the Ch 9 duel web controlling morph).
+ * Fed ONCE before the duelweb layout engages (idempotent; a re-feed re-bakes the data
+ * textures). `pairing` (the per-point duel id, 0xFFFF = dust) is baked into `uPairingTex`
+ * and the `duels` into `uDuelTex`; `nodes` + `edges` are stored for `getDuelWebLayout`.
+ * NO new per-point buffer / vertex attribute (the field holds at 14). See CONTRACT §26.
+ */
+export interface DuelGraphInput {
+	/** pairing.u16: per-point duel id (0xFFFF = dust), aligned with the field point order */
+	pairing: Uint16Array;
+	/** the duels (px/py strand-midpoint + dominance color), baked into uDuelTex */
+	duels: DuelGraphDuel[];
+	/** the player nodes (x/y normalized world position), stored for getDuelWebLayout readback */
+	nodes: DuelGraphNode[];
+	/** the duel edge list (a,b node indices + balls + dom), stored for readback */
+	edges: DuelGraphEdge[];
+}
+
+/** One player node in the WORLD-space duel-web geometry `getDuelWebLayout` returns (§26). */
+export interface DuelWebLayoutNodeInfo {
+	/** world x (normalized node.x × halfExtent, box centred at origin) */
+	x: number;
+	/** world y (normalized node.y × halfExtent) */
+	y: number;
+	name: string;
+	deg: number;
+	era: number;
+	league: 'ipl' | 'wpl';
+}
+
+/**
+ * The world-space duel-web geometry `field.getDuelWebLayout()` returns (§26 — the Ch 9
+ * controlling morph): the fixed-aspect, letterboxed SQUARE box + the per-node WORLD
+ * coordinates (so the scene's SVG strands, player dots and tap targets track the GL
+ * clusters) + the duel edge list. Map an arbitrary normalized coord through
+ * `duelWebPoint` (layout.ts). null before the first resize OR before `setDuelGraph`.
+ */
+export interface DuelWebLayoutInfo {
+	nodes: DuelWebLayoutNodeInfo[];
+	edges: DuelGraphEdge[];
+	left: number;
+	width: number;
+	bottom: number;
+	height: number;
+	halfExtent: number;
 }
 
 /** The review-chip membership input for `field.setReviews` (§25 — the Ch 8 review beat). */
@@ -1047,6 +1175,29 @@ export function createField(opts: FieldOptions): FieldHandle {
 	}
 	let matchTex = makeMatchTex(1, 1, true);
 	let matchBoundsTex = makeMatchTex(1, 1, false);
+	/* ---- duel-web data textures (§26 — the Ch 9 controlling morph) -----------
+	 * Three data textures (the uMatchTex precedent) hold the duel graph so NO new
+	 * per-point buffer / attribute is added (the field stays at 14):
+	 *   uPairingTex   R float    — per POINT, the ball's duel id (0xFFFF = dust),
+	 *                              texelFetch'd in-shader by point index.
+	 *   uDuelTex      RGBA float — per duel (px, py normalized [-1,1], dominance
+	 *                              color -1..1, ball-count weight).
+	 *   uDuelFocusTex R float    — per duel, focus 0..1 (1 lit · 0 recede candidate),
+	 *                              written by setDuelFocus (all 1 until then).
+	 * Start as 1×1 placeholders so the sampler uniforms are always bound; a duelweb
+	 * scene MUST feed the real graph via setDuelGraph (like setMatchTable). */
+	const DUEL_TEX_MAXW = 2048;
+	let pairingTex = makeMatchTex(1, 1, false);
+	let duelTex = makeMatchTex(1, 1, true);
+	let duelFocusTex = makeMatchTex(1, 1, false);
+	// the fed graph, kept for getDuelWebLayout readback + setDuelFocus re-bake
+	let duelGraph: {
+		count: number;
+		nodes: DuelGraphNode[];
+		edges: DuelGraphEdge[];
+		texW: number;
+		texH: number;
+	} | null = null;
 	// the fed table, kept for getMatchDotsLayout readback (the per-match live centres)
 	let matchTable: {
 		count: number;
@@ -1136,6 +1287,125 @@ export function createField(opts: FieldOptions): FieldHandle {
 			centres[m] = { x: nx * halfW, y: baseCy + (laneCy - baseCy) * split };
 		}
 		return { ...matchDotsLayout, count: cnt, split, toss, centres };
+	}
+
+	/* ---- duel-web graph (§26 — the Ch 9 controlling morph) ------------------ */
+	function setDuelGraph(input: DuelGraphInput): void {
+		if (disposed) return;
+		const duels = input.duels;
+		const cnt = Array.isArray(duels) ? duels.length : 0;
+		const pairing = input.pairing;
+		if (!(cnt > 0) || !pairing || pairing.length !== n) {
+			if (import.meta.env.DEV)
+				console.warn(
+					`[every-ball-ever] setDuelGraph: expected duels.length>0 and pairing.length===n_points`,
+					`(${n}) — got duels=${cnt}, pairing=${pairing ? pairing.length : 'none'} — ignoring.`
+				);
+			return;
+		}
+
+		// bake the per-point pairing (duel id, 0xFFFF = dust) into uPairingTex (R32F,
+		// indexed by point index) — the setMatchTable bounds precedent, but per POINT.
+		const pTexW = Math.min(n, DUEL_TEX_MAXW);
+		const pTexH = Math.ceil(n / pTexW);
+		const pData = new Float32Array(pTexW * pTexH);
+		for (let i = 0; i < n; i++) pData[i] = pairing[i];
+
+		// bake the per-duel (px, py, dominance color, ball weight) into uDuelTex (RGBA
+		// float). The ball weight = balls / maxBalls, kept for future density work; the
+		// disc radius is CONSTANT (no data), so a busy duel is no fatter (design gate).
+		const dTexW = Math.min(cnt, DUEL_TEX_MAXW);
+		const dTexH = Math.ceil(cnt / dTexW);
+		const dData = new Float32Array(dTexW * dTexH * 4);
+		let maxBalls = 1;
+		for (let m = 0; m < cnt; m++) maxBalls = Math.max(maxBalls, duels[m].balls || 0);
+		for (let m = 0; m < cnt; m++) {
+			const d = duels[m];
+			const px = Number(d.px);
+			const py = Number(d.py);
+			dData[m * 4] = Number.isFinite(px) ? px : 0;
+			dData[m * 4 + 1] = Number.isFinite(py) ? py : 0;
+			dData[m * 4 + 2] = Number.isFinite(d.color) ? d.color : 0;
+			dData[m * 4 + 3] = Math.max(0, (d.balls || 0) / maxBalls);
+		}
+		// per-duel focus texture, initialized ALL LIT (1) — setDuelFocus overwrites it.
+		const fData = new Float32Array(dTexW * dTexH).fill(1);
+
+		pairingTex.dispose();
+		duelTex.dispose();
+		duelFocusTex.dispose();
+		pairingTex = new THREE.DataTexture(pData, pTexW, pTexH, THREE.RedFormat, THREE.FloatType);
+		pairingTex.minFilter = THREE.NearestFilter;
+		pairingTex.magFilter = THREE.NearestFilter;
+		pairingTex.needsUpdate = true;
+		duelTex = new THREE.DataTexture(dData, dTexW, dTexH, THREE.RGBAFormat, THREE.FloatType);
+		duelTex.minFilter = THREE.NearestFilter;
+		duelTex.magFilter = THREE.NearestFilter;
+		duelTex.needsUpdate = true;
+		duelFocusTex = new THREE.DataTexture(fData, dTexW, dTexH, THREE.RedFormat, THREE.FloatType);
+		duelFocusTex.minFilter = THREE.NearestFilter;
+		duelFocusTex.magFilter = THREE.NearestFilter;
+		duelFocusTex.needsUpdate = true;
+
+		uniforms.uPairingTex.value = pairingTex;
+		uniforms.uPairingTexW.value = pTexW;
+		uniforms.uDuelTex.value = duelTex;
+		uniforms.uDuelTexW.value = dTexW;
+		uniforms.uDuelFocusTex.value = duelFocusTex;
+		uniforms.uDuelFocusTexW.value = dTexW;
+
+		duelGraph = {
+			count: cnt,
+			nodes: input.nodes ?? [],
+			edges: input.edges ?? [],
+			texW: dTexW,
+			texH: dTexH
+		};
+		invalidate();
+	}
+
+	function setDuelFocus(focusIds: number[] | null): void {
+		if (disposed || !duelGraph) return;
+		const { count, texW, texH } = duelGraph;
+		const fData = new Float32Array(texW * texH);
+		if (focusIds === null) {
+			fData.fill(1); // no focus set → every knot lit
+		} else {
+			for (const id of focusIds) {
+				const i = Math.floor(id);
+				if (i >= 0 && i < count) fData[i] = 1;
+			}
+		}
+		duelFocusTex.dispose();
+		duelFocusTex = new THREE.DataTexture(fData, texW, texH, THREE.RedFormat, THREE.FloatType);
+		duelFocusTex.minFilter = THREE.NearestFilter;
+		duelFocusTex.magFilter = THREE.NearestFilter;
+		duelFocusTex.needsUpdate = true;
+		uniforms.uDuelFocusTex.value = duelFocusTex;
+		uniforms.uDuelFocusTexW.value = texW;
+		invalidate();
+	}
+
+	function getDuelWebLayout(): DuelWebLayoutInfo | null {
+		if (!duelWebLayout || !duelGraph) return null;
+		const he = duelWebLayout.halfExtent;
+		const nodes: DuelWebLayoutNodeInfo[] = duelGraph.nodes.map((nd) => ({
+			x: nd.x * he,
+			y: nd.y * he,
+			name: nd.name,
+			deg: nd.deg,
+			era: nd.era,
+			league: nd.league
+		}));
+		return {
+			nodes,
+			edges: duelGraph.edges,
+			left: duelWebLayout.left,
+			width: duelWebLayout.width,
+			bottom: duelWebLayout.bottom,
+			height: duelWebLayout.height,
+			halfExtent: he
+		};
 	}
 
 	/* ---- review chips state (§25 — the Ch 8 review beat) --------------------
@@ -1458,6 +1728,22 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uMatchLaneY: { value: 0.42 },
 		uMatchLaneHalf: { value: 0.2 },
 		uMatchSplit: { value: 0 },
+		// duel web (§26) — the three data textures (placeholders until setDuelGraph is
+		// fed) + the letterboxed square box geometry (set on resize) + the four held
+		// scalars. The whole layout is gated in-shader on code 11 being in the mix, so
+		// R0..R8 render byte-identically regardless of these values.
+		uPairingTex: { value: pairingTex },
+		uPairingTexW: { value: 1 },
+		uDuelTex: { value: duelTex },
+		uDuelTexW: { value: 1 },
+		uDuelFocusTex: { value: duelFocusTex },
+		uDuelFocusTexW: { value: 1 },
+		uDuelHalfExtent: { value: 1 },
+		uDuelDotR: { value: 0.02 },
+		uDuelReveal: { value: 0 },
+		uDuelDominance: { value: 0 },
+		uDuelDustDim: { value: 1 },
+		uStrandRecede: { value: 0 },
 		// review chips (§25) — inactive by default (uReviewClass -1), so the review branch
 		// is a shader no-op and every prior scene renders byte-identically. The lane x's
 		// are baked by setReviews / resize; the box geometry is set on resize.
@@ -1640,6 +1926,7 @@ export function createField(opts: FieldOptions): FieldHandle {
 	let constellationLayout: ConstellationLayout | null = null;
 	let flowLayout: FlowLayout | null = null;
 	let matchDotsLayout: MatchDotsLayout | null = null;
+	let duelWebLayout: DuelWebLayout | null = null;
 	let reviewChipsLayout: ReviewChipsLayout | null = null;
 	let cssW = 1;
 	let cssH = 1;
@@ -2094,7 +2381,11 @@ export function createField(opts: FieldOptions): FieldHandle {
 			a.reviewClass === b.reviewClass &&
 			a.reviewEngage === b.reviewEngage &&
 			a.reviewTint === b.reviewTint &&
-			a.reviewOthersDim === b.reviewOthersDim
+			a.reviewOthersDim === b.reviewOthersDim &&
+			a.duelReveal === b.duelReveal &&
+			a.duelDominance === b.duelDominance &&
+			a.duelDustDim === b.duelDustDim &&
+			a.strandRecede === b.strandRecede
 		);
 	}
 
@@ -2271,6 +2562,15 @@ export function createField(opts: FieldOptions): FieldHandle {
 		// flowLift analog). Read in-shader only while code 10 is in the A/B mix, so this is
 		// a no-op for every prior scene (byte-identical).
 		uniforms.uMatchSplit.value = s.matchSplit;
+
+		// duel web (§26): the four held scalars over the duelweb layout (the flowLift /
+		// matchSplit precedent — the pairing / duel data textures are baked by setDuelGraph,
+		// the per-duel focus by setDuelFocus). Read in-shader only while code 11 is in the
+		// A/B mix, so this is a no-op for every prior scene (byte-identical).
+		uniforms.uDuelReveal.value = s.duelReveal;
+		uniforms.uDuelDominance.value = s.duelDominance;
+		uniforms.uDuelDustDim.value = s.duelDustDim;
+		uniforms.uStrandRecede.value = s.strandRecede;
 
 		// review chips (§25): bake the per-(team×outcome) stack the first time the reviews
 		// engage (cached by version), and set every scalar each apply so engage/tint/
@@ -2504,6 +2804,11 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uniforms.uMatchDotR.value = matchDotsLayout.dotRadius;
 		uniforms.uMatchLaneY.value = matchDotsLayout.laneY;
 		uniforms.uMatchLaneHalf.value = matchDotsLayout.laneHalf;
+		// duel web (§26): the letterboxed square box → the world half-extent (normalized
+		// [-1,1] node / strand-midpoint → world) + the constant jitter-disc radius.
+		duelWebLayout = computeDuelWeb(halfW, halfH);
+		uniforms.uDuelHalfExtent.value = duelWebLayout.halfExtent;
+		uniforms.uDuelDotR.value = duelWebLayout.dotRadius;
 		// review chips (§25): the chip box + per-franchise-lane x's follow the width.
 		rebuildReviewLanes();
 		uniforms.uPointScale.value = basePointPx(w, h, n) * dpr;
@@ -2650,6 +2955,9 @@ export function createField(opts: FieldOptions): FieldHandle {
 		setSparks,
 		setMatchTable,
 		getMatchDotsLayout,
+		setDuelGraph,
+		setDuelFocus,
+		getDuelWebLayout,
 		setReviews,
 		getReviewChipsLayout,
 		dispose(): void {
@@ -2667,6 +2975,9 @@ export function createField(opts: FieldOptions): FieldHandle {
 			groupTex.dispose();
 			matchTex.dispose();
 			matchBoundsTex.dispose();
+			pairingTex.dispose();
+			duelTex.dispose();
+			duelFocusTex.dispose();
 			renderer.dispose();
 			for (const L of labels) L.el.remove();
 		}

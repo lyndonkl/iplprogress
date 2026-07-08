@@ -67,8 +67,12 @@
    "bytes_gz": 20686
   },
   "meta.json": {
-   "bytes_raw": 1477,
-   "bytes_gz": 495
+   "bytes_raw": 1586,
+   "bytes_gz": 519
+  },
+  "pairing.u16": {
+   "bytes_raw": 632398,
+   "bytes_gz": 95109
   },
   "payoff/ch1.json": {
    "bytes_raw": 20655,
@@ -109,6 +113,10 @@
   "scenes/ch8.json": {
    "bytes_raw": 115805,
    "bytes_gz": 33895
+  },
+  "scenes/ch9.json": {
+   "bytes_raw": 612448,
+   "bytes_gz": 118041
   },
   "scenes/coldopen.json": {
    "bytes_raw": 3720,
@@ -154,7 +162,7 @@
     "scenes/coldopen.json"
    ],
    "budget_gz": 3000000,
-   "actual_gz": 406031,
+   "actual_gz": 406055,
    "pass": true
   },
   {
@@ -256,6 +264,16 @@
    "pass": true
   },
   {
+   "name": "chapter ch9 (Living League scene doc + pairing.u16 buffer)",
+   "files": [
+    "scenes/ch9.json",
+    "pairing.u16"
+   ],
+   "budget_gz": 2000000,
+   "actual_gz": 213150,
+   "pass": true
+  },
+  {
    "name": "engines (ch2 par/entry + R3b parallel-track re288/wp_grid)",
    "files": [
     "engines/entry.json",
@@ -288,6 +306,7 @@
     "innings_total.u8",
     "matches.json",
     "meta.json",
+    "pairing.u16",
     "payoff/ch1.json",
     "restate.u8",
     "scenes/ch1.json",
@@ -298,6 +317,7 @@
     "scenes/ch6.json",
     "scenes/ch7.json",
     "scenes/ch8.json",
+    "scenes/ch9.json",
     "scenes/coldopen.json",
     "scenes/interlude.json",
     "scenes/sandbox.json",
@@ -307,7 +327,7 @@
     "wpa.u8"
    ],
    "budget_gz": 25000000,
-   "actual_gz": 1852449,
+   "actual_gz": 2065623,
    "pass": true
   }
  ],

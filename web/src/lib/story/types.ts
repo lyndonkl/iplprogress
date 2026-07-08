@@ -416,6 +416,20 @@ export interface SceneFieldState {
 	matchSplit?: number;
 	/** the review-chip subset fly-out over the held match-dots, or null/omitted for none (§25) */
 	reviews?: ReviewSubset | null;
+	/**
+	 * duel-web reveal over the held `duelweb` layout (§26 — the Ch 9 controlling morph's
+	 * held scalars, the flowLift / matchSplit precedent). `duelReveal` 0→1 draws the strand
+	 * points in (the web draw), `duelDominance` 0→1 mixes in the diverging bowler-blue↔
+	 * batter-red "who came out on top" hue, `duelDustDim` sinks the dust balls (the ones in
+	 * no tracked pairing) so the strands pop, and `strandRecede` sinks non-focus strand knots
+	 * toward neutral (weighted per-duel via field.setDuelFocus). Only meaningful with the
+	 * `duelweb` layout + a fed duel graph; defaults duelReveal 0 / duelDominance 0 /
+	 * duelDustDim 1 / strandRecede 0. Drive across the hold via `dynamicState`.
+	 */
+	duelReveal?: number;
+	duelDominance?: number;
+	duelDustDim?: number;
+	strandRecede?: number;
 	/** whether the picked team's balls stay ignited (default true — §2 standing rule) */
 	teamIgnite?: boolean;
 	/**
