@@ -6,26 +6,25 @@
 	import MatchField from './MatchField.svelte';
 	import ReportCardRail from './ReportCardRail.svelte';
 	import { panelCaptionStyle, isNarrowViewport } from './captionCorner.svelte';
-	import { loadCh8Data, pct0, type Ch8Data, type ClaimRow, type ShuffleNull } from './data';
+	import { loadCh8Data, type Ch8Data, type ClaimRow } from './data';
 
 	/**
-	 * C8-6, SUPPORTING, Belief 4: momentum (FAIL with an honest residual). The dots
-	 * dim to a backdrop; the scene is the momentum audit panel: a claim's observed
-	 * value drawn as a NEEDLE over the HISTOGRAM of the same claim measured on
-	 * shuffled cricket. The cloud's mass is an explicit shaded BAND, a "no effect"
-	 * line sits at 1.0 with "more likely" / "less likely" direction labels, and the
-	 * needle is GREEN outside the band, GREY inside (so "outside" is a categorical
-	 * read, never a fine eyeball). The two shuffles are never overlaid: the panel
-	 * SWAPS the plain band for the same-batter band. The honest residual is drawn as
-	 * a labelled band-edge-to-needle bracket ("the real part, about 7 in 100") and
-	 * it HELD STEADY season after season (the raw edge fades, the real part does not).
-	 * Rendered once per state (no rAF loop). ONE distribution on screen at a time.
+	 * C8-6, SUPPORTING, Belief 4: momentum (FAIL, with an honest small real part).
+	 * REDESIGN (owner review): the permutation-null histogram was unreadable to a
+	 * cricket fan, and the same-batter shuffle barely moved the band (1.078 -> 1.087),
+	 * so the "hold the batter fixed and it vanishes" story was both opaque AND wrong.
+	 * The real deflator is the SITUATION (boundaries bunch in good conditions), not
+	 * batter quality, and about HALF the apparent effect survives as real. So the beat
+	 * is now a SPLIT BAR: the apparent effect decomposed into "the situation" (what a
+	 * random shuffle of the same balls still produces) and "real" (what survives the
+	 * shuffle). Wickets have no real part, only a small dip (the collapse is a myth).
+	 * The same-batter control is demoted to the footnote. One bar, read at a glance.
 	 */
-	const VB_W = 400;
-	const VB_H = 200;
-	const PL = 34;
+	const VB_W = 420;
+	const VB_H = 128;
+	const PL = 18;
 	const PR = 18;
-	const PT = 30;
+	const PT = 44;
 	const PB = 34;
 	const ERA = '2023-26';
 
@@ -43,19 +42,9 @@
 	});
 
 	const step = $derived(
-		progress < 0.2
-			? 1
-			: progress < 0.38
-				? 2
-				: progress < 0.56
-					? 3
-					: progress < 0.72
-						? 4
-						: progress < 0.87
-							? 5
-							: 6
+		progress < 0.22 ? 1 : progress < 0.42 ? 2 : progress < 0.62 ? 3 : progress < 0.82 ? 4 : 5
 	);
-	const BOUNDS = [0, 0.2, 0.38, 0.56, 0.72, 0.87, 1] as const;
+	const BOUNDS = [0, 0.22, 0.42, 0.62, 0.82, 1] as const;
 	const reveal = $derived(captionReveal(progress, BOUNDS[step - 1], BOUNDS[step], { reduced }));
 
 	let panel = $state<HTMLElement | null>(null);
@@ -70,64 +59,58 @@
 
 	const mo = $derived(ch8?.momentum ?? null);
 
-	/* the scripted claim + null mode by step (menu picks override the claim). Steps 1-2
-	   hold the wicket myth (plain), step 3 the hitting raw (plain), steps 4-6 the same-
-	   batter residual. Only ONE null (band) is ever on screen, never overlaid. */
+	/* step 1 audits the collapse (wicket myth); steps 2-5 audit the hot streak
+	   (hitting). A menu pick overrides the scripted claim (optional exploration). */
 	let pickedClaim = $state<string | null>(null);
-	let userBatter = $state(false);
-	const scriptedClaim = $derived(step <= 2 ? mo?.scripted.wicket_myth : mo?.scripted.hitting_sliver);
-	const scriptedBatter = $derived(step >= 4);
-
+	const scriptedClaim = $derived(step <= 1 ? mo?.scripted.wicket_myth : mo?.scripted.hitting_sliver);
 	const activeClaim = $derived(pickedClaim ?? scriptedClaim ?? 'bnd|bnd');
 	const row = $derived<ClaimRow | null>(
 		mo?.claims_by_era[ERA]?.find((r) => r.claim === activeClaim) ?? null
 	);
-	const wantBatter = $derived(pickedClaim ? userBatter : scriptedBatter);
-	const useBatter = $derived(wantBatter && !!row?.batter_null);
-	const nul = $derived<ShuffleNull | null>((useBatter ? row?.batter_null : row?.plain_null) ?? null);
+	/* the split (situation vs real) reveals in the scripted flow at step 3; a menu
+	   pick shows the full decomposition straight away. */
+	const showSplit = $derived(pickedClaim != null || step >= 3);
 
 	const chart = $derived.by(() => {
 		void tick;
 		const r = row;
-		const nl = nul;
-		if (!r || !nl) return null;
-		const lift = r.lift;
-		const bandLo = nl.band[0];
-		const bandHi = nl.band[1];
-		const xLo = Math.min(r.hist.lo, bandLo, lift, 1.0) - 0.01;
-		const xHi = Math.max(r.hist.hi, bandHi, lift, 1.0) + 0.01;
+		if (!r) return null;
+		const apparent = (r.lift - 1) * 100; // percentage points, e.g. +15.9 or -7.0
+		// the strictest shuffle we have (same match + over + batter), else the plain one
+		const nul = r.batter_null ?? r.plain_null;
+		const bandHi = nul.band[1];
+		const explained = (nul.mean_lift - 1) * 100; // what the shuffle alone produces
+		const outside = r.lift > bandHi; // clears the shuffle -> a real part exists
+		const negative = apparent < -0.6;
+		const realRaw = apparent - explained;
+		const real = outside ? Math.max(0, realRaw) : 0;
+		const situation = apparent - real; // the rest: conditions + chance
+		// axis: fit 0, the apparent value, and a little headroom (per-claim adaptive)
+		const lo = Math.min(-8, apparent - 3);
+		const hi = Math.max(apparent + 4, 13);
 		const plotL = PL;
 		const plotR = VB_W - PR;
-		const plotT = PT;
-		const plotB = VB_H - PB;
-		const xS = (v: number): number => plotL + ((v - xLo) / (xHi - xLo)) * (plotR - plotL);
-		const binW = (r.hist.hi - r.hist.lo) / r.hist.nbins;
-		let maxC = 1;
-		for (const c of nl.counts) if (c > maxC) maxC = c;
-		const bars = nl.counts.map((c, i) => {
-			const x0 = xS(r.hist.lo + i * binW);
-			const x1 = xS(r.hist.lo + (i + 1) * binW);
-			const h = (c / maxC) * (plotB - plotT);
-			return { x: x0, w: Math.max(0.5, x1 - x0 - 0.5), y: plotB - h, h };
-		});
-		const outside = lift < bandLo || lift > bandHi;
-		const resid = r.batter_null?.residual ?? null;
+		const xS = (v: number): number => plotL + ((v - lo) / (hi - lo)) * (plotR - plotL);
+		const barY = PT + 6;
+		const barH = 30;
 		return {
-			plotL,
-			plotR,
-			plotT,
-			plotB,
-			bandX: xS(bandLo),
-			bandW: xS(bandHi) - xS(bandLo),
-			bandHiX: xS(bandHi),
-			bandLoX: xS(bandLo),
-			zeroX: xS(1.0),
-			needleX: xS(lift),
-			bars,
+			apparent,
+			apparentPct: Math.round(apparent),
+			saferPct: Math.round(-apparent),
+			sitPct: Math.round(Math.max(0, situation)),
+			realPct: Math.round(real),
 			outside,
-			lift,
-			resid,
-			residPct: resid != null ? pct0((resid - 1) * 100) : null
+			negative,
+			zeroX: xS(0),
+			sitX0: xS(0),
+			sitX1: xS(Math.max(0, situation)),
+			realX1: xS(apparent),
+			negX0: xS(apparent),
+			negX1: xS(0),
+			barY,
+			barH,
+			plotL,
+			plotR
 		};
 	});
 
@@ -138,7 +121,7 @@
 		return panelCaptionStyle(panel);
 	});
 
-	const stamped = $derived(reduced || step >= 6 ? 4 : 3);
+	const stamped = $derived(reduced || step >= 5 ? 4 : 3);
 
 	function pick(claim: string): void {
 		pickedClaim = claim;
@@ -153,43 +136,36 @@
 		<div class="panel" bind:this={panel}>
 			{#if chart && row}
 				<div class="panel-head">
-					<span class="claim-name">{row.fan}</span>
-					<span class="null-name">{useBatter ? 'the same batter, reshuffled' : 'shuffled cricket'}</span>
+					<span class="claim-name">{row.fan.split('(')[0].trim()}</span>
+					<span class="claim-sub">{row.fan.includes('(') ? row.fan.split('(')[1].replace(')', '') : ''}</span>
 				</div>
 				<svg viewBox="0 0 {VB_W} {VB_H}" class="mchart" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
-					<!-- the shaded band: the mass of shuffled cricket -->
-					<rect class="band" x={chart.bandX} y={chart.plotT} width={chart.bandW} height={chart.plotB - chart.plotT} />
-					<!-- the histogram of the shuffle -->
-					{#each chart.bars as b, i (i)}
-						<rect class="hbar" x={b.x} y={b.y} width={b.w} height={b.h} />
-					{/each}
-					<!-- the no-effect line at 1.0 -->
-					<line class="zero" x1={chart.zeroX} x2={chart.zeroX} y1={chart.plotT - 6} y2={chart.plotB} />
-					<text class="dir left" x={chart.zeroX - 6} y={chart.plotT - 12}>&lt; less likely</text>
-					<text class="dir right" x={chart.zeroX + 6} y={chart.plotT - 12}>more likely &gt;</text>
-					<!-- the residual bracket (same-batter mode): band edge to needle -->
-					{#if useBatter && chart.residPct != null}
-						<line class="brk" x1={chart.bandHiX} x2={chart.needleX} y1={chart.plotT + 10} y2={chart.plotT + 10} />
-						<line class="brk" x1={chart.bandHiX} x2={chart.bandHiX} y1={chart.plotT + 6} y2={chart.plotT + 14} />
-						<line class="brk" x1={chart.needleX} x2={chart.needleX} y1={chart.plotT + 6} y2={chart.plotT + 14} />
-						<text class="brk-lbl" x={(chart.bandHiX + chart.needleX) / 2} y={chart.plotT + 4}>
-							the real part, about {chart.residPct} in 100
+					<!-- baseline at 0 (no effect) -->
+					<line class="zero" x1={chart.zeroX} x2={chart.zeroX} y1={chart.barY - 12} y2={chart.barY + chart.barH + 6} />
+					<text class="zero-lbl" x={chart.zeroX} y={chart.barY + chart.barH + 20}>no change</text>
+
+					{#if chart.negative}
+						<!-- the wicket dip: after a wicket, the next ball is SAFER (a myth, no collapse) -->
+						<rect class="dip" x={chart.negX0} y={chart.barY} width={Math.max(1, chart.negX1 - chart.negX0)} height={chart.barH} />
+						<text class="seg-lbl dip-lbl" x={(chart.negX0 + chart.negX1) / 2} y={chart.barY - 6}>
+							{chart.saferPct}% safer. no collapse.
 						</text>
+					{:else}
+						<!-- the situation part (grey): what a random shuffle of the same balls still gives -->
+						<rect class="situation" x={chart.sitX0} y={chart.barY} width={Math.max(0.5, chart.sitX1 - chart.sitX0)} height={chart.barH} />
+						{#if showSplit && chart.outside && chart.realPct > 0}
+							<!-- the real part (green): what survives the shuffle -->
+							<rect class="real" x={chart.sitX1} y={chart.barY} width={Math.max(0.5, chart.realX1 - chart.sitX1)} height={chart.barH} />
+							<text class="seg-lbl sit-lbl" x={(chart.sitX0 + chart.sitX1) / 2} y={chart.barY - 6}>the situation ~{chart.sitPct}</text>
+							<text class="seg-lbl real-lbl" x={(chart.sitX1 + chart.realX1) / 2} y={chart.barY - 6}>real ~{chart.realPct}</text>
+						{:else}
+							<!-- pre-split (step 2) or no real part: one bar, its size = the apparent effect -->
+							<rect class="apparent" x={chart.sitX0} y={chart.barY} width={Math.max(0.5, chart.realX1 - chart.sitX0)} height={chart.barH} />
+							<text class="seg-lbl app-lbl" x={(chart.sitX0 + chart.realX1) / 2} y={chart.barY - 6}>
+								{chart.apparentPct}% more often
+							</text>
+						{/if}
 					{/if}
-					<!-- the needle: green outside the band, grey inside -->
-					<line
-						class="needle"
-						class:green={chart.outside}
-						x1={chart.needleX}
-						x2={chart.needleX}
-						y1={chart.plotT - 4}
-						y2={chart.plotB}
-					/>
-					<polygon
-						class="needle-head"
-						class:green={chart.outside}
-						points="{chart.needleX - 5},{chart.plotT - 10} {chart.needleX + 5},{chart.plotT - 10} {chart.needleX},{chart.plotT - 2}"
-					/>
 				</svg>
 				<!-- the claim menu (optional depth) -->
 				<div class="menu">
@@ -199,64 +175,50 @@
 						</button>
 					{/each}
 				</div>
-				{#if pickedClaim && row.batter_null}
-					<button class="swap" onclick={() => (userBatter = !userBatter)}>
-						{useBatter ? 'Show plain shuffled cricket' : 'Hold the same batter fixed'}
-					</button>
-				{/if}
 			{/if}
 		</div>
 	</div>
 
 	<div class="caption-slot" style="{capStyle}; --reveal: {reveal};">
-		{#if mo}
+		{#if mo && chart}
 			{#if step === 1}
 				<div class="scene-card">
 					<p>
-						Every commentator swears by momentum. So let us test it. The tall needle is what really
-						happens on the field. The grey band behind it is those same balls shuffled into a random
-						order, hundreds of times over, so it shows what pure luck would look like. If a belief is
-						real, the needle breaks clear of the band. If it is just a feeling, it sits inside.
+						First belief: the collapse. One wicket brings the next. But the data says the opposite.
+						After a wicket falls, the next ball is about {chart.saferPct}% <strong>safer</strong>, not
+						more dangerous. There is no streak here at all. The famous collapse is a myth.
 					</p>
 				</div>
 			{:else if step === 2}
 				<div class="scene-card">
 					<p>
-						First belief: one wicket brings another. The dreaded collapse. But the needle sits dead
-						inside the grey. After a wicket falls, the next ball is no likelier to take one than any
-						other ball. The collapse is a story we tell, not a thing the data does.
+						Now the other belief: the hot streak. Hitting begets hitting. And at first glance this one
+						looks real. After a boundary, boundaries come about {chart.apparentPct}% more often.
 					</p>
 				</div>
 			{:else if step === 3}
 				<div class="scene-card">
 					<p>
-						Second belief: hitting begets hitting. Middle a boundary and the next comes easier. And
-						here the needle does break clear of the grey. At first glance, this one looks real.
+						But boundaries bunch in good conditions. A flat pitch, the powerplay, a bowler getting
+						carted. They cluster whether or not the last ball was a four. Shuffle every ball into a
+						random order and about {chart.sitPct} of those {chart.apparentPct} points are still there.
+						That grey part is just the situation, not the shot.
 					</p>
 				</div>
 			{:else if step === 4}
 				<div class="scene-card">
 					<p>
-						But watch. Freeze it to one batter and shuffle only his own balls. Nearly all of the edge
-						vanishes. The boundaries came in a bunch because a good batter was in and set, not because
-						one shot fed the next. Kohli middles three fours in an over because he is Kohli, not
-						because the over had momentum.
-					</p>
-				</div>
-			{:else if step === 5}
-				<div class="scene-card">
-					<p>
-						A thin sliver is left, and it is real: about {chart?.residPct ?? 7} more boundaries in
-						every 100 than pure luck alone. And it has held steady, era after era. That sliver is the
-						only true momentum in the game. The rest was a good batter batting.
+						What is left, the green part, is the real thing: about {chart.realPct} extra boundaries in
+						every 100 that the situation cannot explain. A genuine ball-to-ball nudge, and it has held
+						steady across the eras. Momentum is real for hitting. Just a nudge, not the avalanche the
+						commentary sells.
 					</p>
 				</div>
 			{:else}
 				<div class="scene-card">
 					<p>
 						Belief four: momentum. Graded on the whole record: mostly a feeling. The collapse is a
-						myth. The hot streak is nearly all just a good batter in form, with a sliver of something
-						real underneath.
+						myth. The hot streak is real, but small.
 					</p>
 					<button class="fn" onclick={() => footnotesOpen.set('ch8-momentum')}>ⓘ how we graded momentum</button>
 				</div>
@@ -297,19 +259,18 @@
 
 	.panel-head {
 		display: flex;
-		justify-content: space-between;
-		align-items: baseline;
-		gap: 0.6rem;
+		flex-direction: column;
+		gap: 0.1rem;
 	}
 
 	.claim-name {
-		font-size: 0.86rem;
+		font-size: 0.9rem;
 		font-weight: 700;
 		color: var(--ink);
 	}
 
-	.null-name {
-		font-size: 0.66rem;
+	.claim-sub {
+		font-size: 0.68rem;
 		color: var(--ink-dim);
 		font-style: italic;
 	}
@@ -319,60 +280,54 @@
 		height: auto;
 	}
 
-	.band {
-		fill: rgba(151, 161, 184, 0.2);
-	}
-
-	.hbar {
-		fill: rgba(151, 161, 184, 0.5);
-	}
-
 	.zero {
 		stroke: var(--ink-dim);
 		stroke-width: 1;
 		stroke-dasharray: 3 3;
 	}
 
-	.dir {
+	.zero-lbl {
 		font-size: 8px;
 		fill: var(--ink-dim);
+		text-anchor: middle;
 	}
 
-	.dir.left {
-		text-anchor: end;
+	.situation {
+		fill: rgba(151, 161, 184, 0.45);
 	}
 
-	.dir.right {
-		text-anchor: start;
+	.apparent {
+		fill: rgba(232, 163, 61, 0.55);
 	}
 
-	.needle {
-		stroke: #97a1b8;
-		stroke-width: 2.4;
-	}
-
-	.needle.green {
-		stroke: #6fcf97;
-	}
-
-	.needle-head {
-		fill: #97a1b8;
-	}
-
-	.needle-head.green {
+	.real {
 		fill: #6fcf97;
 	}
 
-	.brk {
-		stroke: #6fcf97;
-		stroke-width: 1.2;
+	.dip {
+		fill: rgba(91, 140, 255, 0.5);
 	}
 
-	.brk-lbl {
-		font-size: 8px;
-		fill: #cde7d8;
+	.seg-lbl {
+		font-size: 9px;
 		text-anchor: middle;
 		font-weight: 700;
+	}
+
+	.sit-lbl {
+		fill: var(--ink-dim);
+	}
+
+	.real-lbl {
+		fill: #cde7d8;
+	}
+
+	.app-lbl {
+		fill: #f0cf9a;
+	}
+
+	.dip-lbl {
+		fill: #b9ccff;
 	}
 
 	.menu {
@@ -398,20 +353,7 @@
 		border-color: var(--teal);
 	}
 
-	.swap {
-		align-self: flex-start;
-		min-height: 36px;
-		padding: 0.2rem 0;
-		border: none;
-		background: none;
-		color: var(--teal);
-		font-size: 0.72rem;
-		font-weight: 600;
-		cursor: pointer;
-	}
-
 	.mbtn:focus-visible,
-	.swap:focus-visible,
 	.fn:focus-visible {
 		outline: 2px solid var(--teal);
 		outline-offset: 2px;

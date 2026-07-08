@@ -591,12 +591,12 @@ export const FOOTNOTES = {
 		]
 	},
 	'ch8-momentum': {
-		title: 'How momentum is graded against shuffled cricket',
+		title: 'How momentum is split into the situation and the real part',
 		paragraphs: [
-			'Each claim is how much likelier an outcome is right after another versus its baseline; the cloud is that same measurement on the deliveries reshuffled thousands of times, first within an innings and its phase, then also holding the batter fixed.',
-			'A boundary after a boundary runs 1.21, 1.19, 1.159 across the eras and clears the plain shuffle; a six after a six runs far higher, near 2 early; a dot after a wicket clears strongly, the one wicket pattern that survives. But a wicket after a wicket runs 0.999, 1.094, then 0.926, never clearing and turning the wrong way.',
-			'Hold the batter fixed and a boundary after a boundary drops to a residual of about 1.072, 1.084, 1.066, holding FLAT across the eras so the real part does not fade even as the raw edge does; a six after a six sits about 1.143 to 1.3, a thin but robust sliver. A wicket after a wicket clears the fuller test only in the 2016-19 window and is null or reversed before and since, so the myth grade is scoped to today’s game.',
-			'The belief as sold on television is mostly a feeling: the wicket half is false, and most of the hitting half is good batters batting, with a small real sliver left. This is consistent with Collapse Contagion, the aftershock read in Chapter 9. “Permutation null,” “autocorrelation” and “the batter-stratified null” are the technical names.'
+			'Each claim asks how much likelier an outcome is right after another. The trap is that outcomes bunch in the same conditions: boundaries come in a rush on a flat pitch or in the powerplay whether or not the last ball went for four. So we deal the deliveries back in a random order hundreds of times, keeping each match and over intact. Whatever the shuffle still produces is just that bunching. Whatever the real order beats it by is the genuine ball-to-ball part.',
+			'A boundary after a boundary runs about 16% more often (1.159 in 2023-26). But the shuffle alone already produces about half of that, near 1.08, so roughly half the apparent streak is just the situation. What clears the shuffle, about 7 in every 100, is real, and that real part holds flat across the eras (a residual near 1.072, 1.084, 1.066) even as the bigger raw number fades. A six after a six carries a larger real part, a residual around 1.14 to 1.30: a set batter really does keep clearing the rope.',
+			'Also holding the batter fixed barely moves the shuffle (from about 1.078 to 1.087), so the deflator is the situation, not who is batting. A wicket after a wicket runs 0.926: after a wicket the next ball is a touch safer, not more dangerous, and it never clears the shuffle, so the collapse is a myth. It clears the fuller test only in the 2016-19 window, so the myth grade is scoped to today’s game. This is consistent with Collapse Contagion, the aftershock read in Chapter 9.',
+			'So the belief as sold on television is overstated, not empty: the collapse half is a myth, and the hot-streak half is about half real. The technical names are the permutation null (the shuffle), autocorrelation (the claim), and the batter-stratified null (holding the batter fixed).'
 		]
 	},
 	'ch8-required': {
