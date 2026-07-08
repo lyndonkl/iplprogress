@@ -148,7 +148,8 @@ export type LayoutId =
 	| 'tide'
 	| 'worth'
 	| 'constellation'
-	| 'flow';
+	| 'flow'
+	| 'matchdots';
 
 /**
  * Which per-innings-phase star map is active in the Ch 6 constellation
@@ -210,7 +211,23 @@ export const LAYOUT_CODE: Record<LayoutId, number> = {
 	// parallel then DIVERGE at 2023. `flowLift` reveals the post-fork climb (the
 	// divergence emphasis). Fixed data aspect, letterboxed like the others. No new
 	// per-point buffer (reuses group_ids.u16 + the attrs WPL bit). See CONTRACT §23.
-	flow: 9
+	flow: 9,
+	// Ch 8 controlling morph (free→matchdots): every ball condenses to the centroid
+	// of the MATCH it belongs to + a small radial jitter disc, so one glowing dot =
+	// one whole match (1,331 of them). x = season/time axis (2008 left → 2026 right),
+	// y = the match centroid; the `matchSplit` scalar (the flowLift analog) lerps each
+	// dot into its toss lane (winner batted first → upper lane, winner chose to field
+	// → lower lane). NO new per-point buffer + NO new vertex attribute (the field
+	// stays at 14): the ball's match id is recovered in-shader by a BINARY SEARCH of
+	// position.x against a `match_bounds` DATA TEXTURE (1,331 monotone block-start
+	// point indices), then its centroid + toss + density gain is texelFetched from a
+	// second `uMatchTex` data texture — both fed once via field.setMatchTable (the
+	// setRiverTable / setWorthTables / uWorthTex precedent). Dots render at a CONSTANT
+	// radius and CONSTANT (density-normalized) brightness, so a run-heavy or longer
+	// match is never bigger or brighter (design gate). Hue stays identity (the toss
+	// rivers read POSITIONALLY by lane, never by hue). Fixed data aspect, letterboxed
+	// like the others. See CONTRACT §24.
+	matchdots: 10
 };
 
 /**
@@ -597,6 +614,42 @@ export interface FieldRenderState {
 	sparkLift: number;
 	/** luminance × for non-spark points while sparks glow (1 = no dimming) */
 	sparkOthersDim: number;
+
+	/* ---- match-dots toss split (§24 capability — the Ch 8 controlling morph) ---
+	 * `matchSplit` is the ONE held scalar a scene drives over the held match-dots
+	 * (the flowLift analog): it lerps every dot from its neutral match centroid
+	 * (0) into its toss lane (1) — winner batted first rises to the upper lane,
+	 * winner chose to field falls to the lower lane, by the match table's toss
+	 * class. Time still runs left→right inside each lane, so the field-first river
+	 * SWELLS after 2016 straight from the data's own toss shift (no authored
+	 * animation). Read in-shader only while the `matchdots` layout is in the A/B
+	 * mix, so every prior scene renders byte-identically regardless of this value. */
+	/** 0 = dots on their neutral match centroid · 1 = dots lifted into their toss lanes */
+	matchSplit: number;
+
+	/* ---- review chips (§25 capability — the Ch 8 subset) ----------------------
+	 * A cross-cutting subset over the held match-dots (the setDismissals/setSparks
+	 * precedent — it spends NO controlling morph): the 988 review deliveries fly OUT
+	 * of the held dots into per-team green/red chip stacks as `reviewEngage` scrubs
+	 * 0→1 (staggered per point → object constancy), and settle back as it scrubs 1→0.
+	 * Membership + the per-(team×outcome) stack slot are baked once via
+	 * field.setReviews (the review code into aDismissal, the packed lane+slot into
+	 * aRiverPos — NO new attribute, and aTeam is left untouched so team-ignite stays
+	 * correct everywhere). Review balls recolor by outcome — a LIGHTER green (the
+	 * review paid off / upheld) vs a DARKER red (the call stood / struck down),
+	 * separated by LUMINANCE not hue alone so "mostly dark = mostly the call stood"
+	 * survives red-green colorblindness (CVD-safe gate); the review-red is held
+	 * luminance-distinct from every team red, and while the chips are engaged the
+	 * team-glow-mute guardrail extends so identity never bleeds into the chip read.
+	 * All fields default inactive (reviewClass -1), so R0..R7 render byte-identically. */
+	/** review subset class code (-1 = inactive, 0 = review chips engaged) */
+	reviewClass: number;
+	/** 0 = review balls on their match-dots · 1 = fully flown into the chip stacks */
+	reviewEngage: number;
+	/** green/red outcome recolor strength 0..1 (the luminance-separated CVD-safe recolor) */
+	reviewTint: number;
+	/** luminance × for non-review points while the chips are engaged (1 = no dimming) */
+	reviewOthersDim: number;
 }
 
 export const DEFAULT_RENDER_STATE: FieldRenderState = {
@@ -658,5 +711,10 @@ export const DEFAULT_RENDER_STATE: FieldRenderState = {
 	flowLift: 1,
 	sparkGlow: 0,
 	sparkLift: 0,
-	sparkOthersDim: 1
+	sparkOthersDim: 1,
+	matchSplit: 0,
+	reviewClass: -1,
+	reviewEngage: 0,
+	reviewTint: 0,
+	reviewOthersDim: 1
 };

@@ -26,6 +26,8 @@ import {
 	computeFlow,
 	flowSeasonToX,
 	flowRateToY,
+	computeMatchDots,
+	computeReviewChips,
 	CONSTELLATION_PHASES,
 	basePointPx,
 	WORM_X_CAP,
@@ -34,6 +36,9 @@ import {
 	WORTH_GAIN_TARGET,
 	WORTH_GAIN_MIN,
 	WORTH_GAIN_POW,
+	MATCHDOTS_GAIN_TARGET,
+	MATCHDOTS_GAIN_MIN,
+	MATCHDOTS_GAIN_POW,
 	RAIL_MAX_SLOTS,
 	type ColumnLayout,
 	type WallLayout,
@@ -43,7 +48,9 @@ import {
 	type TideLayout,
 	type WorthLayout,
 	type ConstellationLayout,
-	type FlowLayout
+	type FlowLayout,
+	type MatchDotsLayout,
+	type ReviewChipsLayout
 } from './layout';
 import { makeVertexShader, fragmentShader, makePickVertexShader, pickFragmentShader } from './shaders';
 
@@ -304,6 +311,53 @@ export interface FieldHandle {
 	 * there is no pipeline seed, so a `flow` scene MUST call this to light the sparks.
 	 */
 	setSparks(indices: Iterable<number> | null): void;
+	/**
+	 * Feed the match table for the Ch 8 match-dots (§24 — the controlling morph). The
+	 * table carries the 1,331 per-match normalized centroids (nx, ny each in [-1,1]),
+	 * the toss class (0 = winner batted first / upper lane, 1 = winner chose to field /
+	 * lower lane), and the `bounds` — the per-match block-start point index (monotone,
+	 * since a match's deliveries are contiguous in point order) that the shader
+	 * binary-searches to recover each ball's match id. The field bakes the centroids +
+	 * toss + a per-match DENSITY GAIN (derived from each match's ball count so every dot
+	 * reads at a constant brightness) into a `uMatchTex` data texture and the bounds into
+	 * a `uMatchBoundsTex` data texture (the uWorthTex precedent — NO new per-point buffer,
+	 * NO new vertex attribute, so the field holds at 14 attributes). Fed once by the scene
+	 * before the matchdots layout engages; re-calling replaces the table. See CONTRACT §24.
+	 */
+	setMatchTable(table: MatchTable): void;
+	/**
+	 * current match-dots geometry (§24 — Ch 8's controlling morph): the fixed-aspect,
+	 * letterboxed box + the per-match world centroids for the LIVE `matchSplit` (so the
+	 * scene's SVG season axis, lane labels, the belief-reality crossover lines and the
+	 * WPL circles track the toss-lane lift) + the per-match toss class + the lane / dot
+	 * geometry. Map an arbitrary normalized centroid through `matchDotsPoint(layout, nx,
+	 * ny)` (layout.ts). null before the first resize OR before a match table is fed;
+	 * rebuilt on resize, centres re-derived from the live `matchSplit` on every read.
+	 */
+	getMatchDotsLayout(): MatchDotsLayoutInfo | null;
+	/**
+	 * Set the review-chip subset for the Ch 8 review beat (§25). Pass `{ indices, team,
+	 * outcome }` — `indices` the 988 review-delivery point indices, `team` each chip's
+	 * franchise LANE index (0-based; the scene's own franchise→lane mapping), `outcome`
+	 * 0 (struck down / the call stood) or 1 (upheld / paid off). The field bakes the
+	 * review code into the REUSED `aDismissal` and the packed lane+cumulative-stack-slot
+	 * into the REUSED `aRiverPos` (Ch 8 never coexists with Ch 3, and `aTeam` is left
+	 * untouched so team-ignite stays correct in every chapter — NO new attribute), then
+	 * renders. The struck-down (red) chips fill the bottom of each lane, the upheld
+	 * (green) chips the top, each lane's height ∝ its review count. Pass `null` to clear
+	 * (all -1). The working-today path (the setDismissals / setSparks precedent). §25.
+	 */
+	setReviews(reviews: ReviewInput | null): void;
+	/**
+	 * current review-chip geometry (§25): the chip-stack box + per-franchise-lane centres,
+	 * struck/upheld band label anchors, per-chip tick (upheld) / cross (struck) micro-glyph
+	 * anchors, the reader's-own-lane NON-RED head-marker anchor, and a MOBILE AGGREGATE
+	 * mode (one league-wide green/red split so the phone never draws all the lanes) — plus
+	 * per-lane struck/upheld counts. Scenes register the SVG chip labels, the green/red
+	 * legend, the glyphs and the head marker to the GL chips via `field.projectToCss`. null
+	 * before the first resize OR before reviews are fed. Rebuilt on resize / setReviews.
+	 */
+	getReviewChipsLayout(): ReviewChipsLayoutInfo | null;
 	readonly data: FieldData;
 	readonly stats: Readonly<FieldStats>;
 }
@@ -417,6 +471,110 @@ export interface ResortColumnInfo {
 	gis: number[];
 }
 
+/**
+ * The match table for `field.setMatchTable` (§24 — the Ch 8 match-dots). All arrays are
+ * indexed by match id (0..count-1) in POINT ORDER (the same chronological order the
+ * flatten point stream uses), so `bounds` is monotone increasing and the in-shader
+ * binary search recovers each ball's match id from its point index. Straight from
+ * `scenes/ch8.json` `match_dots.centroids` + `match_bounds`.
+ */
+export interface MatchTable {
+	/** number of matches (rows) — 1,331 for the full corpus */
+	count: number;
+	/** flat normalized centroids [nx0, ny0, nx1, ny1, …], each in [-1,1], length 2×count */
+	centroids: ArrayLike<number>;
+	/** per-match toss class: 0 = winner batted first (upper lane) · 1 = winner chose to field (lower lane); length count */
+	toss: ArrayLike<number>;
+	/** per-match block-start point index (monotone increasing), length count — the binary-search bounds */
+	bounds: ArrayLike<number>;
+	/** OPTIONAL per-match result code (stored for readback / tap tooltips; not used in-shader), length count */
+	result?: ArrayLike<number>;
+}
+
+/**
+ * Match-dots geometry exposed to scenes (§24 — the Ch 8 controlling morph). The fixed-
+ * aspect, letterboxed box (from `computeMatchDots`) + the per-match world centroids for
+ * the CURRENTLY APPLIED `matchSplit` (so the scene's SVG season axis, lane labels, the
+ * belief-reality crossover lines and the WPL circles track the toss-lane lift) + the
+ * per-match toss class. Map an arbitrary normalized centroid through `matchDotsPoint`.
+ */
+export interface MatchDotsLayoutInfo extends MatchDotsLayout {
+	/** number of matches (dots) */
+	count: number;
+	/** the live `matchSplit` 0..1 the `centres` below reflect */
+	split: number;
+	/** per-match toss class (0 bat-first / 1 field-first), length count */
+	toss: number[];
+	/** per-match world centroid for the LIVE `matchSplit` (length count) */
+	centres: { x: number; y: number }[];
+}
+
+/** The review-chip membership input for `field.setReviews` (§25 — the Ch 8 review beat). */
+export interface ReviewInput {
+	/** the review-delivery point indices (the 988 reviews) */
+	indices: ArrayLike<number>;
+	/** each review's franchise LANE index (0-based; the scene's own franchise→lane mapping) */
+	team: ArrayLike<number>;
+	/** each review's outcome: 0 = struck down (the call stood) · 1 = upheld (paid off) */
+	outcome: ArrayLike<number>;
+}
+
+/** One franchise chip lane, for anchoring the lane's SVG labels + glyphs (§25). */
+export interface ReviewLane {
+	/** the lane index (the franchise column) */
+	lane: number;
+	/** world x of the lane centre */
+	x: number;
+	/** struck-down (red / the call stood) chip count in this lane */
+	struck: number;
+	/** upheld (green / paid off) chip count in this lane */
+	upheld: number;
+	/** total reviews in this lane */
+	total: number;
+	/** world y of the top of the lane's stack (its height ∝ total / maxLaneTotal) */
+	topY: number;
+	/** world centre of the struck-down (red) band — label anchor */
+	struckCenter: { x: number; y: number };
+	/** world centre of the upheld (green) band — label anchor */
+	upheldCenter: { x: number; y: number };
+	/** world anchor for the struck-down CROSS micro-glyph cluster */
+	crossAnchor: { x: number; y: number };
+	/** world anchor for the upheld TICK micro-glyph cluster */
+	tickAnchor: { x: number; y: number };
+	/** world anchor for the reader's own-team NON-RED head marker (a crest above the lane top) */
+	headMarker: { x: number; y: number };
+}
+
+/** Review-chip geometry exposed to scenes (§25 — the Ch 8 review beat). */
+export interface ReviewChipsLayoutInfo {
+	/** the chip-stack box */
+	box: { left: number; width: number; bottom: number; top: number; height: number };
+	/** per-franchise lane geometry, length nLanes */
+	lanes: ReviewLane[];
+	/** the busiest lane's review count (the 100%-height normalizer) */
+	maxLaneTotal: number;
+	/**
+	 * league-wide totals + the MOBILE AGGREGATE-mode single green/red split (so the phone
+	 * shows one aggregate split plus the reader's own lane, never all the unreadable lanes).
+	 */
+	aggregate: {
+		struck: number;
+		upheld: number;
+		total: number;
+		/** league struck / upheld share (0..1) */
+		struckFrac: number;
+		upheldFrac: number;
+		/** world x of the aggregate column (box centre) */
+		x: number;
+		/** world y of the struck/upheld boundary in a full-height aggregate column */
+		splitY: number;
+		/** world centre of the aggregate struck (red) band — label anchor */
+		struckCenter: { x: number; y: number };
+		/** world centre of the aggregate upheld (green) band — label anchor */
+		upheldCenter: { x: number; y: number };
+	};
+}
+
 interface LabelEntry {
 	el: HTMLElement;
 	gi: number; // -1 IPL heading, -2 WPL heading
@@ -429,6 +587,10 @@ export function createField(opts: FieldOptions): FieldHandle {
 	const { canvas, container, labelLayer, data, onRender } = opts;
 	const n = data.nPoints;
 	const groupCount = data.groups.length;
+	// team count sizes the review-chip lane uniform array (§25 — uReviewLaneX[TEAM_COUNT],
+	// indexed by the franchise lane index the scene assigns). At least 1 so the #define is
+	// valid even on a degenerate teams.json.
+	const teamCount = Math.max(1, data.teams.length);
 
 	// The match facet + exact-match tooltip need a per-point match index. It is
 	// OPTIONAL: present only when the pipeline ships match_index.u16. Without it
@@ -812,6 +974,283 @@ export function createField(opts: FieldOptions): FieldHandle {
 		};
 	}
 
+	/* ---- match-dots data textures (§24 — the Ch 8 controlling morph) ---------
+	 * Two data textures (the uWorthTex precedent) hold the 1,331 match rows so NO new
+	 * per-point buffer / attribute is added (the field stays at 14):
+	 *   uMatchTex       RGBA float — per match (nx, ny normalized [-1,1], toss class,
+	 *                                per-match DENSITY GAIN)
+	 *   uMatchBoundsTex R float    — per match, the block-start point index (monotone),
+	 *                                binary-searched in-shader against position.x.
+	 * Sized to the fed table (wrapped into rows if it ever exceeds MATCH_TEX_MAXW). Start
+	 * as 1×1 placeholders so the sampler uniforms are always bound; a matchdots scene MUST
+	 * feed the real table via setMatchTable (like setStarTables / setRiverTable). */
+	const MATCH_TEX_MAXW = 2048;
+	function makeMatchTex(dataW: number, dataH: number, rgba: boolean): THREE.DataTexture {
+		const tex = new THREE.DataTexture(
+			rgba ? new Float32Array(dataW * dataH * 4) : new Float32Array(dataW * dataH),
+			dataW,
+			dataH,
+			rgba ? THREE.RGBAFormat : THREE.RedFormat,
+			THREE.FloatType
+		);
+		tex.minFilter = THREE.NearestFilter;
+		tex.magFilter = THREE.NearestFilter;
+		tex.needsUpdate = true;
+		return tex;
+	}
+	let matchTex = makeMatchTex(1, 1, true);
+	let matchBoundsTex = makeMatchTex(1, 1, false);
+	// the fed table, kept for getMatchDotsLayout readback (the per-match live centres)
+	let matchTable: {
+		count: number;
+		nx: Float64Array;
+		ny: Float64Array;
+		toss: Float64Array;
+	} | null = null;
+
+	function setMatchTable(table: MatchTable): void {
+		if (disposed) return;
+		const cnt = Math.floor(table.count);
+		if (
+			!(cnt > 0) ||
+			table.centroids.length < cnt * 2 ||
+			table.toss.length < cnt ||
+			table.bounds.length < cnt
+		) {
+			if (import.meta.env.DEV)
+				console.warn(
+					`[every-ball-ever] setMatchTable: expected count>0 with centroids≥2×count,`,
+					`toss≥count, bounds≥count — got count=${table.count} — ignoring.`
+				);
+			return;
+		}
+		const texW = Math.min(cnt, MATCH_TEX_MAXW);
+		const texH = Math.ceil(cnt / texW);
+		const cData = new Float32Array(texW * texH * 4);
+		const bData = new Float32Array(texW * texH);
+		const nx = new Float64Array(cnt);
+		const ny = new Float64Array(cnt);
+		const toss = new Float64Array(cnt);
+		for (let m = 0; m < cnt; m++) {
+			const x = Number(table.centroids[m * 2]);
+			const y = Number(table.centroids[m * 2 + 1]);
+			const ts = Number(table.toss[m]) >= 0.5 ? 1 : 0;
+			const start = Number(table.bounds[m]);
+			// per-match ball count from the contiguous point block → the density gain so a
+			// longer / run-heavier match is no brighter than a short one (§0.1 / design gate).
+			const next = m < cnt - 1 ? Number(table.bounds[m + 1]) : n;
+			const ballCount = Math.max(1, next - start);
+			const gain = Math.min(
+				1,
+				Math.max(MATCHDOTS_GAIN_MIN, Math.pow(MATCHDOTS_GAIN_TARGET / ballCount, MATCHDOTS_GAIN_POW))
+			);
+			cData[m * 4] = Number.isFinite(x) ? x : 0;
+			cData[m * 4 + 1] = Number.isFinite(y) ? y : 0;
+			cData[m * 4 + 2] = ts;
+			cData[m * 4 + 3] = gain;
+			bData[m] = Number.isFinite(start) ? start : 0;
+			nx[m] = Number.isFinite(x) ? x : 0;
+			ny[m] = Number.isFinite(y) ? y : 0;
+			toss[m] = ts;
+		}
+		matchTable = { count: cnt, nx, ny, toss };
+		matchTex.dispose();
+		matchBoundsTex.dispose();
+		matchTex = new THREE.DataTexture(cData, texW, texH, THREE.RGBAFormat, THREE.FloatType);
+		matchTex.minFilter = THREE.NearestFilter;
+		matchTex.magFilter = THREE.NearestFilter;
+		matchTex.needsUpdate = true;
+		matchBoundsTex = new THREE.DataTexture(bData, texW, texH, THREE.RedFormat, THREE.FloatType);
+		matchBoundsTex.minFilter = THREE.NearestFilter;
+		matchBoundsTex.magFilter = THREE.NearestFilter;
+		matchBoundsTex.needsUpdate = true;
+		uniforms.uMatchTex.value = matchTex;
+		uniforms.uMatchBoundsTex.value = matchBoundsTex;
+		uniforms.uMatchN.value = cnt;
+		uniforms.uMatchTexW.value = texW;
+		invalidate();
+	}
+
+	function getMatchDotsLayout(): MatchDotsLayoutInfo | null {
+		if (!matchDotsLayout || !matchTable) return null;
+		const split = Math.min(1, Math.max(0, applied.matchSplit));
+		const { halfW, halfH, laneY, laneHalf } = matchDotsLayout;
+		const cnt = matchTable.count;
+		const centres: { x: number; y: number }[] = new Array(cnt);
+		const toss: number[] = new Array(cnt);
+		for (let m = 0; m < cnt; m++) {
+			const nx = matchTable.nx[m];
+			const ny = matchTable.ny[m];
+			const ts = matchTable.toss[m];
+			toss[m] = ts;
+			const baseCy = ny * halfH;
+			const laneSign = ts < 0.5 ? 1 : -1;
+			const laneCy = laneSign * laneY + ny * laneHalf;
+			centres[m] = { x: nx * halfW, y: baseCy + (laneCy - baseCy) * split };
+		}
+		return { ...matchDotsLayout, count: cnt, split, toss, centres };
+	}
+
+	/* ---- review chips state (§25 — the Ch 8 review beat) --------------------
+	 * Membership (the review code) rides the REUSED aDismissal, and the packed lane index
+	 * + cumulative stack slot rides the REUSED aRiverPos (Ch 8 never coexists with Ch 3);
+	 * aTeam is left untouched so team-ignite stays correct in every chapter. reviewLaneOf
+	 * remembers each review point's franchise lane so ensureReviewData can bake the stack. */
+	const reviewLaneOf = new Int32Array(n).fill(-1);
+	const reviewLaneX = new Float32Array(teamCount);
+	let reviewNLanes = 0;
+	let reviewVersion = 0;
+	let reviewKey = ''; // the reviewVersion currently baked into aRiverPos
+	let reviewActive = false; // whether the last applied state engaged the review chips
+	let reviewMaxLaneTotal = 1; // the busiest lane's review count (100%-height normalizer)
+	let reviewLaneStruck: number[] = [];
+	let reviewLaneUpheld: number[] = [];
+
+	// Lay the franchise lanes across the chip box + push the per-lane x's to the uniform.
+	// Called on setReviews (nLanes changed) and on resize (box changed). Cheap.
+	function rebuildReviewLanes(): void {
+		reviewChipsLayout = computeReviewChips(reviewNLanes, halfWCache, halfHCache);
+		reviewLaneX.fill(0);
+		for (let l = 0; l < reviewNLanes && l < teamCount; l++)
+			reviewLaneX[l] = reviewChipsLayout.laneXs[l];
+		uniforms.uReviewLaneX.value = reviewLaneX;
+		uniforms.uReviewBottom.value = reviewChipsLayout.bottom;
+		uniforms.uReviewHeight.value = reviewChipsLayout.height;
+		uniforms.uReviewLaneHalfW.value = reviewChipsLayout.laneHalfW;
+		// in-slot y jitter < the slot pitch (height / busiest-lane count) so chips read as
+		// a soft stack, not a hard grid; recomputed once ensureReviewData knows the max.
+		uniforms.uReviewChipJitter.value =
+			(reviewChipsLayout.height / Math.max(1, reviewMaxLaneTotal)) * 0.35;
+	}
+
+	function setReviews(reviews: ReviewInput | null): void {
+		if (disposed) return;
+		const dis = dismissalAttr.array as Int8Array;
+		dis.fill(-1);
+		reviewLaneOf.fill(-1);
+		reviewNLanes = 0;
+		if (reviews !== null) {
+			const { indices, team, outcome } = reviews;
+			const k = indices.length;
+			for (let j = 0; j < k; j++) {
+				const i = Math.floor(Number(indices[j]));
+				if (!(i >= 0 && i < n)) continue;
+				const o = Number(outcome[j]) >= 0.5 ? 1 : 0;
+				let lane = Math.floor(Number(team[j]));
+				if (!(lane >= 0)) lane = 0;
+				if (lane >= teamCount) lane = teamCount - 1; // clamp into the lane array
+				dis[i] = o;
+				reviewLaneOf[i] = lane;
+				if (lane + 1 > reviewNLanes) reviewNLanes = lane + 1;
+			}
+		}
+		dismissalAttr.needsUpdate = true;
+		reviewVersion++;
+		reviewKey = '';
+		riversKey = ''; // aDismissal/aRiverPos changed — force the Ch 3 rivers cache to rebuild too
+		rebuildReviewLanes();
+		if (reviewActive) ensureReviewData();
+		invalidate();
+	}
+
+	// Bake the per-review stacked slot into aRiverPos = lane + slot (integer lane part,
+	// cumulative 0..1 slot fraction). Struck-down chips fill the bottom of each lane, upheld
+	// on top; each lane's height ∝ its review count / the busiest lane. Cached by version.
+	function ensureReviewData(): void {
+		const key = `${reviewVersion}`;
+		if (reviewKey === key) return;
+		reviewKey = key;
+		const dis = dismissalAttr.array as Int8Array;
+		const struck = new Array<number>(reviewNLanes).fill(0);
+		const upheld = new Array<number>(reviewNLanes).fill(0);
+		for (let i = 0; i < n; i++) {
+			const lane = reviewLaneOf[i];
+			if (lane < 0) continue;
+			if (dis[i] >= 0.5) upheld[lane]++;
+			else struck[lane]++;
+		}
+		let maxTotal = 1;
+		for (let l = 0; l < reviewNLanes; l++) {
+			const t = struck[l] + upheld[l];
+			if (t > maxTotal) maxTotal = t;
+		}
+		const runStruck = new Array<number>(reviewNLanes).fill(0);
+		const runUpheld = new Array<number>(reviewNLanes).fill(0);
+		const pos = riverPosAttr.array as Float32Array;
+		for (let i = 0; i < n; i++) {
+			const lane = reviewLaneOf[i];
+			if (lane < 0) continue;
+			let cum: number;
+			if (dis[i] >= 0.5) {
+				cum = struck[lane] + runUpheld[lane];
+				runUpheld[lane]++;
+			} else {
+				cum = runStruck[lane];
+				runStruck[lane]++;
+			}
+			// slot < 1 always (cum ≤ laneTotal−0.5 ≤ maxTotal−0.5), so floor(lane+slot) == lane
+			pos[i] = lane + (cum + 0.5) / maxTotal;
+		}
+		riverPosAttr.needsUpdate = true;
+		reviewMaxLaneTotal = maxTotal;
+		reviewLaneStruck = struck;
+		reviewLaneUpheld = upheld;
+		if (reviewChipsLayout)
+			uniforms.uReviewChipJitter.value = (reviewChipsLayout.height / maxTotal) * 0.35;
+	}
+
+	function getReviewChipsLayout(): ReviewChipsLayoutInfo | null {
+		if (!reviewChipsLayout || reviewNLanes <= 0) return null;
+		const rl = reviewChipsLayout;
+		const maxTotal = Math.max(1, reviewMaxLaneTotal);
+		const lanes: ReviewLane[] = [];
+		let aggStruck = 0;
+		let aggUpheld = 0;
+		for (let l = 0; l < reviewNLanes; l++) {
+			const struck = reviewLaneStruck[l] ?? 0;
+			const upheld = reviewLaneUpheld[l] ?? 0;
+			const total = struck + upheld;
+			aggStruck += struck;
+			aggUpheld += upheld;
+			const x = rl.laneXs[l];
+			const struckMidY = rl.bottom + (struck / 2 / maxTotal) * rl.height;
+			const upheldMidY = rl.bottom + ((struck + upheld / 2) / maxTotal) * rl.height;
+			const topY = rl.bottom + (total / maxTotal) * rl.height;
+			lanes.push({
+				lane: l,
+				x,
+				struck,
+				upheld,
+				total,
+				topY,
+				struckCenter: { x, y: struckMidY },
+				upheldCenter: { x, y: upheldMidY },
+				crossAnchor: { x, y: struckMidY },
+				tickAnchor: { x, y: upheldMidY },
+				headMarker: { x, y: topY + rl.height * 0.04 }
+			});
+		}
+		const aggTotal = aggStruck + aggUpheld;
+		const aggStruckFrac = aggTotal > 0 ? aggStruck / aggTotal : 0;
+		const aggUpheldFrac = aggTotal > 0 ? aggUpheld / aggTotal : 0;
+		return {
+			box: { left: rl.left, width: rl.width, bottom: rl.bottom, top: rl.top, height: rl.height },
+			lanes,
+			maxLaneTotal: maxTotal,
+			aggregate: {
+				struck: aggStruck,
+				upheld: aggUpheld,
+				total: aggTotal,
+				struckFrac: aggStruckFrac,
+				upheldFrac: aggUpheldFrac,
+				x: 0,
+				splitY: rl.bottom + aggStruckFrac * rl.height,
+				struckCenter: { x: 0, y: rl.bottom + (aggStruckFrac / 2) * rl.height },
+				upheldCenter: { x: 0, y: rl.bottom + (aggStruckFrac + aggUpheldFrac / 2) * rl.height }
+			}
+		};
+	}
+
 	/* ---- over-rail uniform arrays (§20) — sized to RAIL_MAX_SLOTS ----------- */
 	const railIdxArr = new Float32Array(RAIL_MAX_SLOTS).fill(-9999);
 	const railSlotVecs: THREE.Vector2[] = Array.from(
@@ -955,7 +1394,32 @@ export function createField(opts: FieldOptions): FieldHandle {
 		// branch is a shader no-op and every prior scene renders byte-identically.
 		uSparkGlow: { value: 0 },
 		uSparkLift: { value: 0 },
-		uSparkOthersDim: { value: 1 }
+		uSparkOthersDim: { value: 1 },
+		// match-dots (§24) — the two data textures (placeholders until setMatchTable is
+		// fed) + the binary-search bound + the letterboxed box geometry (set on resize) +
+		// the toss-lane lift. The whole layout is gated in-shader on code 10 being in the
+		// mix, so R0..R7 render byte-identically regardless of these values.
+		uMatchTex: { value: matchTex },
+		uMatchBoundsTex: { value: matchBoundsTex },
+		uMatchN: { value: 0 },
+		uMatchTexW: { value: 1 },
+		uMatchHalfExtent: { value: new THREE.Vector2(1, 1) },
+		uMatchDotR: { value: 0.02 },
+		uMatchLaneY: { value: 0.42 },
+		uMatchLaneHalf: { value: 0.2 },
+		uMatchSplit: { value: 0 },
+		// review chips (§25) — inactive by default (uReviewClass -1), so the review branch
+		// is a shader no-op and every prior scene renders byte-identically. The lane x's
+		// are baked by setReviews / resize; the box geometry is set on resize.
+		uReviewClass: { value: -1 },
+		uReviewEngage: { value: 0 },
+		uReviewTint: { value: 0 },
+		uReviewOthersDim: { value: 1 },
+		uReviewLaneX: { value: reviewLaneX },
+		uReviewBottom: { value: -0.5 },
+		uReviewHeight: { value: 1 },
+		uReviewLaneHalfW: { value: 0.02 },
+		uReviewChipJitter: { value: 0.005 }
 	};
 
 	const geometry = new THREE.BufferGeometry();
@@ -1047,7 +1511,7 @@ export function createField(opts: FieldOptions): FieldHandle {
 
 	const material = new THREE.ShaderMaterial({
 		glslVersion: THREE.GLSL3,
-		vertexShader: makeVertexShader(groupCount, hasMatchAttr),
+		vertexShader: makeVertexShader(groupCount, teamCount, hasMatchAttr),
 		fragmentShader,
 		uniforms,
 		transparent: true,
@@ -1072,7 +1536,7 @@ export function createField(opts: FieldOptions): FieldHandle {
 	 * byte-identical rendering. */
 	const railMaterial = new THREE.ShaderMaterial({
 		glslVersion: THREE.GLSL3,
-		vertexShader: makeVertexShader(groupCount, hasMatchAttr, true),
+		vertexShader: makeVertexShader(groupCount, teamCount, hasMatchAttr, true),
 		fragmentShader,
 		uniforms, // SAME object → layout/morph/dim state always matches the field
 		transparent: true,
@@ -1092,7 +1556,7 @@ export function createField(opts: FieldOptions): FieldHandle {
 	   Rendered on demand to a tiny offscreen target — never in the render loop. */
 	const pickMaterial = new THREE.ShaderMaterial({
 		glslVersion: THREE.GLSL3,
-		vertexShader: makePickVertexShader(groupCount, hasMatchAttr),
+		vertexShader: makePickVertexShader(groupCount, teamCount, hasMatchAttr),
 		fragmentShader: pickFragmentShader,
 		uniforms, // SAME object → morph/layout/filter always match the visual field
 		transparent: false,
@@ -1125,6 +1589,8 @@ export function createField(opts: FieldOptions): FieldHandle {
 	let worthLayout: WorthLayout | null = null;
 	let constellationLayout: ConstellationLayout | null = null;
 	let flowLayout: FlowLayout | null = null;
+	let matchDotsLayout: MatchDotsLayout | null = null;
+	let reviewChipsLayout: ReviewChipsLayout | null = null;
 	let cssW = 1;
 	let cssH = 1;
 
@@ -1573,7 +2039,12 @@ export function createField(opts: FieldOptions): FieldHandle {
 			a.flowLift === b.flowLift &&
 			a.sparkGlow === b.sparkGlow &&
 			a.sparkLift === b.sparkLift &&
-			a.sparkOthersDim === b.sparkOthersDim
+			a.sparkOthersDim === b.sparkOthersDim &&
+			a.matchSplit === b.matchSplit &&
+			a.reviewClass === b.reviewClass &&
+			a.reviewEngage === b.reviewEngage &&
+			a.reviewTint === b.reviewTint &&
+			a.reviewOthersDim === b.reviewOthersDim
 		);
 	}
 
@@ -1746,6 +2217,36 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uniforms.uSparkLift.value = s.sparkLift;
 		uniforms.uSparkOthersDim.value = s.sparkOthersDim;
 
+		// match-dots toss split (§24): the ONE held scalar over the matchdots layout (the
+		// flowLift analog). Read in-shader only while code 10 is in the A/B mix, so this is
+		// a no-op for every prior scene (byte-identical).
+		uniforms.uMatchSplit.value = s.matchSplit;
+
+		// review chips (§25): bake the per-(team×outcome) stack the first time the reviews
+		// engage (cached by version), and set every scalar each apply so engage/tint/
+		// othersDim lerp exactly like the rivers. A cross-cutting POSITION modifier — DEV-
+		// warn if it engages alongside another (all move points; stage them apart).
+		uniforms.uReviewEngage.value = s.reviewEngage;
+		uniforms.uReviewTint.value = s.reviewTint;
+		uniforms.uReviewOthersDim.value = s.reviewOthersDim;
+		if (s.reviewClass >= 0) {
+			ensureReviewData();
+			uniforms.uReviewClass.value = s.reviewClass;
+			reviewActive = true;
+		} else {
+			uniforms.uReviewClass.value = -1;
+			reviewActive = false;
+		}
+		if (
+			import.meta.env.DEV &&
+			s.reviewClass >= 0 &&
+			(s.resortClass >= 0 || s.cascadeClass >= 0 || s.riversClass >= 0 || s.railIndices.length > 0)
+		)
+			console.warn(
+				'[every-ball-ever] invariant: the review chips (C8-4) and a re-sort/cascade/rivers/rail',
+				'are both engaged — cross-cutting position modifiers must be staged apart.'
+			);
+
 		// label plane opacity is scene-state-driven, never animated on its own
 		const o = Math.min(1, Math.max(0, s.labels));
 		labelLayer.style.opacity = o.toFixed(3);
@@ -1904,6 +2405,7 @@ export function createField(opts: FieldOptions): FieldHandle {
 		worthLayout = computeWorth(halfW, halfH);
 		constellationLayout = computeConstellation(halfW, halfH);
 		flowLayout = computeFlow(data.groups, halfW, halfH);
+		matchDotsLayout = computeMatchDots(halfW, halfH);
 		uniforms.uHalfW.value = halfW;
 		uniforms.uHalfH.value = halfH;
 		uniforms.uWormLeft.value = wormLayout.left;
@@ -1943,6 +2445,17 @@ export function createField(opts: FieldOptions): FieldHandle {
 		// twin rivers (§23): the letterboxed box changed, so re-bake the per-gi river
 		// cells (season x, centreline heights, band) if a table has been fed.
 		applyFlowGeometry();
+		// match-dots (§24): the letterboxed box → the per-axis half extents (normalized
+		// centroid → world) + the constant jitter-disc radius + the toss-lane geometry.
+		(uniforms.uMatchHalfExtent.value as THREE.Vector2).set(
+			matchDotsLayout.halfW,
+			matchDotsLayout.halfH
+		);
+		uniforms.uMatchDotR.value = matchDotsLayout.dotRadius;
+		uniforms.uMatchLaneY.value = matchDotsLayout.laneY;
+		uniforms.uMatchLaneHalf.value = matchDotsLayout.laneHalf;
+		// review chips (§25): the chip box + per-franchise-lane x's follow the width.
+		rebuildReviewLanes();
 		uniforms.uPointScale.value = basePointPx(w, h, n) * dpr;
 		uniforms.uColHalfWidth.value = columnLayout.colHalfWidth;
 		uniforms.uColBottom.value = columnLayout.bottom;
@@ -2022,6 +2535,10 @@ export function createField(opts: FieldOptions): FieldHandle {
 		setRunouts,
 		setDismissals,
 		setSparks,
+		setMatchTable,
+		getMatchDotsLayout,
+		setReviews,
+		getReviewChipsLayout,
 		dispose(): void {
 			disposed = true;
 			if (rafId !== null) cancelAnimationFrame(rafId);
@@ -2034,6 +2551,8 @@ export function createField(opts: FieldOptions): FieldHandle {
 			pickMaterial.dispose();
 			pickTarget.dispose();
 			worthTex.dispose();
+			matchTex.dispose();
+			matchBoundsTex.dispose();
 			renderer.dispose();
 			for (const L of labels) L.el.remove();
 		}

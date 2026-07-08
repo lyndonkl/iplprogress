@@ -23,6 +23,7 @@ python3 pipeline/flatten.py \
   && python3 pipeline/ch5.py \
   && python3 pipeline/ch6.py \
   && python3 pipeline/ch7.py \
+  && python3 pipeline/ch8.py \
   && python3 pipeline/payoff_harness.py \
   && python3 pipeline/ledger.py \
   && python3 -m unittest discover -s pipeline/tests -q
@@ -65,6 +66,19 @@ columnar dataset (so unlike Ch 2/3/4 the render cannot derive membership client-
 index list is the Ch 5 over-rail precedent). The twin-rivers controlling morph reuses the
 existing `group_ids.u16` + `attrs.u8`, so Ch 7 adds no per-point buffer; it runs **after**
 `flatten`/`scenes` for manifest order (it registers `scenes/ch7.json` in `meta.json`);
+`ch8.py` (R5a) is also engine- and buffer-free: its own corpus pass in flatten's exact
+season-blocked point order (never reading an R1–R4b artifact) computes the belief-audit
+report card (FAIL toss / FAIL reviews / FAIL spells / FAIL-with-a-residual momentum / PASS
+required rate) and emits `scenes/ch8.json`: the **match-dots** controlling-morph table (1,331
+match centroids + the `match_bounds` block-start point indices the field binary-searches
+in-shader, adding NO per-point attribute so the field holds at 14), the **988 review-chip
+subset** (point indices / team / outcome, reusing `aDismissal`/`aTeam`/`aRiverPos`), the toss
+crossover, the spell strips + cold-return tax, the precomputed momentum shuffle nulls (a
+fixed-seed permutation, so two runs emit identical bytes), the required-rate curve, the WPL
+adoption curve, the 16 payoff variants, and the footnote layer. It imports `h2h` (Engine #6)
+for the demoted Matchup Engineering footnote lead ONLY (the usable head-to-head history grew
+12.4%→42.1%). No new per-point buffer (`pairing.u16` belongs to Ch 9); it runs **after**
+`flatten`/`scenes` for manifest order (it registers `scenes/ch8.json` in `meta.json`);
 `payoff_harness.py` emits `payoff/ch1.json`;
 `ledger.py` audits everything on disk against the blueprint §2 budgets. The harness and
 the ledger exit non-zero on failure. The whole build runs in seconds and is **byte-for-byte
@@ -87,6 +101,7 @@ verified by rebuilding and diffing checksums.
 | `ch5.py` | **R3b-2 — Chapter 5 "What a Ball Is Worth".** Consumes the gate-validated `engines/wp_grid.json` + `engines/re288.json` (never rebuilds them; adds two documented derived views: mid-first-innings WP = the era defend curve at a projected total of runs-so-far + RE runs-to-come, interpolated between bucket midpoints — exactly the view `wp.py` designates for R3b — and per-ball RE by interpolating the era surface across the over axis). Emits the **`wpa.u8`** per-point buffer (signed-quantized WPA, batting-team perspective, sentinel 255 for D/L / undecided / short-target matches — the matches the grids exclude), the **`restate.u8`** per-point buffer (the ball's RE-grid cell, `over*10 + wickets_down`, the controlling-morph coordinate), and `scenes/ch5.json` (defended band, RE drift + third-wicket validation, linear weights + per-season price board, Wicket Value Index, finisher cliff, the 2019-final scrub over + WP worm, league WPA headlines, 20 franchise payoff cards with tappable over replays, WPL beats, footnotes incl. the demoted chase-difficulty + era-swap exhibits, and both buffer decode specs). The scrub match and the era-swap innings resolve **by identity**, never a hard-coded index. |
 | `ch6.py` | **R4a — Chapter 6 "Two Dialects" (IPL × WPL, beside the path not on it).** Its own corpus pass (no engine, no per-point buffer — the controlling morph reuses `group_ids.u16`) plus a pure-Python linear-algebra core (Jacobi eigensolver, classical MDS, 2×2 orthogonal-Procrustes/polar factor, Jensen-Shannon divergence). Emits `scenes/ch6.json`: the **Season Constellation Map** — each of the 23 season-groups placed by the JS distance between its 7-way per-ball outcome distribution (dot/single/two-or-three/four/six/wicket/extras), classical MDS to the all-phase MASTER star layout, each per-phase layout (PP 1-6 / middle 7-15 / death 16-20) Procrustes-aligned to it so the WPL never flips sides; emits star (x,y) per phase (stable box), the IPL chronological worm, each WPL star's nearest-IPL neighbour per phase (dotted threads) and the two-truths pairing (outcome-mix twin IPL 2008 vs run-rate twin IPL 2022); the **League Maturity Clock** (WPL yr4 8.54 == IPL yr15), **Run DNA** helix (four 46.8 vs 33.9, six 15.5 vs 29.0), **Stumping Signature** (WPL 5.2-7.9% vs IPL 2026 1.4%), **Photo-Finish** rate (WPL 24.1% the tightest league), the batting ladder + depth (WPL 2025 pos-7+ 15.3%), the 16 sister-franchise payoff variants, and the footnote layer (Star Gravity/Gini, Competitive Balance win-HHI, Powerplay Fear, Twos Culture). Registers `scenes/ch6.json` in `meta.json`. |
 | `ch7.py` | **R4b — Chapter 7 "The Twelfth Man" (the Impact Player rule as a natural experiment).** Its own corpus pass (no engine, no per-point buffer — the twin-rivers controlling morph reuses `group_ids.u16` + `attrs.u8`) in flatten's exact season-blocked point order. Emits `scenes/ch7.json`: the **natural experiment** (IPL run rate range-bound 7.5-8.7 for 2008-2022 then 8.99/9.56/9.63/9.88, vs the rule-free WPL 8.08→8.54; diff-in-diff ≈ +0.9 RPO with disclosed confounds — on screen "the control group", "diff-in-diff" one click deep), the **License Index** (at ≥4 down / overs 7-16: SR 116.8→129.9 while the dismissal rate held ~flat 4.88→4.95; top order took the licence most, +18.0% vs +11.0% for 6-8), the **event-study placebo grid** (every candidate season 2012-2025's before/after level shift + SE + t, emitted whole so the placebo cursor is a lookup; the true 2023 date clears the entire pre-rule placebo cloud, with the honest disclosure that 2024's raw magnitude edges it as the break deepens), the **Playbook Decoder** (subs at the innings break 51.8%→35.7%), the **honest null** (entry entropy flat; top-3 SR 131.5→155.3; bowlers/innings 5.79→6.12), and the **impact-sub extraction**: 556 Impact Player events across 517 distinct deliveries (WPL 0 — the control arm), the bat-vs-bowl reinforcement split (256/300), and the **spark index list** (the 517 field point indices carrying an event, the render's subset-highlight membership). 16 team-playbook payoff variants (10 IPL playbook cards + 5 WPL control-arm cards + neutral). Registers `scenes/ch7.json` in `meta.json`. |
+| `ch8.py` | **R5a — Chapter 8 "The Captain's Brain" (the belief audit, report card FFFFP).** Its own corpus pass in flatten's exact season-blocked point order (no engine, no per-point buffer). Imports `h2h` (Engine #6) for the demoted Matchup Engineering footnote lead ONLY. Emits `scenes/ch8.json`: the **match-dots** controlling-morph table (1,331 match centroids `[x, y, toss_class, result]` + `match_bounds`, the 1,331 monotone block-start point indices the field binary-searches in-shader — NO per-point attribute, the field holds at 14), the **988-chip review subset** (`indices`/`team`/`outcome`, reusing `aDismissal`/`aTeam`/`aRiverPos`), **Belief 1 toss** FAIL (field-first 42.9→77.1 while the chase never paid better 54.3/59.6/52.8; the two crossing lines + crossing point; toss-to-win ~50% every era), **Belief 2 reviews** FAIL (988 reviews 29.6% upheld; the honest delta — the success rate DEGRADED 32.8→28.1, a free fall to 16.9 by 2026, at 1.26→1.87/match), **Belief 3 spells** FAIL (one-over share 54.7→64.1, WPL 75.3; the honest delta — the cold-return tax GREW +0.16→+0.30, strict +0.18→+0.41; near-median example strips), **Belief 4 momentum** FAIL-with-a-residual (the wicket myth collapses 0.93 anti; hitting is mostly good batters batting with a FLAT ~1.07 real sliver; the raw edge 1.21→1.16 that fades is kept off the sliver claim; all shuffle nulls precomputed, fixed seed), **Belief 5 required-rate** PASS (chase powerplay 7.62→9.19 now above the middle overs, ahead-at-halfway 31.7→37.5, with the honest caveat that chasing still wins ~53%), the **WPL transmission** (a two-season adoption curve 54.5→~100, reviews 30.5 vs 29.6, out-fragments at 75.3; analytics-native, never "behind"), the **16 payoff variants** (10 IPL "your captains' report card" incl. RCB 96%/38.7% and CSK 13%/Chepauk and DC last 19.4% + 5 WPL bespoke transmission cards + neutral), and the footnote layer (`ch8-matchdots`/`toss`/`review`/`spell`/`momentum`/`required`/`wpl`/`payoff`/`matchup`/`dew`). Byte-deterministic. Registers `scenes/ch8.json` in `meta.json`. |
 | `payoff_harness.py` | Payoff-card snapshot harness: emits + asserts the 16 Chapter-1 variants (R1a full spec). |
 | `ledger.py` | Payload ledger vs the §2 budgets; prints the table; writes `ledger.json`. |
 | `tests/` | `unittest` snapshot tests (see below). |
@@ -144,6 +159,7 @@ index, over, delivery index):
 | `wpa.u8` **(R3b-2)** | Per-point buffer, 1 byte/point in field point order: the ball's **Win Probability Added** from the **batting team's** perspective. `byte = 127 + round(wpa*127)` clamped to 0..254 (decode `wpa = (byte-127)/127`, so 127 = 0, resolution ~0.008); **255 = sentinel** "no WPA" — the ball's match is D/L, had no decided result, or set a chase target other than a full 20 overs (6,579 balls, exactly the matches the win grids exclude). Second innings reads the era grid at (overs_left, wickets in hand, required-rate bucket); first innings uses the documented projected-total defend view; terminal balls resolve to the actual result (ties to the super-over winner), so per-chase WPA telescopes exactly to (result − first-state WP). Powers the biggest-swing subset-highlights. |
 | `restate.u8` **(R3b-2)** | Per-point buffer, 1 byte/point in field point order: the ball's RE-grid state cell packed `over*10 + wickets_down` (0..199). `over` = the delivery's over index 0..19 (wides/no-balls carry the over they were bowled in); `wickets_down` = dismissals before this delivery (0..9). Both innings packed; filter with the columnar `innings` array if a scene wants first innings only. Drives the Chapter 5 controlling morph (balls arrayed on the 20-over × 10-wicket grid, colored by the era RE surfaces in `scenes/ch5.json` / `engines/re288.json`). |
 | `scenes/ch5.json` **(R3b-2)** | Chapter 5 "What a Ball Is Worth": `defended_band` (170-189, raw + fitted, per era), `re_drift` (both engine surfaces + diff + the third-wicket validation), `linear_weights` (per era) + `price_board` (per season), `wicket_value` (+ the 2024-26 window + run-inflation context), `finisher` (the moving cliff), `scrub` (the 2019 final last over, ball-by-ball, WP worm + observed endgame dots + `point_indices`, the six field point indices the over-rail lifts — never client-derived), `wpa` (league headlines, top-10 swings, `season_gallery` — one ball per league-season for the neutral payoff gallery — closure + coverage; swing rows carry `point_index` + `state_cell`), `payoff` (20 franchise cards: most valuable ball ever + tappable over replay + 4 runners-up, WPL short-history state; every ball row carries `point_index` + `state_cell` for the C5-11 single-point ignite), `wpl_beat` (RE evidence mask + observed-outcome dots + finisher cohort + `match_counts`, the corpus-counted 88/1,331 the C5-10 captions bind to), `footnotes` (crediting, tie rule, first-innings WP view, smoothing, chase-difficulty + era-swap demoted exhibits), and both buffer decode specs. |
+| `scenes/ch8.json` **(R5a)** | Chapter 8 "The Captain's Brain" (the belief audit). `match_dots` (the controlling-morph table: `centroids` = 1,331 × `[x, y, toss_class, result]` — x normalized start date, y a fixed low-discrepancy spread, toss_class 0 bat-first / 1 field-first, result 1 chase-won / 0 bat-first-won / −1 undecided; `bounds` = 1,331 monotone block-start point indices in flatten point order the field binary-searches in-shader; `season`/`league` per match; `axis_ticks`), `review_subset` (the 988 IPL review deliveries: `indices`/`team`/`outcome` for `field.setReviews`, reusing `aDismissal`/`aTeam`/`aRiverPos`), `toss` (FAIL: per-era field-first 42.9→77.1 + chase-win 54.3/59.6/52.8, the two crossing lines + crossing point, the captain-sim lookup), `review` (FAIL: 988/29.6% + the DEGRADED delta 32.8→28.1 free-falling to 16.9, per-team chip lanes + leaderboard), `spell` (FAIL: one-over 54.7→64.1 WPL 75.3, the GROWN cold-return tax +0.16→+0.30 / strict +0.18→+0.41, near-median example strips), `momentum` (FAIL-with-residual: 7 claims × 4 groups with precomputed shuffle-null histograms + the batter-stratified residuals, wicket 0.93 anti + boundary residual FLAT ~1.07), `required_rate` (PASS: chase PP 7.62→9.19, ahead-at-halfway 31.7→37.5), `wpl` (the two-season adoption curve 54.5→~100, reviews 30.5, one-over 75.3), `payoff` (16 variants), `footnotes` (10 `ch8-*` strings). Engine- and buffer-free; no per-point buffer (`match_bounds` is inline, holding the field at 14 attributes). |
 | `ledger.json` | the payload audit (build report, excluded from its own budget math) |
 
 ## R1a recipe pins (metric definitions that reconcile with the catalog teasers)
@@ -403,6 +419,59 @@ snapshot). Era bands are the engines' (2008-10 vs 2023-26 unless stated).
   2008 chase hundred — the same target's failure chance at ball one, 29 in 100
   on the 2008-10 grid vs 16 in 100 on the 2023-26 grid.
 
+## Chapter 8 recipe pins (R5a — "The Captain's Brain", the belief audit)
+
+Every number reconciles **exactly** with `research/storyboards/r5a-chapter8-storyboard.md`
+§3 (the verified-number index) and the R5a scout recount. ARTIFACT WINS: the emitted JSON is
+the on-screen source, and where the recount differs from a blueprint teaser the recount ships
+(three honest deltas are shipped straight, never fudged).
+
+- **Match-dots:** one dot per match, all 1,331 (1,243 IPL + 88 WPL, the actual corpus file
+  count; the storyboard's "1,244 + 89" was off by one each, the artifact carries the real
+  count) resolved from 316,199 field balls. x = normalized start date; y = a fixed
+  low-discrepancy spread (`frac((i+1)·φ)`), so **dot size and brightness encode nothing**.
+  `match_bounds[i]` = the block-start point index of match i in flatten's exact season-blocked
+  point order (monotone non-decreasing) — the field binary-searches these in-shader, adding
+  **no per-point attribute** (holds at 14).
+- **Belief 1 toss (FAIL):** field-first share = the winner's toss decision to field; per era
+  **42.9 / 55.8 / 82.4 / 70.1 / 77.1** (2026 = 82.4). Batting-second win rate among decided
+  matches: **54.3 / 53.1 / 59.6 / 54.5 / 52.8** (the true humped shape, never "flat"). The two
+  lines CROSS between 2008-10 and 2011-15. Toss-to-win ~50% every era (53.2/48.4/57.0/50.3/50.7).
+- **Belief 2 reviews (FAIL):** only "struck down"/"upheld" exist (type unreliable, kept out).
+  **988 reviews, 292 upheld = 29.6%.** Pre-2022 (2018-21) 302 at 1.26/match, 32.8%; from 2022
+  686 at 1.87/match, 28.1%. **Honest delta: accuracy DEGRADED** — per-season 34.7/33.1/29.1/24.8/
+  **16.9** (2026). The 988-delivery subset is emitted in field point order for the chips.
+- **Belief 3 spells (FAIL):** a spell = a bowler's consecutive-over run from one end (even/odd
+  over-index runs). One-over-spell share **54.7 → 64.1** (WPL 75.3; IPL 52.2→67.8 season to
+  season). **Honest delta: the cold-return tax GREW** — over-number-matched (≥5 overs a bin),
+  every first-of-spell over vs continuation: **+0.16 / +0.28 / +0.30**; the stricter cold-
+  re-entry read **+0.18 / +0.34 / +0.41**. WPL tax ~0, dropped on screen. Example strips are
+  NEAR-MEDIAN innings, never cherry-picked extremes.
+- **Belief 4 momentum (FAIL with an honest residual):** each claim = P(outcome | prior) / base
+  (1.0 = no effect), against a permutation null shuffled within (innings × phase) then within
+  (innings × phase × batter). All nulls precomputed at build time with a **fixed seed** (a
+  lookup, not a client permutation) → byte-deterministic. The wicket myth does NOT clear:
+  wicket|wicket **1.00 / 1.09 / 0.93** (anti in the modern era, WPL 0.77). Hitting clears raw
+  (boundary|boundary **1.21 / 1.19 / 1.16**) but the batter-held residual is a thin **~1.07**
+  that holds FLAT (1.072 / 1.084 / 1.066) — only the confounded raw edge fades, so the sliver
+  claim never says it is disappearing.
+- **Belief 5 required-rate (PASS):** chase run rate by phase (all runs / 6 legal balls, 2nd
+  innings, non-D/L, full 20-over target): PP/mid/death **7.62/7.61/8.99** (2008-10) → **9.19/
+  8.75/10.38** (2023-26); PP jumped +1.57 above the middle overs. Ahead-at-halfway **31.7 →
+  37.5**. The honest caveat: the pacing shape flipped, but chasing still wins ~53% (Belief 1).
+- **WPL transmission:** a two-season adoption curve **54.5 → 59.1 → 100 → 95.5** (22 matches a
+  season), pooled 77.3; chase-win 59.8 (stated bare, un-caused); reviews 30.5% over 203 (vs
+  29.6); one-over-spell 75.3 (vs 64.1). Analytics-native, never "behind".
+- **Payoff (16):** home ground = the franchise's most-frequent participation venue; own
+  field-first@home + chase-win@home + the league-wide review-discipline rank. RCB 96%/38.7%
+  (rank 1), CSK 13%/Chepauk, DC 19.4% (rank 10 of 10). 5 WPL bespoke transmission cards
+  ("born into the analytics age") + neutral. Two separate facts, not cause and effect, ~20-odd
+  home games each.
+- **Matchup footnote (`ch8-matchup`, demoted):** LED with the raw material growing — usable
+  head-to-head history (≥12 prior faced balls, via Engine #6 `h2h.usable_history`) **12.4%
+  (2009) → 42.1% (2019) → ~32% post-2022**; the score itself is weak (~1.2×, no adoption ramp),
+  kept off screen.
+
 ## Budgets (ledger) — actuals
 
 - **Cold-open critical set** (`meta.json` + `groups.json` + `group_ids.u16` +
@@ -437,8 +506,13 @@ snapshot). Era bands are the engines' (2008-10 vs 2023-26 unless stated).
   316,199 B raw / **42,462 B gz** (the state cell steps slowly within an innings),
   ch5.json **23,364 B gz** (two 20×10 RE grids + diff, the price board, 20 payoff cards
   with replays, the scrub over, footnotes).
-- Full read-through ≤ 25 MB gz → actual ~1.80 MB gz (R2a engines + the parallel track + the
-  R2b/R3a/R3b chapter buffers).
+- **Chapter 8** (`scenes/ch8.json`, lazy-loaded at Ch 8 entry): ≤ 2 MB gz → actual **33,864 B
+  gz** (115,712 B raw). Engine- and buffer-free — the 1,331 match centroids + `match_bounds`
+  block-start indices + the 988-delivery review subset + the precomputed momentum shuffle-null
+  histograms (small binned counts, not raw shuffles, so they compress hard) + the 16 payoff
+  variants + the 10 footnote strings, all in one scene doc. `pairing.u16` belongs to Ch 9.
+- Full read-through ≤ 25 MB gz → actual ~1.83 MB gz (R2a engines + the parallel track + the
+  R2b/R3a/R3b/R5a chapter buffers and scene docs).
 - The `ledger.py` rows enumerate exactly the shipped filenames (no phantom
   `draw/truth.json` / `ch1/outrate.json` rows — those never shipped; the R1a scene
   data lives in `scenes/coldopen.json` + `scenes/ch1.json`).

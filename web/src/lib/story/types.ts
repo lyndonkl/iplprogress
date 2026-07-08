@@ -30,6 +30,8 @@ export type ChapterId =
 	| 'ch5'
 	| 'ch6'
 	| 'ch7'
+	| 'ch8'
+	| 'ch9'
 	| 'endcard'
 	| 'bowl';
 
@@ -314,6 +316,36 @@ export interface SparkSubset {
 	othersDim?: number;
 }
 
+/**
+ * The review chips (§25 capability — the Ch 8 subset-highlight). A cross-cutting
+ * subset over the held `matchdots` layout, declared on a scene's `fieldState`. The
+ * 988 review deliveries fly OUT of the held match-dots into per-team green/red chip
+ * stacks (one column per franchise, struck-down red at the bottom, upheld green on
+ * top) as `engage` scrubs 0→1 (the setDismissals/setSparks precedent — it composes
+ * with the matchdots layout and spends NO controlling morph). The NEXT scene
+ * declaring no reviews lerps `engage` back to 0 and the chips settle back onto their
+ * match-dots (reversible, the reverse leg is free). Drive `engage` across the hold
+ * from a caption step via `SceneDef.dynamicState` (a post-morph field change, like
+ * the rivers `engage`).
+ *
+ * MEMBERSHIP: the scene supplies it once via `field.setReviews({ indices, team,
+ * outcome })` — `indices` the 988 review-delivery point indices, `team` each chip's
+ * franchise LANE index, `outcome` 0 (struck down / the call stood) or 1 (upheld /
+ * paid off). The field bakes the review code into `aDismissal` and the packed
+ * lane+slot into `aRiverPos` (NO new attribute; `aTeam` is left untouched so
+ * team-ignite stays correct in every chapter). The outcome recolor separates by
+ * LUMINANCE not hue alone (green LIGHTER, red DARKER), so the "mostly red / mostly
+ * the call stood" read survives red-green colorblindness. See CONTRACT §25.
+ */
+export interface ReviewSubset {
+	/** 0 = review balls held on their match-dots · 1 = fully flown into the chip stacks (default 0) */
+	engage: number;
+	/** green/red outcome recolor strength 0..1 — the luminance-separated CVD-safe recolor (default 1) */
+	tint?: number;
+	/** luminance × for non-review points while the chips are engaged (default 0.12) */
+	othersDim?: number;
+}
+
 export interface ConstellationPhaseState {
 	/** the active/target phase map: 'all' | 'powerplay' | 'middle' | 'death' */
 	table: ConstellationPhase;
@@ -373,6 +405,17 @@ export interface SceneFieldState {
 	flowLift?: number;
 	/** the impact-sub spark glow over the `aSpark` subset, or null/omitted for none (§23) */
 	sparks?: SparkSubset | null;
+	/**
+	 * the toss-split lift over the held `matchdots` layout (§24 — the Ch 8 controlling
+	 * morph's one held scalar, the flowLift analog): 0 = every dot on its neutral match
+	 * centroid, 1 = each dot lifted into its toss lane (winner batted first → upper lane,
+	 * winner chose to field → lower lane). Only meaningful with the `matchdots` layout +
+	 * a fed match table; default 0. Drive 0→1 across the hold via `dynamicState` for the
+	 * C8-3 lane split (the field-first river swells straight from the data's toss shift).
+	 */
+	matchSplit?: number;
+	/** the review-chip subset fly-out over the held match-dots, or null/omitted for none (§25) */
+	reviews?: ReviewSubset | null;
 	/** whether the picked team's balls stay ignited (default true — §2 standing rule) */
 	teamIgnite?: boolean;
 	/**

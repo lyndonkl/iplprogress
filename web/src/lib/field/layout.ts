@@ -1003,3 +1003,176 @@ export function flowRateToY(
 	const norm = span > 0 ? (Math.min(Math.max(rate, layout.rateLo), layout.rateHi) - layout.rateLo) / span : 0;
 	return layout.bottom + norm * layout.height;
 }
+
+/* ---------------------------------------------------------------------------
+ * The match-dots (Ch 8 controlling morph, CONTRACT §24). Every ball condenses to
+ * the CENTROID of the MATCH it belongs to, forming 1,331 glowing discs (one dot =
+ * one whole match):
+ *   x = the match's SEASON/TIME position (2008 left → 2026 right)
+ *   y = the match centroid; the held `matchSplit` scalar lerps each dot into its
+ *       toss lane (winner batted first → upper lane, winner chose to field → lower
+ *       lane), so the field-first river swells after 2016 straight from the data.
+ * The per-match normalized centroid (nx, ny each in [-1,1]), the toss class and a
+ * density gain live in a `uMatchTex` data texture; the ball's match id is recovered
+ * in-shader by a binary search of position.x against a `match_bounds` data texture
+ * (both fed once via field.setMatchTable). NO new per-point buffer, NO new vertex
+ * attribute — the field holds at 14 attributes.
+ *
+ * This layout.ts function owns only the letterboxed BOX (the per-axis half extents
+ * that map the normalized [-1,1] centroid frame to world) + the lane geometry (the
+ * world lane-centre offset and the lane band half-height) + the constant jitter-disc
+ * radius. The per-match world centroids for the LIVE `matchSplit` are re-derived on
+ * `getMatchDotsLayout()`, so the scene's SVG lane labels / season axis / crossover
+ * lines / WPL circles can never drift from the GL dots.
+ *
+ * HONESTY LOCK (mirroring worms/frontier/tide/worth/constellation/flow): the box holds
+ * a FIXED data aspect independent of the viewport and LETTERBOXES on portrait, so the
+ * time axis and the two toss lanes read identically on desktop and phone. The consts
+ * below are owner-tunable (storyboard §7); changing them keeps the letterbox invariant.
+ * ------------------------------------------------------------------------- */
+
+/** Fixed world width : world height for the match-dots box (wide — the time axis). */
+export const MATCHDOTS_ASPECT = 1.7;
+/** Fraction of the frame the fixed-aspect box fills (letterbox + axis/label room). */
+export const MATCHDOTS_FILL = 0.84;
+/** A match dot's jitter-disc radius as a fraction of the box half-height (constant — no data). */
+export const MATCHDOTS_DOT_RADIUS = 0.02;
+/** Lane-centre offset (bat-first up / field-first down) as a fraction of the box half-height. */
+export const MATCHDOTS_LANE = 0.42;
+/** Lane band half-height as a fraction of the box half-height (the dots spread inside the lane). */
+export const MATCHDOTS_LANE_HALF = 0.2;
+/**
+ * Per-match DENSITY GAIN (mirrors the worth-grid §0.1 gain): a dot's per-ball alpha
+ * is scaled by clamp((MATCHDOTS_GAIN_TARGET / ballCount)^POW, MIN, 1) so a match's
+ * INTEGRATED dot brightness is (near) independent of how many balls it had — a longer
+ * / run-heavier match is never brighter than a short one (the design gate that killed
+ * data-varying luminance). ~230-ball full T20s land near 1; short/rain matches are
+ * lifted, huge ones damped. Owner-tunable; used in field.ts setMatchTable.
+ */
+export const MATCHDOTS_GAIN_TARGET = 230;
+export const MATCHDOTS_GAIN_MIN = 0.05;
+export const MATCHDOTS_GAIN_POW = 0.85;
+
+export interface MatchDotsLayout {
+	/** world x of the box left edge (normalized x = -1) */
+	left: number;
+	/** world width of the box (normalized x span -1 → 1) */
+	width: number;
+	/** world y of the box bottom edge (normalized y = -1) */
+	bottom: number;
+	/** world height of the box (normalized y span -1 → 1) */
+	height: number;
+	/** world half-width — normalized nx ∈ [-1,1] maps to world x = nx × halfW */
+	halfW: number;
+	/** world half-height — normalized ny ∈ [-1,1] maps to world y = ny × halfH */
+	halfH: number;
+	/** world radius of a match dot's constant jitter disc (mirrors uMatchDotR) */
+	dotRadius: number;
+	/** world lane-centre offset (upper lane +laneY, lower lane -laneY; mirrors uMatchLaneY) */
+	laneY: number;
+	/** world lane band half-height the dots spread within a lane (mirrors uMatchLaneHalf) */
+	laneHalf: number;
+}
+
+/**
+ * Fixed-aspect, letterboxed match-dots box for the current frame — the largest box
+ * of the locked data aspect that fits, then centred at the origin. The normalized
+ * [-1,1] centroid frame maps into it via `matchDotsPoint`. Rebuilt on resize.
+ */
+export function computeMatchDots(halfW: number, halfH: number): MatchDotsLayout {
+	const frameW = 2 * halfW * MATCHDOTS_FILL;
+	const frameH = 2 * halfH * MATCHDOTS_FILL;
+	let width = frameH * MATCHDOTS_ASPECT;
+	if (width > frameW) width = frameW;
+	const height = width / MATCHDOTS_ASPECT;
+	const hw = width / 2;
+	const hh = height / 2;
+	return {
+		left: -hw,
+		width,
+		bottom: -hh,
+		height,
+		halfW: hw,
+		halfH: hh,
+		dotRadius: hh * MATCHDOTS_DOT_RADIUS,
+		laneY: hh * MATCHDOTS_LANE,
+		laneHalf: hh * MATCHDOTS_LANE_HALF
+	};
+}
+
+/**
+ * World coordinate for a NORMALIZED match centroid (nx, ny each in [-1,1], from
+ * `scenes/ch8.json` `match_dots.centroids`) in the given box — the NEUTRAL (pre-split)
+ * centre the shader uses at `matchSplit` 0 (world = n × halfExtent, no jitter). Scenes
+ * call this to register the season axis, lane labels and the crossover's anchors to the
+ * GL dots via `field.projectToCss`. For a per-match centre that tracks the LIVE
+ * `matchSplit` (the toss lane lift), read `field.getMatchDotsLayout().centres[m]`.
+ */
+export function matchDotsPoint(
+	layout: MatchDotsLayout,
+	nx: number,
+	ny: number
+): { x: number; y: number } {
+	return { x: nx * layout.halfW, y: ny * layout.halfH };
+}
+
+/* ---------------------------------------------------------------------------
+ * The review chips (Ch 8 subset, CONTRACT §25). The 988 review deliveries fly OUT
+ * of the held match-dots into per-team chip stacks: one vertical column per franchise
+ * LANE, laid evenly across a centred box, struck-down (red) chips at the bottom and
+ * upheld (green) chips stacked on top. Each lane's height is proportional to its review
+ * count (normalized against the busiest lane), so the volume is honest and "mostly
+ * red = mostly the call stood" reads by area. This function owns only the box + the
+ * per-lane x's; the per-point cumulative stack slot is baked in field.ts.
+ * ------------------------------------------------------------------------- */
+
+/** Fraction of the frame width the chip-stack box fills. */
+export const REVIEW_FILL_W = 0.9;
+/** Fraction of the frame height the chip-stack box fills. */
+export const REVIEW_FILL_H = 0.7;
+
+export interface ReviewChipsLayout {
+	/** world x of the box left edge */
+	left: number;
+	/** world width of the box (all lanes) */
+	width: number;
+	/** world y at the stack baseline (0% — chips build up from here) */
+	bottom: number;
+	/** world y at the top of the busiest lane (100%) */
+	top: number;
+	/** world height spanning 0 → the busiest lane */
+	height: number;
+	/** world x of each lane's centre, indexed by lane index (length nLanes) */
+	laneXs: number[];
+	/** in-lane x jitter half-width (fills the column so chips read as a stack) */
+	laneHalfW: number;
+	/** slot pitch in world units (label-density decisions) */
+	slotW: number;
+}
+
+/**
+ * Evenly-spaced review chip lanes across a centred box for the current frame. `nLanes`
+ * is the number of franchise columns the scene assigned (via the `team` lane indices in
+ * `field.setReviews`). Scenes anchor lane labels / the green-red legend / the per-chip
+ * tick-cross glyphs to these via `getReviewChipsLayout()` + `field.projectToCss`.
+ */
+export function computeReviewChips(nLanes: number, halfW: number, halfH: number): ReviewChipsLayout {
+	const width = 2 * halfW * REVIEW_FILL_W;
+	const left = -width / 2;
+	const height = 2 * halfH * REVIEW_FILL_H;
+	const bottom = -height / 2;
+	const lanes = Math.max(1, nLanes);
+	const slotW = width / lanes;
+	const laneXs: number[] = new Array(nLanes);
+	for (let i = 0; i < nLanes; i++) laneXs[i] = left + (i + 0.5) * slotW;
+	return {
+		left,
+		width,
+		bottom,
+		top: bottom + height,
+		height,
+		laneXs,
+		laneHalfW: slotW * 0.4,
+		slotW
+	};
+}

@@ -117,6 +117,19 @@ CH6_SET_FILES = ("scenes/ch6.json",)
 # (already in the cold-open set), so Ch 7 adds no per-point buffer. Lazy-loaded
 # at Ch 7 entry; held to the per-chapter budget.
 CH7_SET_FILES = ("scenes/ch7.json",)
+# R5a Chapter 8 "The Captain's Brain": the whole belief-audit chapter — the
+# match-dots controlling-morph table (1,331 centroids + the match_bounds block-
+# start indices the field binary-searches in-shader) + the 988 review-chip subset
+# (point indices / team / outcome), the toss crossover, the spell strips + cold-
+# return tax, the precomputed momentum shuffle nulls, the required-rate curve, the
+# WPL adoption curve, the 16 team-payoff variants, and the footnote layer — all
+# ship in one scene doc (scenes/ch8.json). Engine- and buffer-free: the match-dots
+# add NO per-point attribute (they binary-search the inline match_bounds data
+# texture, holding the field at 14 attributes) and the review chips reuse
+# aDismissal/aTeam/aRiverPos (Ch 8 never coexists with Ch 3), so Ch 8 ships no
+# per-point buffer (pairing.u16 belongs to Ch 9). Lazy-loaded at Ch 8 entry; held
+# to the per-chapter budget.
+CH8_SET_FILES = ("scenes/ch8.json",)
 # Engine tables under engines/: R2a's engine #1 (par/SR+) + engine #5 (entry
 # states) consumed by Chapter 2, plus the parallel-track engine #2 (re288) +
 # engine #3 (wp_grid) built during R2/R3a and consumed in R3b. All lazy-loaded
@@ -166,6 +179,7 @@ def build_ledger(out_root: Path = canon.OUT_ROOT) -> dict:
     ch5_files = [n for n in CH5_SET_FILES if n in artifacts]
     ch6_files = [n for n in CH6_SET_FILES if n in artifacts]
     ch7_files = [n for n in CH7_SET_FILES if n in artifacts]
+    ch8_files = [n for n in CH8_SET_FILES if n in artifacts]
     engine_files = sorted(n for n in artifacts if n.startswith(ENGINES_PREFIXES))
 
     checks = [
@@ -240,6 +254,13 @@ def build_ledger(out_root: Path = canon.OUT_ROOT) -> dict:
             "budget_gz": BUDGET_CHAPTER_GZ,
             "actual_gz": gz_sum(ch7_files),
             "pass": bool(ch7_files) and gz_sum(ch7_files) <= BUDGET_CHAPTER_GZ,
+        },
+        {
+            "name": "chapter ch8 (Captain's Brain scene doc + match-dots/review subset)",
+            "files": ch8_files,
+            "budget_gz": BUDGET_CHAPTER_GZ,
+            "actual_gz": gz_sum(ch8_files),
+            "pass": bool(ch8_files) and gz_sum(ch8_files) <= BUDGET_CHAPTER_GZ,
         },
         {
             "name": "engines (ch2 par/entry + R3b parallel-track re288/wp_grid)",

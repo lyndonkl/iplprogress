@@ -1,4 +1,4 @@
-# Story Shell Contract — R1a (+ R1b field capabilities: §11 picking · §12 filtering; + R2a Ch 2: §13 worm-space · §14 run-out cascade; + R2b Ch 3: §15 frontier plane · §16 dismissal rivers; + MF §17 mobile "read, then watch" captions; + R3a Ch 4: §18 tide skyline + waterline; + R3b-2 Ch 5: §19 worth grid + pricelens · §20 over rail · §21 WPA highlight; + R4a Ch 6: §22 constellation + phase toggle; + R4b Ch 7: §23 twin rivers `flow` + impact-sub sparks)
+# Story Shell Contract — R1a (+ R1b field capabilities: §11 picking · §12 filtering; + R2a Ch 2: §13 worm-space · §14 run-out cascade; + R2b Ch 3: §15 frontier plane · §16 dismissal rivers; + MF §17 mobile "read, then watch" captions; + R3a Ch 4: §18 tide skyline + waterline; + R3b-2 Ch 5: §19 worth grid + pricelens · §20 over rail · §21 WPA highlight; + R4a Ch 6: §22 constellation + phase toggle; + R4b Ch 7: §23 twin rivers `flow` + impact-sub sparks; + R5a Ch 8: §24 match-dots `matchdots` + toss lanes · §25 review chips)
 
 The scene system every scene builder codes against. The shell (this directory +
 `lib/field/` + `lib/state/`) is owned by the story-shell architect; **scene
@@ -53,7 +53,7 @@ scrubs the field from the previous scene's `fieldState` to this scene's
 ```ts
 {
   layout: 'free' | 'columns' | 'wall' | 'assembly' | 'worms' | 'frontier'
-        | 'tide' | 'worth';
+        | 'tide' | 'worth' | 'constellation' | 'flow' | 'matchdots' | 'duelweb';
   reveal?: number;    // assembly stream-in 0..1 (chronological by point index)
   dim?: number;       // global luminance ×, 1 = full (default 1)
   wplDim?: number;    // WPL-points luminance × (C1-2 shelf staging; default 1)
@@ -139,8 +139,11 @@ scene's held `fieldState` isn't the right jump-cut target, declare
 
 ## 3. Field states you may NOT invent
 
-- One controlling morph per chapter (morph budget). Ch 1's is free→wall.
-  Everything else is a subset-highlight or a 2D annotation-plane scene.
+- One controlling morph per chapter (morph budget). Ch 1's is free→wall …
+  Ch 8's is free→matchdots (§24). Everything else is a subset-highlight (e.g.
+  Ch 8's 988 review chips, §25) or a 2D annotation-plane scene (e.g. Ch 8's
+  belief-reality crossover, scene-authored SVG) — the review chips and the
+  crossover spend no morph.
 - The on-screen ball count is **316,199** wherever pixels are visible; 316,388
   and the 189 super-over balls live in footnote sheets and /methods only.
 - No statistical term of art in main flow (glossary rule) — technical names go
@@ -1984,3 +1987,337 @@ drift from the GL ribbons.
 - The flow position + the spark lift live in the shared `computeCore()`, so the
   pick pass tracks the ribbons and the lifted sparks and can never drift from the
   visual field.
+
+---
+
+## 24. The match-dots + the toss lanes — Ch 8's controlling morph (R5a `matchdots` layout + `matchSplit` state)
+
+Chapter 8's single controlling morph (free→matchdots, analogous to Ch 1's
+free→wall … Ch 7's free→flow). Every ball condenses onto its **match centroid**:
+the field of 316,199 deliveries becomes **1,331 glowing dots**, one per match
+(the IPL's 1,244 and the WPL's 89, less the super-over exclusions), laid out by
+**season/time** — 2008 at the left, 2026 at the right. Each dot is a small
+jittered disc of **constant radius and constant brightness**: dot size and
+luminance encode **NO** data variable, so a run-heavy match is no bigger or
+brighter than a low-scoring one (a preattentive-honesty must-fix — nothing about
+a dot's size or glow is a stat). Positions are **in-shader**; there is **no new
+per-point buffer** and **no positions cross the wire**. The catch is that a
+ball's match id is not on the wire either — so `computeCore()` recovers it by an
+in-shader **binary search of `position.x` against a `match_bounds` data texture**
+(the 1,331 monotone block-start point indices), which holds the field at **14
+vertex attributes** (§24.2). Add nothing yourself — the shell owns the layout.
+
+### 24.1 Declaring it
+
+```ts
+fieldState: { layout: 'matchdots', matchSplit: 0 }   // free→matchdots is the morph
+```
+
+Each ball flies to its match centre + a small **radial jitter** (deterministic,
+in-shader, the constellation `posConstellation` precedent), so a match reads as
+one soft DISC of its own deliveries, not a dot. Hue stays identity (outcome
+colours, the WPL teal shift, the picked team lit on top — the reader's **team
+stays ignited**, its matches glowing inside the cloud). The morph is the
+chapter's ONE layout morph; the toss lanes (`matchSplit`, §24.3) and the review
+chips (`reviews`, §25) are a scalar / a subset that **compose** with `matchdots`
+and spend no second morph.
+
+**Honesty lock (do not fight it).** The plot's **data aspect ratio is FIXED**
+(`MATCHDOTS_ASPECT`) and viewport-independent — the frame **LETTERBOXES** rather
+than stretching, so the season axis and the two toss lanes read identically on
+desktop and portrait phone. `MATCHDOTS_ASPECT` / `MATCHDOTS_FILL` /
+`MATCHDOTS_DOT_RADIUS` / `MATCHDOTS_LANE` live in `lib/field/layout.ts` and are
+the owner-tunable constants flagged for build sign-off.
+
+### 24.2 Feeding the match table — `field.setMatchTable(table)` (READ THIS)
+
+The per-match centroids are a small precomputed lookup the scene feeds ONCE (from
+`scenes/ch8.json`), before the match-dots engage, exactly like `setStarTables` /
+`setRiverTable` / `setWorthTables`:
+
+```ts
+const md = ch8.match_dots;              // { centroids: [[nx, ny, toss, result]] × 1,331 }
+field.setMatchTable(md);                 // baked into the matchTex data texture
+```
+
+- Each row is a **normalized `(x, y)` centroid** in one common `[-1, 1]` frame
+  (x = the match's season/time position, y = its neutral centroid) plus its
+  **toss class** (batted-first vs chose-to-field) and its **result**, indexed by
+  match id — straight from the JSON, no transform. Re-calling replaces the table.
+  The shell bakes it into an RGBA-float `matchTex` DataTexture (~1,331 wide,
+  Nearest — the `uWorthTex` precedent) and maps it 1:1 into the letterboxed box.
+
+**Attribute-ceiling requirement (release-blocking — the §23.4 / §18.6 note
+again).** The single BufferGeometry binds **every** per-point attribute at once,
+and the field is at its ceiling of **14 attributes**. A 15th attribute threw
+`THREE.WebGLProgram … Too many attributes` on the ANGLE/Metal build machine and
+**blacked out the WHOLE field**, not just this layout — so the match-dots add
+**NO per-point attribute**. Instead the pipeline emits `match_bounds` (the 1,331
+monotone block-start point indices) as a second data texture (`uMatchBoundsTex`,
+`uMatchN`), and `computeCore()` recovers each ball's match id by an **in-shader
+binary search of `position.x`** against it (~11 `texelFetch`, morph-frames only),
+then `texelFetch`es that match's centroid + toss + result from `uMatchTex`.
+`match_bounds` ships **inside `scenes/ch8.json`**, never as a separate `.u16`
+buffer. Keep any future flag packed the same way — do not reach for the 15th
+attribute (that slot is Ch 9's `aPairing`, §26).
+
+### 24.3 The toss lanes — `SceneFieldState.matchSplit` (a held scalar, NOT a re-sort, NOT a second morph)
+
+```ts
+matchSplit?: number;   // 0 = dots on their neutral centroid · 1 = lifted into toss lanes (default 0)
+```
+
+The ONE scalar a scene drives over the held match-dots — the **exact analog of
+the Ch 7 `flowLift`**. It lerps each dot from its neutral centroid (0) into one
+of two horizontal **toss lanes** (1) by the match's toss class: matches the
+winner won **batting first** rise to the **upper (bat-first) lane**, matches the
+winner **chose to field** fall to the **lower (field-first) lane**. Time still
+runs left→right inside each lane, so the lower field-first lane visibly **SWELLS
+after 2016** while the bat-first lane THINS — and that swell is the real toss
+column's own shape, **never** an authored animation or a padded lane. Drive it
+**0→1 across the hold from a caption step via `SceneDef.dynamicState`** (a
+post-morph field change, exactly like `flowLift` / the cascade `sweep` /
+pricelens `mix`); per the §12.2 orchestrator caveat, ALSO surface it through
+`dynamicState` so a stray scroll re-application cannot revert it. Lerps like any
+scalar (default 0 both sides → a no-op); read in-shader only while the
+`matchdots` layout is in the A/B mix, so **every prior scene renders
+byte-identically**. The lane displacement is applied by toss class inside
+`posMatch`; the point-to-match assignment never changes — only the y lane moves,
+so the whole match-cohort glides together (Gestalt common fate).
+
+### 24.4 Drawing the season axis / lane labels / crossover / WPL circles — `field.getMatchDotsLayout()` + `matchDotsPoint`
+
+The **season axis** (2008→2026 ticks), the two **toss-lane labels**, the
+persistent **legend** ("one dot, one match, 1,331 of them; left to right is 2008
+to 2026"), the **belief-reality crossover** (C8-3), and the **WPL circles**
+(C8-8) are the **scene's job on the annotation plane** (SVG registered to the GL
+match centres) — never GL geometry (the cardinality rule). Register them with:
+
+```ts
+import { matchDotsPoint } from '$lib/field/layout';
+const ml = field.getMatchDotsLayout();     // null before first resize OR before a match table is fed — guard
+if (ml) {
+  // a match centre for the LIVE matchSplit (tracks the toss-lane lift):
+  const css = field.projectToCss(ml.centres[matchId].x, ml.centres[matchId].y);
+  // an arbitrary normalized coord (a season-axis tick, a lane-band vertex from ch8.json):
+  const p = matchDotsPoint(ml, nx, ny);
+  const tickCss = field.projectToCss(p.x, p.y);   // §0.4a caption-overlap QA
+}
+```
+
+`getMatchDotsLayout()` returns the fixed-aspect letterboxed box
+(`left/width/bottom/height/halfExtent/dotRadius`) PLUS `centres` — the per-match
+WORLD centroid for the **currently applied `matchSplit`** (so the crossover, the
+WPL circles and the labels track the toss-lane lift, re-read after each
+`applyState`). `matchDotsPoint(layout, nx, ny)` is the EXACT centre mapping the
+shader uses (frame centred at the origin, world = n × halfExtent), so the SVG and
+the GL discs can never drift. Rebuilt on resize.
+
+**The belief-reality crossover is scene-authored — it spends no §, no field
+change.** The two directly-end-labeled polylines that CROSS ("chose to field" vs
+"the chase won"), their "a choice" / "a result" kind-tags, the annotated
+crossing-point marker and the honest 5-point chase-win shape are drawn
+**entirely in the Ch 8 annotations component** (the Ch 7 license-surface
+precedent), anchored via `getMatchDotsLayout()` + `projectToCss()` if it needs
+match geometry. The field's only role is the existing `dim` scalar. It is a
+belief-versus-outcome mismatch, **not** a subtractable gap, so it carries **no
+shaded fill** and is separated by line style + luminance, never a green/red
+legend (green/red is reserved for the review chips, §25). Reduced motion renders
+it static.
+
+### 24.5 Reduced motion & what the platform added (for the pipeline / other agents)
+
+- **Reduced motion** jump-cuts free→matchdots live (the settled 1,331 dots at
+  `matchSplit: 0`, the season axis and legend drawn, team glow intact) — declare
+  `reducedMotionEndState: { layout: 'matchdots', matchSplit: 0 }` (or let it
+  default to `fieldState`); a toss-split scene carries `matchSplit: 1`. There is
+  no motion to watch.
+- **New `LayoutId` `matchdots`** (code 10) + **new `FieldRenderState` field**
+  `matchSplit` (0 = neutral, inert), set by `resolveRenderState`. Both default
+  inert (`matchdots` is never a layout in R1..R4b; the lane displacement is a
+  shader no-op at `matchSplit` 0) — so **R1a…R4b scenes render byte-identically**
+  (verified: `glError` 0; the free field, worm-space, tide skyline, constellation
+  and twin rivers all render unchanged; the discarded `posMatch` compute never
+  changes a prior layout's returned position). Also add `'ch8'` to the
+  `ChapterId` union and fold `matchdots` into the `SceneFieldState` layout union
+  (§2) before any Ch 8 scene compiles.
+- **No new per-point buffer, zero wire cost, 14 attributes held:** the render
+  reads the ball's match id by binary-searching `position.x` against
+  `uMatchBoundsTex` (`uMatchN` entries), then `texelFetch`es the centroid + toss
+  + result from `uMatchTex` (fed via `field.setMatchTable`); `uMatchHalfExtent` /
+  `uMatchDotR` size the discs and `uMatchSplit` drives the lanes. `pickLayout`
+  takes a `vec3 pMatch` param returning it at `id == 10` (both call sites, both
+  shaders). The box geometry (`computeMatchDots`, `matchDotsPoint`, `MATCHDOTS_*`
+  constants) is in `field/layout.ts`.
+- **Pipeline dependency (R5a):** `scenes/ch8.json` `match_dots.centroids`
+  (1,331 × normalized x/y + toss class + result) and `match_bounds` (1,331
+  block-start point indices). Both are direct roll-ups of the corpus — no fitted
+  model, no engine, no WASM.
+- The match-dot position lives in the shared `computeCore()`, so the pick pass
+  tracks the dots (and the lifted lanes) and can never drift from the visual
+  field.
+
+---
+
+## 25. The review chips — Ch 8's hero subset-highlight (R5a review subset over `matchdots`)
+
+The **988 review deliveries** (every review captains have called; reviews exist
+2018+ only) fly out of the held match-dots into **per-team green-and-red chip
+stacks**: one lane per franchise, a **green band** (the on-field call was
+overturned — the review paid off, 292 chips) above a **red band** (the call
+stood, 696 chips). It is a cross-cutting **fly-out + recolor** over a per-point
+membership flag — the CONTRACT §16 dismissal-river / §23.4 spark subset
+precedent, but a fly-out into stacks rather than a re-stack — and it **composes**
+with `matchdots` and spends **no second morph**. Hue is a **gated exception**
+here (green/red on the chips, the §16 rivers precedent); everything else stays
+identity.
+
+**Budget-safe REUSE (no new per-point attribute).** Ch 8 never coexists with
+Ch 3, so the review subset **reuses three existing attributes** rather than
+adding a 15th (which blacks out the field, §24.2): `aDismissal[i]` = the review
+code (**−1** not-a-review · **0** struck-down / red · **1** upheld / green),
+`aTeam[i]` selects the chip-stack **lane**, and `aRiverPos[i]` = the baked
+cumulative **slot** within the (team × outcome) sub-stack (the `ensureRiversData`
+precedent). The field stays at **14 attributes**.
+
+### 25.1 Declaring it
+
+```ts
+reviews?: {
+  engage: number;      // 0..1 subset-active / recolor strength (0 = inactive)
+  tint?: number;       // 0..1 green/red recolor strength (default follows engage)
+  othersDim?: number;  // luminance × for NON-chip points while engaged (default 1 = none)
+} | null;
+```
+
+`SceneFieldState.reviews` resolves (via `resolveRenderState`) into the
+`FieldRenderState` scalars **`reviewClass`** (the fly-out POSITION gate + the
+guardrail sentinel), **`reviewEngage`** (from `engage`), **`reviewTint`** (from
+`tint`) and **`reviewOthersDim`** (from `othersDim`). The chips are **declared
+engaged** in `fieldState` (`reviews: { engage: 1, othersDim: 0.25, tint: 1 }`)
+while the **fly-out itself is `reviewClass` driven 0→1 across the hold from a
+caption step via `dynamicState`** (the rivers-engage / cascade-sweep precedent):
+the dots settle to neutral (`matchSplit → 0`) and then the 988 chips fly to their
+stacks. `reviewClass` carries an **inactive sentinel (< 0)** whenever no
+`reviews` are declared, so the whole branch — the fly-out AND the guardrail
+`if (uReviewClass >= 0) …` — is a shader no-op and **every prior scene renders
+byte-identically**. The next scene declaring `reviews: null` lerps the chips back
+into the cloud. Feed membership before the chips engage (§25.2).
+
+### 25.2 Feeding membership — `field.setReviews({ indices, team, outcome })` (READ THIS)
+
+```ts
+// once, when the scene mounts (before the chips engage):
+field.setReviews({
+  indices,   // the 988 review-delivery FIELD POINT indices (same point order as every buffer)
+  team,      // number[] parallel to indices: the franchise lane (indexes uReviewTeamX / aTeam)
+  outcome    // number[] parallel to indices: 0 = struck down (red) · 1 = upheld (green)
+});          // straight from scenes/ch8.json
+// field.setReviews(null) clears membership
+```
+
+`setReviews` clears and **rebakes `aDismissal`** to the review code, records the
+**per-team counts**, and bakes the per-(team × outcome) **stack slot** into
+`aRiverPos`; it is cached by a **review-version** so a re-scroll is free (the
+`setRunouts` / `setSparks` precedent). There is no pipeline seed, so a review
+scene **must** call `setReviews` to light the chips. Baked ONCE — no per-frame
+cost, demand mode preserved. Because the reuse touches `aDismissal` / `aRiverPos`,
+`field.ts` **DEV-warns if the reviews engage alongside** a Ch 1 re-sort, the Ch 2
+cascade, the Ch 3 rivers, or the over rail (they would collide on the shared
+attributes; they never render together in the piece).
+
+### 25.3 The colour-safety gate — CVD-safe luminance + glyph, the green/red exception, the red-team mute (do not fight it)
+
+The load-bearing **"mostly red" read MUST NOT rest on hue** (green/red is the
+canonical colour-vision-deficiency confusion pair, and this is a male-skewed
+audience — a release-blocking must-fix). So the two bands carry **two redundant,
+CVD-safe channels beyond hue**:
+
+1. **Luminance separation.** `C_REVIEW_GREEN` is drawn as the **LIGHTER** band
+   and `C_REVIEW_RED` as the **DARKER** band, so **"mostly dark = mostly the call
+   stood"** survives with no colour at all. This luminance order is not optional.
+2. **A micro-glyph per chip** (a **tick** on paid-off chips, a **cross** on
+   struck-down chips), drawn by the scene from the `getReviewChipsLayout()` glyph
+   anchors (§25.4) — the report-card rail's cross/tick semantics carried onto the
+   bands so the read is icon-first, colour-second.
+
+**The red-team mute guardrail (release-blocking).** `C_REVIEW_RED` is a specific
+chip red held **luminance- and hue-distinct from every team's own red identity**
+in the palette (and `C_REVIEW_GREEN` is held apart from the WPL teal), so a
+franchise-red reader never confuses "my team" with "the call stood". Belt and
+braces, the **team-glow-mute guardrail EXTENDS** while the chips are engaged so
+no identity glow can bleed into the chip read:
+
+```glsl
+if (uReviewClass >= 0) muteAmt = max(muteAmt, uReviewMute);
+```
+
+Because that mute removes the reader's own-team colour-pop, the reader's own lane
+is instead marked at its head by a **non-red, non-glow marker** (a small crest or
+bracket, scene-drawn from the head-marker anchor) so "look for your team first"
+still works preattentively. The green/red recolor itself is gated by
+`uReviewClass` + `uReviewOthersDim` in `main()`; hue is otherwise identity.
+
+### 25.4 Drawing the lanes / bands / legend / glyphs / own-lane marker — `field.getReviewChipsLayout()`
+
+The per-team **lane labels**, the **green/red band** captions, the persistent
+**legend** ("green + tick = the call got overturned · red + cross = the call
+stood"), the per-chip **tick/cross glyph** marks, the reader's **own-lane head
+marker**, and the **counts** are the **scene's job on the annotation plane** —
+never GL geometry. Register them with:
+
+```ts
+const rl = field.getReviewChipsLayout();   // null before first resize OR before setReviews — guard
+if (rl) {
+  const laneCss  = field.projectToCss(rl.lanes[team].x, rl.lanes[team].y);          // lane label
+  const greenTop = field.projectToCss(rl.lanes[team].greenAnchor.x, rl.lanes[team].greenAnchor.y);
+  // rl.glyphs → per-chip tick/cross anchors · rl.ownMarker → the non-red head marker
+}
+```
+
+`getReviewChipsLayout()` returns the **per-team lane centres**, the **green/red
+band anchors**, the **counts**, the per-chip **glyph anchors**, the **own-lane
+head-marker anchor**, and — load-bearing — a **MOBILE aggregate mode**: on a
+phone the 15 lanes are **not** all drawn (~24px a lane is unreadable), so the
+layout exposes ONE **league-wide green/red split** for the "mostly red" thesis
+plus the reader's **own individuated lane** (the rest are tap-to-reveal), a
+cognitive-design must-fix. Rebuilt on resize; re-read after each `applyState`.
+
+### 25.5 Reduced motion & what the platform added (for the pipeline / other agents)
+
+- **Reduced motion** holds the settled chip stacks (the green/red bands drawn
+  with their tick/cross glyphs, the legend up, the FAIL stamp on the rail); the
+  chips resolve to their end positions and there is no fly-out to watch. Declare
+  `reducedMotionEndState: { layout: 'matchdots', matchSplit: 0, reviews: { engage: 1, othersDim: 0.25, tint: 1 } }`.
+- **New `FieldRenderState` fields** `reviewClass` (fly-out gate + sentinel,
+  inactive < 0), `reviewEngage`, `reviewTint`, `reviewOthersDim`, set by
+  `resolveRenderState`. All default inert — so **R1a…R4b (and Ch 8's own
+  match-dots scenes that declare `reviews: null`) render byte-identically** (the
+  review branch is a shader no-op at the inactive sentinel).
+- **No new per-point attribute** (the §24.2 ceiling): the subset **reuses**
+  `aDismissal` (review code), `aTeam` (lane) and `aRiverPos` (stack slot), fed via
+  `field.setReviews`; the field stays at **14 attributes**. The new shader
+  additions are a `#define TEAM_COUNT`, the `uReviewTeamX[TEAM_COUNT]` lane-x
+  table (indexed by `aTeam`), the chip-box uniforms, the `uReview*` scalars, and
+  the palette consts `C_REVIEW_GREEN` / `C_REVIEW_RED` — none of which touch a
+  prior layout.
+- **Pipeline dependency (R5a):** `scenes/ch8.json` carries the **988
+  review-delivery point indices**, each with its **team** and its **outcome** (0
+  struck / 1 upheld), plus the per-team chip-lane geometry, the green/red band
+  anchors, the per-chip glyph anchors, the own-lane head-marker anchor, the mobile
+  aggregate split, and the counts. All are direct roll-ups of the corpus — no
+  fitted model, no engine, no WASM.
+- The review-chip fly-out position lives in the shared `computeCore()`
+  (`posReviewChips`), so the pick pass tracks the chips and can never drift from
+  the visual field.
+
+---
+
+## 26. The duel web — Ch 9's controlling morph (R5b `duelweb` layout) — RESERVED
+
+**Reserved for Chapter 9 (The Living League, R5b); NOT built in R5a.** The
+`duelweb` layout (LayoutId code 11) is the sole future capability that adds the
+**15th vertex attribute** (`pairing.u16` → `aPairing`), whose on-target program
+compile is the release-blocking check flagged in §24.2. `duelweb` is already
+folded into the §2 layout union so the type is forward-declared, but its section
+is intentionally left as a reservation — do not implement it until R5b.

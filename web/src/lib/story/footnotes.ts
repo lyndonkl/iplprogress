@@ -547,6 +547,96 @@ export const FOOTNOTES = {
 			'Reinforcement type is read from the match state when the sub is activated: if that team is batting it is a batting reinforcement, if fielding a bowling one. Batting reinforcements are recorded on the ball the sub walks in for; bowling ones at the start of the innings their team fields.',
 			'A WPL card is the control-arm card. The women’s league never had the rule, which is precisely why anyone can say what the rule did to the men’s. An advantage, never a deficit. Every card is built by the pipeline from one 16-variant table, snapshot-tested, never typed by hand.'
 		]
+	},
+
+	/* ---- Chapter 8 · The Captain's Brain (r5a) -------------------------------
+	 * The belief audit: five beliefs held up to the whole record, four fails and
+	 * one pass. On screen every device wears a fan name; the technical names
+	 * (field-first share, upheld share, the permutation null, empirical-Bayes
+	 * shrinkage, the no-lookahead ordering) live here, one click deep (the
+	 * glossary rule). Prose numbers track scenes/ch8.json EXACTLY (the artifact
+	 * wins: where a recount differs from an older teaser the recount ships, so
+	 * DRS accuracy fell, the cold-return tax grew, momentum is a fail with an
+	 * honest residual, and the WPL adopted chase-first on a two-season curve). */
+	'ch8-matchdots': {
+		title: 'What a match-dot is',
+		paragraphs: [
+			'Each match-dot is every ball of one match placed at its centroid, with a small jitter disc so a match reads as one soft dot. Every dot is drawn at the same radius and the same brightness, so a run-heavy match is no bigger or brighter than a low-scoring one, because nothing about a dot’s size or glow is a stat.',
+			'The 316,199 field balls resolve into 1,331 matches (1,243 IPL plus 88 WPL, minus the super-over exclusions), the same universe as every prior chapter. Each match sits at its start date, so seasons read left to right, and from here every belief re-poses this same cloud.'
+		]
+	},
+	'ch8-toss': {
+		title: 'How the two rivers of the toss are counted',
+		paragraphs: [
+			'Captains chose to field 42.9, 55.8, 82.4, 70.1, 77.1 in 100 across the eras, while the chase won 54.3, 53.1, 59.6, 54.5, 52.8 in 100 over the same eras, and winning the toss led to winning the match about half the time every era. Per season the field-first share ran 55, 39, 35 in the first three years, then broke at 2016 to the low 80s and never came back down (82.4 in 2026).',
+			'The honest wrinkle: the field-first surge landed in the same window the chase genuinely paid (59.6 in 100, 2016-19), then chasing decayed back to about 53 while the doctrine stayed locked at 77 to 82, so the belief outlived its evidence. Sample sizes 175, 342, 239, 194, 293 matches by era.',
+			'This is a belief-versus-outcome mismatch, not a claim the toss decides matches. “Field-first share” and “batting-second win rate” are the technical names. See also the Double-Header Dew Ledger (ch8-dew).'
+		]
+	},
+	'ch8-review': {
+		title: 'How the review chips are counted, and the two outcomes',
+		paragraphs: [
+			'988 reviews in all, 292 of them right, so 29.6 in 100 paid off. Before the 2022 doubling, 302 reviews at 1.26 a match and 32.8 right; from 2022 on, 686 at 1.87 a match and 28.1 right. Per season the hit rate fell 34.7, 33.1, 29.1, 24.8, 16.9 across 2022 to 2026 (the 2026 count was 118 reviews, so read the last point as one noisy season, not certainty).',
+			'The record holds only two outcomes, “struck down” (the call stood) and “upheld” (the call overturned); a review-type field is on barely half and unreliable, the umpire’s-call field on only 140 of 988.',
+			'The honest delta: the success rate actively fell, not merely stayed flat. A falling share is equally consistent with better on-field umpiring or more marginal reviews under the doubled allowance, so the grade is scoped to the measured rate, never “the reviewing got dumber”; a struck-down review still confirmed the call and is not “wasted.”',
+			'“Review success rate” and “upheld share” are the technical names.'
+		]
+	},
+	'ch8-spell': {
+		title: 'What a spell is, and the cold-return tax',
+		paragraphs: [
+			'A spell is a bowler’s unbroken run of overs from one end; because the laws forbid two overs in a row, this is the consecutive-over run at one end. One-and-done overs ran 54.7 in 2008-10, 62.3 in 2016-19, 64.1 in 2023-26, and 52.2 to 67.8 season to season; the WPL runs highest at 75.3.',
+			'The cold-return tax, measured only against other bowlers bowling the same over number (at least five overs a bin), ran +0.16, +0.28, +0.3 an over, or +0.18, +0.34, +0.41 on the stricter cold-re-entry read. The honest delta: the tax roughly doubled, from about a sixth of a run to nearly a third, not the teaser’s stable fifth.',
+			'Each strip is a near-median example innings, labeled “one example innings,” chosen so the picture does not overstate the modest 9-point shift; adjacent same-end same-bowler overs merge into one fused bar so a spell reads by connectedness, not by telling bowler hues apart. The WPL tax is dropped on screen (about zero, the over-matched bins are too thin). See also the Matchup Engineering footnote (ch8-matchup).'
+		]
+	},
+	'ch8-momentum': {
+		title: 'How momentum is graded against shuffled cricket',
+		paragraphs: [
+			'Each claim is how much likelier an outcome is right after another versus its baseline; the cloud is that same measurement on the deliveries reshuffled thousands of times, first within an innings and its phase, then also holding the batter fixed.',
+			'A boundary after a boundary runs 1.21, 1.19, 1.159 across the eras and clears the plain shuffle; a six after a six runs far higher, near 2 early; a dot after a wicket clears strongly, the one wicket pattern that survives. But a wicket after a wicket runs 0.999, 1.094, then 0.926, never clearing and turning the wrong way.',
+			'Hold the batter fixed and a boundary after a boundary drops to a residual of about 1.072, 1.084, 1.066, holding FLAT across the eras so the real part does not fade even as the raw edge does; a six after a six sits about 1.143 to 1.3, a thin but robust sliver. A wicket after a wicket clears the fuller test only in the 2016-19 window and is null or reversed before and since, so the myth grade is scoped to today’s game.',
+			'The belief as sold on television is mostly a feeling: the wicket half is false, and most of the hitting half is good batters batting, with a small real sliver left. This is consistent with Collapse Contagion, the aftershock read in Chapter 9. “Permutation null,” “autocorrelation” and “the batter-stratified null” are the technical names.'
+		]
+	},
+	'ch8-required': {
+		title: 'How the chase-pacing curve is read',
+		paragraphs: [
+			'Chase run rate by phase, powerplay then middle then death: 7.62, 7.61, 8.99 in 2008-10; 8.42, 7.84, 9.81 in 2016-19; 9.19, 8.75, 10.38 in 2023-26. The powerplay jumped +1.57 to sit above the middle overs, the shape flipping from up-sloping to front-loaded.',
+			'Read on real chases only (second innings, non-rain-shortened, a full 20-over target); the death rates are conditioned on the chases that lasted that long, so the shape-flip leans on the powerplay jump. Teams ahead of the going rate at the 10-over mark rose from 31.7 to 37.5.',
+			'The pacing genuinely changed, but it does not mean chasing wins more, which stayed flat at about 53 per Belief 1, so the pass is on the pacing shape, not the result. “Required run rate” is the technical name.'
+		]
+	},
+	'ch8-wpl': {
+		title: 'The WPL, born into the analytics age',
+		paragraphs: [
+			'The women’s league chose to field 54.5, 59.1, 100.0, 95.5 of the time across 2023 to 2026, pooling to 77.3, almost exactly the men’s pooled rate; the per-season match counts were 22, 22, 22, 22, so 100 in a season is a small sample, not certainty. Its reviews paid off 30.5 of the time across 203 reviews, next to the men’s 29.6; its one-and-done over share was 75.3, above the modern men’s 64.1.',
+			'The chase-win figure of 59.8 is a bare fact and never caused, so it must not read as the doctrine working in the WPL. The teaser said the women’s league inherited chase-first fully formed from season one; the recount shows season one at 54.5, about the men’s 2008 rate, then a hard two-season ramp to near 100, so the culture arrived fast but it did arrive.',
+			'The men’s game took the better part of a decade and settled around three-quarters, never reaching the WPL’s near-100, so no “fifteen years to get there” claim is made. The WPL is framed only as a league born into the analytics age, arriving with the culture before the history. See also the Double-Header Dew Ledger (ch8-dew).'
+		]
+	},
+	'ch8-payoff': {
+		title: 'How your captains’ report card is built',
+		paragraphs: [
+			'The home ground is the franchise’s most-frequent venue; the home toss share is how often its own captains chose to field there; the home chase-win is its win rate batting second at home; the review-discipline rank is league-wide review success by franchise. On about twenty home games each, the home toss share and the home chase-win are two separate facts, not cause and effect, so read them lightly.',
+			'The review-discipline leaderboard runs best to worst RCB 38.7, RR 33.6, SRH 32.7, MI 32.4, CSK 29.7, KKR 27.7, PBKS 27.7, LSG 25.8, GT 25.3, DC 19.4.',
+			'The WPL card is the analytics-native beat made personal, never a deficit card. See also the Matchup Engineering footnote (ch8-matchup).'
+		]
+	},
+	'ch8-matchup': {
+		title: 'The matchup era, and how a head-to-head record is read',
+		paragraphs: [
+			'Lead with the raw material growing, not the score. How much head-to-head history a captain has to work with exploded: the share of balls where the batter and bowler had already faced each other at least a dozen deliveries was 12.4 in 2009, 42.1 by 2019, and about 32 after the 2022 expansion diluted the pool with new teams (29.8, 33.0, 34.2 across the recent seasons), more than tripling in a decade.',
+			'The score itself is weak: judged only on what was known before each ball, captains landed on a best-third matchup about 30 in 100 against 25 by luck, roughly 1.2 times, with no adoption ramp and confounded by simpler pace-versus-spin and left-right logic, so we do not put it on screen.',
+			'Each pair’s record is built with no peeking (matches ordered by real date, a ball sees only deliveries strictly before it; three snapshot tests confirm zero lookahead on all 33,772 pairs), and a thin sample is pulled toward the league average of 1.3322 runs a ball until a pair has earned about 51 balls of weight. Empirical-Bayes shrinkage and the no-lookahead ordering are the technical names.'
+		]
+	},
+	'ch8-dew': {
+		title: 'The Double-Header Dew Ledger',
+		paragraphs: [
+			'Part of why captains choose to field is not belief at all, it is the weather. In day-night matches the evening dew makes the ball skid wet and hard to grip, so bowling second is genuinely harder, which is exactly why a captain who wins the toss puts the other side in and takes the chase. The Double-Header Dew Ledger tracks how much of the field-first surge sits in dew-prone evening slots and double-headers, and it grows with the schedule.',
+			'We keep this off the main grade because it does not change the verdict (the chase-win rate stayed flat whether or not dew was in play), but it is the honest caveat on Belief 1: not every captain choosing to field is chasing a myth, some are just reading the sky. The WPL plays many day-night double-headers, so it is especially exposed to dew, part of why its field-first curve ramped so fast.'
+		]
 	}
 } as const satisfies Record<string, FootnoteEntry>;
 

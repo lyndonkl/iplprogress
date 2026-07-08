@@ -116,6 +116,17 @@ export const WALLHEAT_NEUTRAL_BYTE = 73;
  */
 export const RAIL_STAGGER = 0.05;
 
+/**
+ * Base alpha multiplier the field settles to in the Ch 8 match-dots (§24): the 316k
+ * balls collapse into 1,331 discs (~230 balls a disc), so a moderate base alpha lets
+ * each dot read as a soft glowing disc rather than a blown-out blob. Combined in the
+ * shader with the per-match DENSITY GAIN (uMatchTex.w) so a longer / run-heavier match
+ * is no brighter than a short one (the design gate). Team-ignited dots resist it
+ * (personalization survives). No-op outside the matchdots layout. Owner-tunable; baked
+ * into the shader as MATCHDOTS_ALPHA.
+ */
+export const MATCHDOTS_ALPHA = 0.5;
+
 /* ---------------------------------------------------------------------------
  * Shared GLSL — the position + visibility core. Used verbatim by BOTH the
  * visual and the pick vertex shaders so their geometry can never drift.
@@ -306,6 +317,44 @@ uniform float uFlowLift;           // 0 = baseline heights · 1 = true run-rate 
 uniform float uSparkGlow;          // spark brightness/glow strength 0..1 (0 = inactive)
 uniform float uSparkLift;          // world-units vertical lift for spark points
 uniform float uSparkOthersDim;     // luminance × for non-spark points while sparks glow
+
+// ---- Match-dots (Ch 8, §24). Every ball condenses to the CENTROID of its MATCH.
+//      NO new per-point attribute + NO new buffer: the ball's match id is recovered
+//      by a BINARY SEARCH of position.x against uMatchBoundsTex (1,331 monotone
+//      block-start point indices), then its centroid + toss + density gain is read
+//      from uMatchTex (per match: R = nx, G = ny normalized [-1,1]; B = toss class
+//      0 bat-first / 1 field-first; A = per-match density gain). The centroid maps
+//      1:1 into the letterboxed box via uMatchHalfExtent (per-axis); uMatchSplit lifts
+//      each dot into its toss lane. A constant radial jitter (uMatchDotR) makes each
+//      match a glowing disc. The whole block is gated on the matchdots layout (code
+//      10) being in the mix, so the ~11-texelFetch binary search runs ONLY on
+//      matchdots frames and every prior scene renders byte-identically.
+uniform highp sampler2D uMatchTex;       // per-match: (nx, ny, toss, densityGain)
+uniform highp sampler2D uMatchBoundsTex; // per-match: R = block-start point index (monotone)
+uniform int uMatchN;                     // number of matches (binary-search bound)
+uniform int uMatchTexW;                  // match-texture width (id → texel wrapping)
+uniform vec2 uMatchHalfExtent;           // world half-extents: world = normalized × this
+uniform float uMatchDotR;                // world radius of a match dot's constant jitter disc
+uniform float uMatchLaneY;               // world lane-centre offset (bat-first up / field-first down)
+uniform float uMatchLaneHalf;            // world lane band half-height (dots spread within a lane)
+uniform float uMatchSplit;               // 0 = neutral centroid · 1 = lifted into the toss lanes
+
+// ---- Review chips (Ch 8, §25). A subset over the held match-dots (the rivers/sparks
+//      precedent). Membership + the packed lane+slot ride the REUSED aDismissal (review
+//      code -1 none / 0 struck / 1 upheld) + aRiverPos (lane index in the integer part,
+//      cumulative stack slot 0..1 in the fraction), so aTeam is NEVER touched (team-
+//      ignite stays correct in every chapter) and no new attribute is added. The 988
+//      review balls fly out into per-lane columns (struck-down red at the bottom, upheld
+//      green on top). Inactive at uReviewClass < 0, so every prior scene is byte-identical.
+uniform float uReviewClass;         // -1 = inactive · >= 0 = review chips engaged
+uniform float uReviewEngage;        // 0 = balls on their match-dots · 1 = fully stacked in the chips
+uniform float uReviewTint;          // green/red outcome recolor strength (luminance-separated, CVD-safe)
+uniform float uReviewOthersDim;     // luminance × for non-review points while the chips are engaged
+uniform float uReviewLaneX[TEAM_COUNT]; // world x per franchise lane index
+uniform float uReviewBottom;        // world y at the stack baseline (0%)
+uniform float uReviewHeight;        // world height spanning 0 → the busiest lane
+uniform float uReviewLaneHalfW;     // in-lane x jitter half-width (fills the column)
+uniform float uReviewChipJitter;    // small in-slot y jitter (chips read as a soft stack)
 `;
 
 /** Core per-point attributes (both shaders read these). */
@@ -350,7 +399,12 @@ uint pcg(uint v) {
 }
 const float INV32 = 1.0 / 4294967296.0;
 
-vec3 pickLayout(int id, vec3 pFree, vec3 pCols, vec3 pWall, vec3 pWorms, vec3 pFrontier, vec3 pTide, vec3 pWorth, vec3 pConst, vec3 pFlow) {
+// match-dots (§24): id → texel in the match textures (wraps if the match count ever
+// exceeds one texture row; uMatchTexW is the width fed by field.ts, so 1,331 sits in
+// row 0). Shared by the centroid (uMatchTex) and bounds (uMatchBoundsTex) fetches.
+ivec2 mtexel(int id) { return ivec2(id % uMatchTexW, id / uMatchTexW); }
+
+vec3 pickLayout(int id, vec3 pFree, vec3 pCols, vec3 pWall, vec3 pWorms, vec3 pFrontier, vec3 pTide, vec3 pWorth, vec3 pConst, vec3 pFlow, vec3 pMatch) {
 	if (id == 1) return pCols;
 	if (id == 2) return pWall;
 	if (id == 4) return pWorms;
@@ -359,6 +413,7 @@ vec3 pickLayout(int id, vec3 pFree, vec3 pCols, vec3 pWall, vec3 pWorms, vec3 pF
 	if (id == 7) return pWorth;
 	if (id == 8) return pConst;
 	if (id == 9) return pFlow;
+	if (id == 10) return pMatch;
 	return pFree; // 0 free · 3 assembly share the free-field scatter
 }
 
@@ -410,6 +465,9 @@ struct Core {
 	float railT;         // 0..1 flight progress toward the rail slot (overlay pass only)
 	bool spark;          // impact-sub spark membership (aSpark) — Ch 7 luminance lift (§23)
 	float flowWeight;    // 0..1 amount of the twin-rivers layout in the A/B mix (ribbon alpha)
+	float matchWeight;   // 0..1 amount of the matchdots layout in the A/B mix (§24 settle alpha)
+	float matchGain;     // per-match density gain (§24 constant-brightness discs; 1 outside matchdots)
+	bool reviewMember;   // review-chip subset member (aDismissal >= 0 while reviews engaged, §25)
 };
 
 Core computeCore() {
@@ -592,13 +650,56 @@ Core computeCore() {
 		(h3 - 0.5) * 0.25
 	);
 
+	// match-dots (Ch 8, §24): every ball condenses to the CENTROID of its MATCH.
+	// GATED on the matchdots layout (code 10) being in the mix, so the ~11-texelFetch
+	// binary search runs ONLY on matchdots frames — every prior scene skips it, and
+	// posMatch stays the cheap free scatter (pickLayout returns it only for id == 10,
+	// which never happens off the matchdots layout, so it is never USED). This keeps
+	// R0..R7 byte-identical AND spends the search cost only where the layout is live.
+	vec3 posMatch = posFree;
+	o.matchGain = 1.0;
+	if (uLayoutA == 10 || uLayoutB == 10) {
+		// binary search: the largest match m with bounds[m] <= this ball's point index.
+		// A match's deliveries are contiguous in point order, so bounds is monotone and
+		// bounds[0] == 0, so lo always converges to this ball's own match block.
+		int mlo = 0;
+		int mhi = uMatchN - 1;
+		for (int it = 0; it < 12; it++) {   // ceil(log2(1331)) = 11, +1 safety
+			if (mlo >= mhi) break;
+			int mid = (mlo + mhi + 1) / 2;
+			float b = texelFetch(uMatchBoundsTex, mtexel(mid), 0).r;
+			if (b <= position.x) mlo = mid; else mhi = mid - 1;
+		}
+		vec4 mc = texelFetch(uMatchTex, mtexel(mlo), 0); // (nx, ny, toss, densityGain)
+		o.matchGain = mc.w;
+		float mnx = mc.x;
+		float mny = mc.y;
+		// neutral centroid y vs the toss lane (bat-first up, field-first down); the dots
+		// spread within a lane by their own centroid ny so the lane reads as a band that
+		// swells where the data has more matches — the field-first river after 2016.
+		float baseCy = mny * uMatchHalfExtent.y;
+		float laneSign = (mc.z < 0.5) ? 1.0 : -1.0;
+		float laneCy = laneSign * uMatchLaneY + mny * uMatchLaneHalf;
+		float cy = mix(baseCy, laneCy, clamp(uMatchSplit, 0.0, 1.0));
+		// constant radial jitter disc (linear radius → a centre-dense glow, the
+		// constellation precedent) — a run-heavy / longer match is no fatter than a
+		// low-scoring one, since nothing about the disc encodes a stat (design gate).
+		float mAng = h4 * 6.28318530718;
+		float mRad = uMatchDotR * h1;
+		posMatch = vec3(
+			mnx * uMatchHalfExtent.x + cos(mAng) * mRad,
+			cy + sin(mAng) * mRad,
+			(h3 - 0.5) * 0.25
+		);
+	}
+
 	// morph with per-point stagger so the field streams, not teleports
 	float delay = h3 * 0.55;
 	float t = clamp(uProgress * 1.55 - delay, 0.0, 1.0);
 	t = t * t * (3.0 - 2.0 * t);
 	vec3 pos = mix(
-		pickLayout(uLayoutA, posFree, posCols, posWall, posWorms, posFrontier, posTide, posWorth, posConstellation, posFlow),
-		pickLayout(uLayoutB, posFree, posCols, posWall, posWorms, posFrontier, posTide, posWorth, posConstellation, posFlow),
+		pickLayout(uLayoutA, posFree, posCols, posWall, posWorms, posFrontier, posTide, posWorth, posConstellation, posFlow, posMatch),
+		pickLayout(uLayoutB, posFree, posCols, posWall, posWorms, posFrontier, posTide, posWorth, posConstellation, posFlow, posMatch),
 		t
 	);
 
@@ -617,6 +718,11 @@ Core computeCore() {
 	// how much of the twin-rivers layout (code 9) is in the mix — gates the ribbon
 	// alpha (no-op for every prior layout, never 9).
 	o.flowWeight = (uLayoutA == 9 ? (1.0 - t) : 0.0) + (uLayoutB == 9 ? t : 0.0);
+
+	// how much of the match-dots layout (code 10) is in the mix — gates the settle
+	// alpha + the per-match density gain + the size/glow flatten (§24). No-op for
+	// every prior layout (matchWeight is 0, never code 10), so R0..R7 are byte-identical.
+	o.matchWeight = (uLayoutA == 10 ? (1.0 - t) : 0.0) + (uLayoutB == 10 ? t : 0.0);
 
 	// impact-sub spark lift (§23) — the POSITION change lives here so the pick pass
 	// tracks the lifted spark; the brighten/glow is per-shader (visual). Gated on
@@ -654,6 +760,30 @@ Core computeCore() {
 			(h3 - 0.5) * 0.25
 		);
 		pos = mix(pos, posBand, rv);
+	}
+
+	// review chips flight (§25): the 988 review deliveries (aDismissal >= 0 while the
+	// reviews are engaged) fly OUT of the held match-dots into per-team chip columns.
+	// The REUSED aRiverPos packs the franchise LANE index (integer part) + the cumulative
+	// stack slot 0..1 (fraction), so aTeam stays untouched and no attribute is added.
+	// Struck-down (aDismissal 0) chips sit low, upheld (aDismissal 1) high — the slot is
+	// baked cumulative struck-then-upheld in field.ts. Reversible: uReviewEngage 1→0
+	// returns each chip to its match-dot. A cross-cutting POSITION modifier like the rivers.
+	o.reviewMember = false;
+	if (uReviewClass >= 0.0 && aDismissal >= -0.5) {
+		o.reviewMember = true;
+		float lane = floor(aRiverPos);
+		float slot = aRiverPos - lane;
+		int li = int(lane + 0.5);
+		float laneX = uReviewLaneX[li];
+		vec3 posChip = vec3(
+			laneX + (h4 * 2.0 - 1.0) * uReviewLaneHalfW,
+			uReviewBottom + slot * uReviewHeight + (h2 * 2.0 - 1.0) * uReviewChipJitter,
+			(h3 - 0.5) * 0.25
+		);
+		float cv = clamp(uReviewEngage * 1.55 - delay, 0.0, 1.0);
+		cv = cv * cv * (3.0 - 2.0 * cv);
+		pos = mix(pos, posChip, cv);
 	}
 
 	// assembly stream-in: chronological reveal by point index
@@ -760,9 +890,15 @@ Core computeCore() {
 `;
 }
 
-export function makeVertexShader(groupCount: number, hasMatch = false, railOverlay = false): string {
+export function makeVertexShader(
+	groupCount: number,
+	teamCount: number,
+	hasMatch = false,
+	railOverlay = false
+): string {
 	return /* glsl */ `
 #define GROUP_COUNT ${groupCount}
+#define TEAM_COUNT ${Math.max(1, teamCount)}
 #define RAIN_W ${ASSEMBLY_RAIN_WINDOW}
 #define WALLHEAT_NEUTRAL ${(WALLHEAT_NEUTRAL_BYTE / 255).toFixed(6)}
 #define CASCADE_FLASH_W ${CASCADE_FLASH_WINDOW.toFixed(6)}
@@ -772,6 +908,7 @@ export function makeVertexShader(groupCount: number, hasMatch = false, railOverl
 #define RAIL_MAX ${RAIL_MAX_SLOTS}
 #define RAIL_STAGGER_W ${RAIL_STAGGER.toFixed(6)}
 #define FLOW_RIBBON_A ${FLOW_RIBBON_ALPHA.toFixed(6)}
+#define MATCHDOTS_ALPHA ${MATCHDOTS_ALPHA.toFixed(6)}
 ${hasMatch ? '#define HAS_MATCH' : ''}
 ${railOverlay ? '#define RAIL_OVERLAY' : ''}
 
@@ -804,6 +941,17 @@ const vec3 C_CASCADE_RED = vec3(1.0, 0.145, 0.115); // #ff251d
 const vec3 C_RIVER_STUMPS  = vec3(1.000, 0.690, 0.180); // #ffb02e — bowled + lbw
 const vec3 C_RIVER_CAUGHT  = vec3(0.357, 0.549, 1.000); // #5b8cff — caught
 const vec3 C_RIVER_STUMPED = vec3(0.878, 0.373, 0.847); // #e05fd8 — stumped
+
+// review-chip outcome palette (C8-4, the ONE gated hue exception in Ch 8, §25). The
+// CVD-safe gate: the two bands MUST separate by LUMINANCE, not hue alone, so "mostly
+// dark = mostly the call stood" survives red-green colorblindness. C_REVIEW_GREEN is
+// the LIGHTER band (the review paid off / upheld, lum ≈ 0.83) and C_REVIEW_RED the
+// DARKER band (the call stood / struck down, lum ≈ 0.52). The review-red is held
+// luminance-distinct from and brighter than every team identity red (so a red-franchise
+// reader never confuses "my team" with "struck down"), and the green is held off the
+// WPL teal. Owner-tunable (storyboard §7) — the exact hues are the remaining sign-off.
+const vec3 C_REVIEW_GREEN = vec3(0.659, 0.925, 0.753); // #a8ecc0 — upheld / paid off (LIGHTER)
+const vec3 C_REVIEW_RED   = vec3(0.937, 0.353, 0.267); // #ef5a44 — struck down / call stood (DARKER)
 
 ${coreBodyGlsl()}
 
@@ -870,6 +1018,15 @@ void main() {
 		c = mix(c, C_TEAL, k);
 	}
 
+	// ---- Match-dots flatten (§24): a match dot must read at a CONSTANT radius and
+	//      brightness, so a boundary-heavy match is no bigger or brighter than a
+	//      low-scoring one (design gate). Fade the outcome size boost + the six/four
+	//      glow toward neutral by matchWeight; HUE stays identity. Team-ignite runs
+	//      LATER, so the reader's own team still pops. No-op off the matchdots layout
+	//      (matchWeight 0 → mix is identity), so every prior scene is byte-identical.
+	sizeMul = mix(sizeMul, 1.0, core.matchWeight);
+	glow *= mix(1.0, 0.0, core.matchWeight);
+
 	// ---- Era-relative intent recolor (C1-2 thesis beat), gated by uWallHeatMix.
 	if (uWallHeatMix > 0.0) {
 		c = mix(c, heatColor(aWallHeat), uWallHeatMix);
@@ -928,6 +1085,14 @@ void main() {
 	//      saturated blob. No-op outside the flow layout (flowWeight is 0 for every
 	//      prior layout, never code 9), so R1..R6 render byte-identically.
 	alphaMul *= mix(1.0, FLOW_RIBBON_A, core.flowWeight);
+
+	// ---- Match-dots settle (§24): the 316k balls collapse into 1,331 discs, so a
+	//      moderate base alpha (MATCHDOTS_ALPHA) lets each read as a soft disc, and the
+	//      per-match DENSITY GAIN (uMatchTex.w, in core.matchGain) makes a dot's
+	//      INTEGRATED brightness independent of the match's ball count — a longer / rain-
+	//      shortened match is no dimmer or brighter than a full one (the design gate).
+	//      No-op outside the matchdots layout (matchWeight 0), so R0..R7 are byte-identical.
+	alphaMul *= mix(1.0, MATCHDOTS_ALPHA * core.matchGain, core.matchWeight);
 
 	// ---- Worth-grid pricelens (§19): the cell's price LUMINANCE rides the
 	//      color (hue stays identity — a scalar multiply is luminance only) and
@@ -993,6 +1158,25 @@ void main() {
 		}
 	}
 
+	// ---- Review chips recolor (§25): the review subset recolours by OUTCOME — a
+	//      LIGHTER green (the review paid off / upheld, aDismissal 1) vs a DARKER red
+	//      (the call stood / struck down, aDismissal 0), separated by LUMINANCE not hue
+	//      alone so "mostly dark = mostly the call stood" survives red-green colorblindness
+	//      (the CVD-safe gate). Everything else dims. The fly-out already happened in core;
+	//      the tick/cross micro-glyphs are the scene's SVG. No-op when uReviewClass < 0.
+	if (uReviewClass >= 0.0) {
+		float re = clamp(uReviewEngage, 0.0, 1.0);
+		if (core.reviewMember) {
+			vec3 rc = (aDismissal > 0.5) ? C_REVIEW_GREEN : C_REVIEW_RED;
+			c = mix(c, rc, uReviewTint * re);
+			glow = max(glow, 0.25 * re);
+		} else {
+			float od = mix(1.0, uReviewOthersDim, re);
+			alphaMul *= od;
+			c *= mix(0.75, 1.0, od);
+		}
+	}
+
 	// ---- Impact-sub sparks (§23): the 517 impact-sub deliveries glow as bright
 	//      sparks entering the IPL river — a LUMINANCE boost + glow + size (hue
 	//      stays identity), with non-spark points optionally damped (uSparkOthersDim)
@@ -1048,6 +1232,10 @@ void main() {
 		float muteAmt = 0.0;
 		if (uCascadeClass >= 0.0) muteAmt = max(muteAmt, uCascadeMute);
 		if (uRiversClass >= 0.0) muteAmt = max(muteAmt, uRiversMute);
+		// through the review chips (C8-4) the team glow desaturates so a red-franchise
+		// reader (RCB / PBKS / SRH) never confuses their own lit lane with a struck-down
+		// (red) chip; the mute rises with the chip engage. Gated on the beat being active.
+		if (uReviewClass >= 0.0) muteAmt = max(muteAmt, uReviewEngage);
 		if (muteAmt > 0.0) {
 			float m = clamp(muteAmt, 0.0, 1.0);
 			float lum = dot(tcol, vec3(0.299, 0.587, 0.114));
@@ -1118,14 +1306,16 @@ void main() {
  * + one readback per tap, never a loop (idle GPU stays ~0).
  * ------------------------------------------------------------------------- */
 
-export function makePickVertexShader(groupCount: number, hasMatch = false): string {
+export function makePickVertexShader(groupCount: number, teamCount: number, hasMatch = false): string {
 	return /* glsl */ `
 #define GROUP_COUNT ${groupCount}
+#define TEAM_COUNT ${Math.max(1, teamCount)}
 #define RAIN_W ${ASSEMBLY_RAIN_WINDOW}
 #define CASCADE_FLASH_W ${CASCADE_FLASH_WINDOW.toFixed(6)}
 #define WORTH_CELL_FILL ${WORTH_CELL_FILL.toFixed(6)}
 #define RAIL_MAX ${RAIL_MAX_SLOTS}
 #define RAIL_STAGGER_W ${RAIL_STAGGER.toFixed(6)}
+#define MATCHDOTS_ALPHA ${MATCHDOTS_ALPHA.toFixed(6)}
 ${hasMatch ? '#define HAS_MATCH' : ''}
 
 ${UNIFORMS_GLSL}

@@ -16,6 +16,7 @@
 	import { scenes as ch5Scenes } from '$lib/scenes/ch5';
 	import { scenes as ch6Scenes } from '$lib/scenes/ch6';
 	import { scenes as ch7Scenes } from '$lib/scenes/ch7';
+	import { scenes as ch8Scenes } from '$lib/scenes/ch8';
 	import { scenes as endCardScenes } from '$lib/scenes/endcard';
 	import { scenes as sandboxScenes } from '$lib/scenes/sandbox';
 
@@ -41,6 +42,9 @@
 		// The Twelfth Man: the 2023 Impact Player rule as a natural experiment, with
 		// the rule-free WPL as the control group. Picks up the Ch 4 cliff.
 		...ch7Scenes,
+		// The Captain's Brain: the belief audit grades five analytics-era beliefs
+		// against the whole record (four fails, one pass) over the 1,331 match-dots.
+		...ch8Scenes,
 		...endCardScenes,
 		...sandboxScenes
 	];

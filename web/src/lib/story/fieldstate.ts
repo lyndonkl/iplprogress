@@ -12,6 +12,7 @@ import type {
 	ConstellationPhaseState,
 	OverRail,
 	PriceLens,
+	ReviewSubset,
 	RunoutCascade,
 	SceneDef,
 	SceneFieldState,
@@ -109,6 +110,8 @@ interface ResolvedSceneState {
 	phase: ConstellationPhaseState | null;
 	flowLift: number;
 	sparks: SparkSubset | null;
+	matchSplit: number;
+	reviews: ReviewSubset | null;
 	teamIgnite: boolean;
 	wallHeatMix: number;
 }
@@ -130,6 +133,8 @@ export function withDefaults(s: SceneFieldState): ResolvedSceneState {
 		phase: s.phase ?? null,
 		flowLift: s.flowLift ?? 1,
 		sparks: s.sparks ?? null,
+		matchSplit: s.matchSplit ?? 0,
+		reviews: s.reviews ?? null,
 		teamIgnite: s.teamIgnite ?? true,
 		wallHeatMix: s.wallHeatMix ?? 0
 	};
@@ -254,6 +259,17 @@ export function resolveRenderState(
 	const fromSp = f.sparks;
 	const toSp = g.sparks;
 
+	// Review chips (§25) resolve like the rivers: the active descriptor (preferring
+	// `to`) fixes the discrete class (0 active / -1 inert), while `engage` LERPS — so
+	// the chips fly out as the scene declaring them advances engage, and settle back
+	// (engage → 0) when the next scene declares none. When NO reviews are declared
+	// (rev null) every review field takes its INERT default so a non-review scene is
+	// byte-identical to DEFAULT_RENDER_STATE (reviewClass -1 → the shader branch is a
+	// no-op, so the team-glow-mute guardrail keyed off it never fires).
+	const fromRev = f.reviews;
+	const toRev = g.reviews;
+	const rev = toRev ?? fromRev;
+
 	// Facet filter resolves like the highlight: the discrete facets come from
 	// whichever side declares an active filter (preferring `to`), while filterDim
 	// lerps — an inactive side contributes dim 1, so a filter fades in/out cleanly.
@@ -359,7 +375,18 @@ export function resolveRenderState(
 		// the spark glow fades in and back out; inactive at glow 0 (byte-identical).
 		sparkGlow: lerp(fromSp?.glow ?? 0, toSp?.glow ?? 0, clampedT),
 		sparkLift: lerp(fromSp?.lift ?? 0, toSp?.lift ?? 0, clampedT),
-		sparkOthersDim: lerp(fromSp?.othersDim ?? 1, toSp?.othersDim ?? 1, clampedT)
+		sparkOthersDim: lerp(fromSp?.othersDim ?? 1, toSp?.othersDim ?? 1, clampedT),
+		// match-dots toss split (§24): the held lift lerps like any scalar (default 0 both
+		// sides = neutral centroid, a no-op). Read in-shader only while the matchdots layout
+		// is in the mix, so a non-matchdots scene equals DEFAULT_RENDER_STATE.
+		matchSplit: lerp(f.matchSplit, g.matchSplit, clampedT),
+		// review chips (§25): engage lerps (fly-out / settle-back); tint / othersDim come
+		// from the active descriptor (discrete, like the rivers). Inert when NO reviews are
+		// declared (reviewClass -1, engage 0, tint 0, othersDim 1) → byte-identical.
+		reviewClass: rev ? 0 : -1,
+		reviewEngage: lerp(fromRev?.engage ?? 0, toRev?.engage ?? 0, clampedT),
+		reviewTint: rev ? rev.tint ?? 1 : 0,
+		reviewOthersDim: rev ? rev.othersDim ?? 0.12 : 1
 	};
 }
 
