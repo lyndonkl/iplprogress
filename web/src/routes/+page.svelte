@@ -18,6 +18,7 @@
 	import { scenes as ch7Scenes } from '$lib/scenes/ch7';
 	import { scenes as ch8Scenes } from '$lib/scenes/ch8';
 	import { scenes as ch9Scenes } from '$lib/scenes/ch9';
+	import { scenes as ch10Scenes } from '$lib/scenes/ch10';
 	import { scenes as endCardScenes } from '$lib/scenes/endcard';
 	import { scenes as sandboxScenes } from '$lib/scenes/sandbox';
 
@@ -49,6 +50,10 @@
 		// The Living League: institutions churn (squads, careers), the human fabric
 		// (the rivalries) persists straight through every mega-auction reset.
 		...ch9Scenes,
+		// The Era Machine (the finale): we stop narrating eras and let the data draw
+		// its own fault lines, close the 2023 mystery, then exhale the ribbon back to
+		// the cold-open free field. There is no Chapter 11.
+		...ch10Scenes,
 		...endCardScenes,
 		...sandboxScenes
 	];

@@ -16,17 +16,14 @@ export interface NavItem {
 
 /** Unbuilt chapters, in reading order, titles only (storyboard §6). */
 export const FUTURE_CHAPTERS: string[] = [
-	// 'Chapter 2: The Last of the Anchors', 'Chapter 3: The Counterrevolution',
-	// 'Chapter 4: The Rising Tide', 'Interlude: The Net Session',
-	// 'Chapter 5: What a Ball Is Worth', 'Chapter 6: Two Dialects' and
-	// 'Chapter 7: The Twelfth Man' and 'Chapter 8: The Captain’s Brain' are now
-	// LIVE (their scenes declare a navLabel; see src/lib/scenes/ch2..ch8,
-	// interlude), so they appear as live nav items. 'Chapter 9: The Living
-	// League' is now LIVE too (its title scene declares the navLabel; see
-	// src/lib/scenes/ch9), so it is a live nav item, not a `soon`.
-	'Chapter 10: The Era Machine'
-	// 'The Field Is Yours' is now LIVE (the Bowl scene declares it as a navLabel;
-	// see src/lib/scenes/sandbox), so it appears as a live nav item, not a `soon`.
+	// Every chapter is now LIVE. Chapters 2 through 9 declare navLabels on their
+	// title scenes (see src/lib/scenes/ch2..ch9, interlude), and 'Chapter 10: The
+	// Era Machine' shipped in R6a as the LAST chapter (its title scene declares
+	// the navLabel; see src/lib/scenes/ch10), so it too is a live nav item, not a
+	// `soon`. 'The Field Is Yours' (the sandbox) is live via its Bowl scene's
+	// navLabel. With Chapter 10 the narrative is complete: there is no Chapter 11
+	// and no next-chapter tease, so FUTURE_CHAPTERS is empty and the nav is
+	// all-live.
 ];
 
 /** Compose nav items: scenes that declare navLabel, then the soon list. */

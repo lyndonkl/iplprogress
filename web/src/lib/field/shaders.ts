@@ -398,6 +398,17 @@ uniform float uDuelReveal;             // 0 = strand points hidden · 1 = fully 
 uniform float uDuelDominance;          // 0 = outcome colour · 1 = full red/white/blue dominance recolor
 uniform float uDuelDustDim;            // luminance × for the dust balls (1 = no dimming)
 uniform float uStrandRecede;           // 0 = every knot lit · 1 = non-focus knots receded to neutral
+
+// ---- Ribbon + player teleporter (Ch 10, §27 — the finale). The ribbon layout (code
+//      12) is a PURE FUNCTION of the point index — no per-point data, only these two
+//      band scalars + the reveal. The teleporter is a subset over aRunOut bit2. Every
+//      branch is gated (ribbonWeight 0 / uTeleportProgress 0) so R0..R9 are byte-identical.
+uniform float uRibbonBandY;      // ribbon band centre y (world)
+uniform float uRibbonBandHalf;   // ribbon band half-thickness (world; constant jitter, not a count)
+uniform float uRibbonReveal;     // 0 = ribbon hidden · 1 = fully drawn (default 1)
+uniform float uTeleportProgress; // 0 = inactive · >0 = the teleported subset lifts + pops
+uniform float uTeleportLift;     // world-units vertical lift for teleported points
+uniform float uTeleportOthersDim;// luminance × for non-teleport points while the teleporter is active
 `;
 
 /** Core per-point attributes (both shaders read these). */
@@ -454,7 +465,7 @@ ivec2 mtexel(int id) { return ivec2(id % uMatchTexW, id / uMatchTexW); }
 // program links under the WebGL2 256-vertex-uniform-vector floor on mobile GPUs.
 vec4 grpRow(int gi, int row) { return texelFetch(uGroupTex, ivec2(gi, row), 0); }
 
-vec3 pickLayout(int id, vec3 pFree, vec3 pCols, vec3 pWall, vec3 pWorms, vec3 pFrontier, vec3 pTide, vec3 pWorth, vec3 pConst, vec3 pFlow, vec3 pMatch, vec3 pDuel) {
+vec3 pickLayout(int id, vec3 pFree, vec3 pCols, vec3 pWall, vec3 pWorms, vec3 pFrontier, vec3 pTide, vec3 pWorth, vec3 pConst, vec3 pFlow, vec3 pMatch, vec3 pDuel, vec3 pRibbon) {
 	if (id == 1) return pCols;
 	if (id == 2) return pWall;
 	if (id == 4) return pWorms;
@@ -465,6 +476,7 @@ vec3 pickLayout(int id, vec3 pFree, vec3 pCols, vec3 pWall, vec3 pWorms, vec3 pF
 	if (id == 9) return pFlow;
 	if (id == 10) return pMatch;
 	if (id == 11) return pDuel;
+	if (id == 12) return pRibbon;
 	return pFree; // 0 free · 3 assembly share the free-field scatter
 }
 
@@ -523,6 +535,8 @@ struct Core {
 	float duelColor;     // per-duel dominance color -1..1 (+1 batter-red / -1 bowler-blue; 0 outside duelweb)
 	float duelFocus;     // per-duel focus 0..1 (1 = lit · 0 = recede candidate; 1 outside duelweb)
 	bool duelDust;       // true when this ball is in no tracked pairing (dust scatter) — §26
+	float ribbonWeight;  // 0..1 amount of the ribbon layout in the A/B mix (§27 reveal / settle alpha)
+	bool teleport;       // player-teleporter subset member (aRunOut bit2) — Ch 10 lift/pop (§27)
 };
 
 Core computeCore() {
@@ -551,8 +565,15 @@ Core computeCore() {
 	// aRunOut is a packed flag byte: bit0 = run-out (Ch 2 cascade), bit1 = impact-sub
 	// spark (Ch 7). Decoding bit0 with mod is byte-identical to the old gt-0.5 test for
 	// every value the run-out path ever sets (0/1), so R1..R4a render identically.
-	o.runOut = mod(aRunOut, 2.0) >= 0.5;
-	o.spark = aRunOut >= 1.5; // bit1 set (value 2 or 3) — the Ch 7 spark subset (§23)
+	int runBits = int(aRunOut + 0.5);
+	o.runOut = (runBits & 1) != 0;
+	// bit1 = the Ch 7 spark subset (§23). A strict bit-test (byte-identical to the old
+	// gt-1.5 test for every value setSparks/setRunouts ever write: 0/1/2/3) so the Ch 10
+	// teleporter's bit2 (value 4) never spills into the spark path.
+	o.spark = (runBits & 2) != 0;
+	// bit2 = the Ch 10 Player Teleporter subset (§27), baked via setTeleport. Ch 2/Ch 7
+	// (bit0/bit1) never co-render with Ch 10, so one attribute carries all three.
+	o.teleport = (runBits & 4) != 0;
 
 	// subset re-sort membership (drives position + color)
 	bool resortOn = uResortClass >= 0.0;
@@ -785,13 +806,26 @@ Core computeCore() {
 		}
 	}
 
+	// ribbon (Ch 10, §27 — the finale): every ball condenses onto one long CHRONOLOGICAL
+	// band. x = the ball's own point index 0..N-1 mapped left→right (uInvN = 1/nPoints,
+	// so ci is the chronological fraction 0..1 ≈ match order 2008→2026); y = a thin centred
+	// band + a hashed jitter so the dense stream reads as texture. A PURE FUNCTION of
+	// position.x — NO texelFetch, NO new attribute. pickLayout returns it only for id == 12,
+	// which never happens off the ribbon layout, so it is never USED for R0..R9 (byte-identical).
+	float rci = position.x * uInvN;
+	vec3 posRibbon = vec3(
+		(rci * 2.0 - 1.0) * uHalfW * 0.95,
+		uRibbonBandY + (h2 * 2.0 - 1.0) * uRibbonBandHalf,
+		(h3 - 0.5) * 0.25
+	);
+
 	// morph with per-point stagger so the field streams, not teleports
 	float delay = h3 * 0.55;
 	float t = clamp(uProgress * 1.55 - delay, 0.0, 1.0);
 	t = t * t * (3.0 - 2.0 * t);
 	vec3 pos = mix(
-		pickLayout(uLayoutA, posFree, posCols, posWall, posWorms, posFrontier, posTide, posWorth, posConstellation, posFlow, posMatch, posDuel),
-		pickLayout(uLayoutB, posFree, posCols, posWall, posWorms, posFrontier, posTide, posWorth, posConstellation, posFlow, posMatch, posDuel),
+		pickLayout(uLayoutA, posFree, posCols, posWall, posWorms, posFrontier, posTide, posWorth, posConstellation, posFlow, posMatch, posDuel, posRibbon),
+		pickLayout(uLayoutB, posFree, posCols, posWall, posWorms, posFrontier, posTide, posWorth, posConstellation, posFlow, posMatch, posDuel, posRibbon),
 		t
 	);
 
@@ -821,10 +855,20 @@ Core computeCore() {
 	// layout (duelWeight is 0, never code 11), so R0..R8 are byte-identical.
 	o.duelWeight = (uLayoutA == 11 ? (1.0 - t) : 0.0) + (uLayoutB == 11 ? t : 0.0);
 
+	// how much of the ribbon layout (code 12) is in the mix — gates the reveal fade +
+	// the settle alpha (§27). No-op for every prior layout (ribbonWeight is 0, never code
+	// 12), so R0..R9 are byte-identical.
+	o.ribbonWeight = (uLayoutA == 12 ? (1.0 - t) : 0.0) + (uLayoutB == 12 ? t : 0.0);
+
 	// impact-sub spark lift (§23) — the POSITION change lives here so the pick pass
 	// tracks the lifted spark; the brighten/glow is per-shader (visual). Gated on
 	// uSparkGlow so it is a no-op for every prior scene (byte-identical).
 	if (uSparkGlow > 0.0 && o.spark) pos.y += uSparkLift * uSparkGlow;
+
+	// player teleporter lift (§27) — the POSITION change lives here so the pick pass
+	// tracks the lifted subset; the brighten/others-dim is per-shader (visual). Gated on
+	// uTeleportProgress so it is a no-op for every prior scene (byte-identical).
+	if (uTeleportProgress > 0.0 && o.teleport) pos.y += uTeleportLift * uTeleportProgress;
 
 	// subset re-sort flight — matching points arc into their season's column
 	if (o.matchResort) {
@@ -1195,6 +1239,12 @@ void main() {
 	//      prior layout, never code 9), so R1..R6 render byte-identically.
 	alphaMul *= mix(1.0, FLOW_RIBBON_A, core.flowWeight);
 
+	// ---- Ribbon reveal + settle (§27): the chronological band fades in as uRibbonReveal
+	//      rises (0 → 1) and settles to a moderate band alpha (the twin-rivers FLOW_RIBBON_A
+	//      precedent) so the dense stream reads as texture, not a saturated blob. No-op
+	//      outside the ribbon layout (ribbonWeight 0, never code 12) — R0..R9 byte-identical.
+	alphaMul *= mix(1.0, FLOW_RIBBON_A * clamp(uRibbonReveal, 0.0, 1.0), core.ribbonWeight);
+
 	// ---- Match-dots settle (§24): the 316k balls collapse into 1,331 discs, so a
 	//      moderate base alpha (MATCHDOTS_ALPHA) lets each read as a soft disc, and the
 	//      per-match DENSITY GAIN (uMatchTex.w, in core.matchGain) makes a dot's
@@ -1326,6 +1376,24 @@ void main() {
 			alphaMul = max(alphaMul, 0.9 * uSparkGlow);
 		} else {
 			float od = mix(1.0, uSparkOthersDim, uSparkGlow);
+			alphaMul *= od;
+			c *= mix(0.8, 1.0, od);
+		}
+	}
+
+	// ---- Player teleporter (§27): the selected player-season's deliveries (aRunOut bit2,
+	//      baked via setTeleport) LIFT out (pos already moved in core) and pop; everything
+	//      else dims by uTeleportOthersDim so the picked player reads alone against the
+	//      ribbon. LUMINANCE only (hue stays identity). No-op at uTeleportProgress == 0, so
+	//      every prior scene renders byte-identically.
+	if (uTeleportProgress > 0.0) {
+		if (core.teleport) {
+			c *= 1.0 + 0.6 * uTeleportProgress;
+			glow = max(glow, 0.5 * uTeleportProgress);
+			sizeMul *= 1.0 + 0.4 * uTeleportProgress;
+			alphaMul = max(alphaMul, 0.9 * uTeleportProgress);
+		} else {
+			float od = mix(1.0, uTeleportOthersDim, uTeleportProgress);
 			alphaMul *= od;
 			c *= mix(0.8, 1.0, od);
 		}

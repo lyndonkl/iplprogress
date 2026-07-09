@@ -143,6 +143,21 @@ CH8_SET_FILES = ("scenes/ch8.json",)
 # attribute, so the field holds at 14. Lazy-loaded at Ch 9 entry; held to the per-
 # chapter budget (pairing.u16 measures about 95 KB gz).
 CH9_SET_FILES = ("scenes/ch9.json", "pairing.u16")
+# R6a Chapter 10 "The Era Machine" (the FINALE): the whole chapter — the ribbon
+# geometry hints, the league-pulse seismograph (per-season metric ladders + the
+# strictness dial's precomputed break-index sets beta0.3..beta14 with each crack's
+# ball-position and Bayesian posterior + the per-metric cracks), the fault-map
+# subway (metric lines, break stations, the 2023/2024/2014 interchanges), the
+# bridge-player verdict (league SR 141.72 -> 150.59 = +8.87, 56 bridge batters, the
+# within/turnover shift-share, the three-suspect card), the Teleporter (Machine A
+# Sehwag translated through time with band < gap, Machine B Gayle-vs-Fraser-McGurk
+# percent-above-par bar-swap), the convergence clock, the 2021 venue-leg micro-era,
+# the 16 payoff variants, and the ch10-* footnote strings — ship in ONE scene doc
+# (scenes/ch10.json). Buffer-free like Ch 6 and Ch 7: the ribbon is a pure
+# position.x function (no 15th attribute, the field stays at 14) and the Teleporter
+# subset rides the spare bit2 of the existing aRunOut byte, so Ch 10 adds NO new
+# per-point buffer. Lazy-loaded at Ch 10 entry; held to the per-chapter budget.
+CH10_SET_FILES = ("scenes/ch10.json",)
 # Engine tables under engines/: R2a's engine #1 (par/SR+) + engine #5 (entry
 # states) consumed by Chapter 2, plus the parallel-track engine #2 (re288) +
 # engine #3 (wp_grid) built during R2/R3a and consumed in R3b. All lazy-loaded
@@ -194,6 +209,7 @@ def build_ledger(out_root: Path = canon.OUT_ROOT) -> dict:
     ch7_files = [n for n in CH7_SET_FILES if n in artifacts]
     ch8_files = [n for n in CH8_SET_FILES if n in artifacts]
     ch9_files = [n for n in CH9_SET_FILES if n in artifacts]
+    ch10_files = [n for n in CH10_SET_FILES if n in artifacts]
     engine_files = sorted(n for n in artifacts if n.startswith(ENGINES_PREFIXES))
 
     checks = [
@@ -282,6 +298,13 @@ def build_ledger(out_root: Path = canon.OUT_ROOT) -> dict:
             "budget_gz": BUDGET_CHAPTER_GZ,
             "actual_gz": gz_sum(ch9_files),
             "pass": bool(ch9_files) and gz_sum(ch9_files) <= BUDGET_CHAPTER_GZ,
+        },
+        {
+            "name": "chapter ch10 (Era Machine scene doc, buffer-free)",
+            "files": ch10_files,
+            "budget_gz": BUDGET_CHAPTER_GZ,
+            "actual_gz": gz_sum(ch10_files),
+            "pass": bool(ch10_files) and gz_sum(ch10_files) <= BUDGET_CHAPTER_GZ,
         },
         {
             "name": "engines (ch2 par/entry + R3b parallel-track re288/wp_grid)",

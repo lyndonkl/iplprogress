@@ -1,4 +1,4 @@
-# Story Shell Contract — R1a (+ R1b field capabilities: §11 picking · §12 filtering; + R2a Ch 2: §13 worm-space · §14 run-out cascade; + R2b Ch 3: §15 frontier plane · §16 dismissal rivers; + MF §17 mobile "read, then watch" captions; + R3a Ch 4: §18 tide skyline + waterline; + R3b-2 Ch 5: §19 worth grid + pricelens · §20 over rail · §21 WPA highlight; + R4a Ch 6: §22 constellation + phase toggle; + R4b Ch 7: §23 twin rivers `flow` + impact-sub sparks; + R5a Ch 8: §24 match-dots `matchdots` + toss lanes · §25 review chips; + R5b Ch 9: §26 duel web `duelweb`)
+# Story Shell Contract — R1a (+ R1b field capabilities: §11 picking · §12 filtering; + R2a Ch 2: §13 worm-space · §14 run-out cascade; + R2b Ch 3: §15 frontier plane · §16 dismissal rivers; + MF §17 mobile "read, then watch" captions; + R3a Ch 4: §18 tide skyline + waterline; + R3b-2 Ch 5: §19 worth grid + pricelens · §20 over rail · §21 WPA highlight; + R4a Ch 6: §22 constellation + phase toggle; + R4b Ch 7: §23 twin rivers `flow` + impact-sub sparks; + R5a Ch 8: §24 match-dots `matchdots` + toss lanes · §25 review chips; + R5b Ch 9: §26 duel web `duelweb`; + R6a Ch 10: §27 ribbon `ribbon`)
 
 The scene system every scene builder codes against. The shell (this directory +
 `lib/field/` + `lib/state/`) is owned by the story-shell architect; **scene
@@ -53,7 +53,8 @@ scrubs the field from the previous scene's `fieldState` to this scene's
 ```ts
 {
   layout: 'free' | 'columns' | 'wall' | 'assembly' | 'worms' | 'frontier'
-        | 'tide' | 'worth' | 'constellation' | 'flow' | 'matchdots' | 'duelweb';
+        | 'tide' | 'worth' | 'constellation' | 'flow' | 'matchdots' | 'duelweb'
+        | 'ribbon';
   reveal?: number;    // assembly stream-in 0..1 (chronological by point index)
   dim?: number;       // global luminance ×, 1 = full (default 1)
   wplDim?: number;    // WPL-points luminance × (C1-2 shelf staging; default 1)
@@ -140,7 +141,9 @@ scene's held `fieldState` isn't the right jump-cut target, declare
 ## 3. Field states you may NOT invent
 
 - One controlling morph per chapter (morph budget). Ch 1's is free→wall …
-  Ch 8's is free→matchdots (§24), Ch 9's is free→duelweb (§26). Everything else
+  Ch 8's is free→matchdots (§24), Ch 9's is free→duelweb (§26), Ch 10's is
+  free→ribbon (§27, plus its free reverse leg — the finale exhales back to the
+  cold-open scatter). Everything else
   is a subset-highlight (e.g.
   Ch 8's 988 review chips, §25) or a 2D annotation-plane scene (e.g. Ch 8's
   belief-reality crossover, scene-authored SVG) — the review chips and the
@@ -2542,3 +2545,241 @@ Scene-authored, spending no §, no field change beyond the four scalars above:
 - The duel-web position lives in the shared `computeCore()` (`posDuelWeb`), so the
   pick pass tracks the knots and can never drift from the visual field (tap-a-knot
   → `pairing` → duel).
+
+---
+
+## 27. The ribbon — Ch 10's controlling morph (R6a `ribbon` layout, the finale)
+
+Chapter 10's single controlling morph (free→ribbon, analogous to Ch 1's free→wall
+… Ch 9's free→duelweb) — and the **last morph in the piece**. Every ball condenses
+onto one long horizontal **time band**: the field of 316,199 deliveries sorts
+left→right by **when it was bowled**, the leftmost dot the first ball of 2008, the
+rightmost the last ball of this year, so the whole history reads as one ribbon.
+This is the **simplest morph in the whole piece**: the ribbon geometry is a **PURE
+FUNCTION of `position.x`**, which already carries the chronological point index
+(0..316198, flatten season-blocked order ≈ match order 2008→2026), and `uInvN`
+already exists — so it adds **NO new per-point buffer, NO data texture, and NO new
+per-point vertex attribute** (call this out: unlike `worms`/`frontier`/`tide`/
+`worth` there is not even an optional `.u8`, and unlike `matchdots`/`duelweb`
+there is not even a data texture — the ribbon needs nothing new on the wire). The
+field **STAYS at 14 vertex attributes** (the §24.2 / §26.2 ceiling, held). The only
+new GL state is **two float uniforms** (`uRibbonBandY` / `uRibbonBandHalf`) plus
+four render-state scalars. The fault-line cracks and the strictness dial are
+**scene-drawn SVG over a precomputed lookup** — the field draws no cracks (§27.3).
+Add nothing yourself — the shell owns the layout.
+
+### 27.1 Declaring it
+
+```ts
+fieldState: {
+  layout: 'ribbon',
+  ribbonReveal: 1,        // ribbon drawn (balls condensed into the time band)
+  teleportProgress: 0,    // Teleporter lift inactive
+  teleportLift: 0,        // world-units lift of the picked player's balls
+  teleportOthersDim: 1    // non-picked balls at full luminance
+}   // free→ribbon is the morph
+```
+
+Each ball flies to `posRibbon.x = (position.x · uInvN · 2 − 1) · uHalfW · 0.95` at a
+thin vertical **jitter band** (`uRibbonBandY` ± `uRibbonBandHalf`, the existing
+per-point hash), so the band has body without a second dimension. Because x is the
+ball INDEX, **every equal slice of width holds an equal number of balls**, so the
+band's brightness is UNIFORM along its length (no false rightward brightening the
+eye could read as "the game intensifying") — the trade is that recent, match-heavy
+seasons occupy MORE width, an encoding fact the copy owns (§27.3), never a trend.
+Hue stays identity (outcome colours, the WPL teal shift, the picked team lit on
+top — the reader's **team stays ignited**, its whole history threaded through the
+band, the emotional hook of the finale). The morph is the chapter's ONE layout
+morph; the free **reverse leg** (ribbon→free, C10-9) exhales the band back into the
+cold-open scatter so the piece ends where it began (§27.4).
+
+**The four scalars (held over the ribbon, driven from `dynamicState`).** Each lerps
+like any scalar (the §26 `duelReveal` / §24 `matchSplit` / §23 `flowLift`
+precedent) and — except `ribbonReveal`, which rides the morph — lands as a
+**post-morph caption STEP**: drive it 0→1 across the hold from
+`SceneDef.dynamicState(progress, held)`, and per the §12.2 orchestrator caveat
+surface it through `dynamicState` so a stray scroll re-application cannot revert
+it. All four default to their inert value, so the whole ribbon branch is a shader
+no-op and **every prior scene renders byte-identically**:
+
+| scalar | 0 | 1 | drives |
+|---|---|---|---|
+| `ribbonReveal` | balls at their free scatter (band erased) | condensed into the time band (ribbon drawn) | the free↔ribbon position lerp — **and the C10-9 exhale-to-free reverse leg** (driven 1→0, a longer settling ease than the C10-2 inhale) |
+| `teleportProgress` | Teleporter lift inactive | the picked player-season's balls fully lifted out of the band | the Teleporter subset lift (§27.2) — gates the whole teleport branch |
+| `teleportLift` | no lift | world-units height the picked cluster rises to | the lift extent (peak ≈ 0.35) |
+| `teleportOthersDim` | — | luminance × sinking every non-picked ball while one player is aloft (default 1 = none) | isolating the lifted innings the machine re-quotes |
+
+Because the reveal is a scalar (not the shell's layout `t`), the **exhale can
+dissolve the same band back to the free scatter without spending a second
+controlling morph**, exactly as `matchSplit` / `flowLift` / `duelReveal` are
+post-morph scalars over their held layout.
+
+### 27.2 The Teleporter subset — `field.setTeleport(indices)` (READ THIS)
+
+The **Player Teleporter** (C10-6) lifts one picked player-season's real balls out
+of the ribbon as a small bright cluster, so the reader watches the actual innings
+the machine is about to re-quote. It is a cross-cutting **subset lift** over the
+held ribbon (the §23.4 spark / §14.3 run-out / §16.3 dismissal precedent) — it
+composes with `ribbon` and spends **NO second controlling morph**. Membership is
+fed ONCE from the columnar dataset (the picked player-season's field point
+indices, defaulting to the reader's team legend or Sehwag 2008), before the lift
+engages:
+
+```ts
+// once, when the scene mounts (before the lift engages):
+field.setTeleport(pickedIndices);   // the picked player-season's field point indices
+// field.setTeleport(null) clears membership
+```
+
+Driven by `teleportProgress` 0→1 from `dynamicState`, the flagged balls rise by
+`teleportLift` while `teleportOthersDim` sinks the rest; the whole subset lifts
+TOGETHER (Gestalt common fate). Reversible (the next scene declaring
+`teleportProgress: 0` settles them back); inactive at `teleportProgress` 0 (every
+prior scene byte-identical). The re-quoting itself — the naive ghost, the honest
+re-quote, the own-era percent — is the scene's 2D card (§27.4), a lookup into the
+precomputed `scenes/ch10.json` table, **never a live model**.
+
+**Budget-safe REUSE (no new per-point attribute — the §24.2 / §26.2 ceiling, held
+at 14).** Ch 10 never coexists with Ch 2 or Ch 7, so the Teleporter flag **reuses
+the spare bit of the existing `aRunOut` packed byte** rather than adding a 15th
+attribute (which blacked out the whole field on the ANGLE/Metal build machine,
+§24.2): `aRunOut` packs bit 0 = run-out (Ch 2 cascade) and bit 1 = spark (Ch 7),
+so `setTeleport` writes the spare **bit 2** with a bit-preserving read-modify-write
+(`arr[i] &= 0xFB; arr[i] |= 4`, cloned from `setSparks` / baked ONCE, cached by a
+teleport-version), read in-shader as `o.teleport = (int(aRunOut + 0.5) & 4) != 0`.
+The field stays at **14 attributes**. Because the reuse touches `aRunOut`,
+`field.ts` **DEV-warns if the Teleporter engages alongside** the Ch 2 run-out
+cascade or the Ch 7 sparks (they would collide on the shared byte; they never
+render together in the piece — Ch 10 owns the byte alone).
+
+### 27.3 Honesty lock (do not fight it)
+
+The ribbon is **spaced by BALLS, not by calendar years**, so its brightness is held
+uniform along its length and the recent seasons' extra width is a fact about how
+many matches are played now (owned in the persistent legend + the C10-2 footnote:
+"the right side is wider because there are more matches now, not because anything
+sped up"), never a rightward trend the eye may misread. The three modern cracks
+(2022 / 2023 / 2024) therefore sit within a few percent of width of each other, so
+the fine modern ORDER is delegated to the fault map (C10-4, an equal-spaced YEAR
+axis), and the ribbon carries only the read it can resolve (the big "sixes cracked
+back in the mid-2010s" gap).
+
+- **The fault-line cracks are SCENE-DRAWN SVG — the field draws no crack.** The
+  scene reads `getRibbonLayout()` (§27.4) and draws a vertical mark at
+  `pointToX(breakIndex)` for each break, encoding its certainty (the emitted
+  posterior, 0.15–0.44, so most breaks are modest) on TWO redundant honest
+  channels: a soft-edged glow band (intensity tracks the posterior, width tracks
+  the location-uncertainty) AND a discrete style (surer = solid full-height, less
+  sure = dashed and shorter), plus an always-visible high-contrast locator stroke
+  and a direct year label so the MARK clears the detection floor without inflating
+  the certainty. A crack sits at the **exact ball-position the segmentation found**
+  (e.g. 2014@0.320, 2018@0.509, 2022@0.703, 2023@0.764, 2024@0.824 of the IPL
+  point span), never hand-placed on a round year.
+- **The strictness dial is a PRECOMPUTED-SEGMENTATION LOOKUP — never a re-fit.**
+  Dragging "how big a change counts as a new era" swaps which precomputed
+  break-index set the scene draws (the penalty sweep β0.3 = 6 eras · β0.6 = 4 ·
+  β1.0 = 3 · β4.0 = 2 · β14+ = 1, all verified exactly), and adjacent tinted
+  era-bands visibly FUSE as the count drops — a pure lookup into `scenes/ch10.json`,
+  no client re-fit. QA greps the Ch 10 scenes for any changepoint/segmentation call
+  and fails on one (the §22 "never a live re-embed in the browser" precedent).
+- **Ship the honest deltas straight** (every on-screen number data-bound to
+  `ch10.json`, never hardcoded): **sixes broke 2014 then 2018** (mid-2010s, not one
+  clean 2018); **about two-thirds** (~67%, not three-quarters) of the 2023-24
+  +8.9 jump was new personnel and usage, not the same players hitting harder; the
+  naive era-translation ceiling is **~224** (Sehwag's real ~185 → ~224, not 228),
+  the honest re-quote **~214**, with the honest marker's uncertainty band strictly
+  narrower than the ~10-point gap to the ghost (QA asserts band < gap); "how far
+  above his own era" ships as **SR+, a percent-above-par gap, NEVER a z-score** (2011
+  Gayle **+57%** edges 2024 Fraser-McGurk **+35%** once each is measured against his
+  own era's going rate, despite a raw SR ~51 lower); the WPL run rate crosses the
+  men's present level **~2027-28** (a band, ~2027-2031) while its six-hitting is
+  **off the clock** (run rate closes first; six-hitting lags so far it is barely
+  foreseeable on four seasons) — the uncertainty owned loudly.
+- **The plot's aspect is FIXED and viewport-independent** — the frame
+  **LETTERBOXES** rather than stretching, so the ribbon reads identically on desktop
+  and portrait phone (drawn as a thicker, wrapped or centred band on a phone, never
+  a one-pixel line). `RIBBON_ASPECT` / `RIBBON_FILL` / `RIBBON_BAND_FRAC` live in
+  `field/layout.ts` and are the owner-tunable constants flagged for build sign-off.
+
+### 27.4 Drawing the cracks / era-bands / time axis / Teleporter anchor — `field.getRibbonLayout()` + `ribbonPointToX`
+
+The vertical **cracks**, the tinted **era-bands**, the **strictness dial** + its
+"N eras" counter, the **time-axis ticks**, the persistent **legend**, the
+**seismograph strip** (C10-3), the **fault-map subway** (C10-4), the **three-panel
+verdict card** (C10-5), the **Teleporter two-machine card** (C10-6) and the
+**convergence fans** (C10-7) are the **scene's job on the annotation plane** (SVG/
+DOM registered to field coordinates) — **never** GL geometry (the cardinality rule;
+the field is the ribbon, the cracks/lines are crisp SVG on top, the §13/§15/§22/§26
+"field draws no lines" precedent). The seismograph strip, fault map, verdict card,
+Teleporter card and convergence fans are **2D annotation-plane scenes over the held
+(dimmed) ribbon** — the particles carry no meaning in a subway map or a fan chart,
+so these are **NOT field morphs** (the morph budget; the §24 belief-reality-
+crossover / §26 heartbeat precedent). Register everything with:
+
+```ts
+const rb = field.getRibbonLayout();      // null before first resize — guard
+if (rb) {
+  // a crack / time-axis tick at a point index (the exact position.x → world map):
+  const x = rb.pointToX(breakIndex);                    // world x of that ball index
+  const css = field.projectToCss(x, rb.box.bottom);     // draw the SVG crack line here
+  // the Teleporter lift anchor (above the band), or any world coord in the box:
+  const liftTop = field.projectToCss(rb.pointToX(i), rb.box.bottom + rb.box.height);
+}
+```
+
+`getRibbonLayout()` returns `{ box, pointToX(i) }` (rebuilt on resize): `box` is the
+fixed-aspect letterboxed data box (`left/width/bottom/height` world coords + the
+band centre/half-height), and `ribbonPointToX(layout, i)` is the **EXACT** `(i ·
+uInvN · 2 − 1) · uHalfW · 0.95` mapping the shader uses, so the SVG cracks / era-band
+edges / time-axis ticks / Teleporter anchor and the GL band can never drift. Feed
+`pointToX(breakIndex)` the crack ball-indices from `ch10.json`; the strictness dial
+swaps which break-index set is drawn (§27.3). **The exhale-to-free reverse leg
+(C10-9) reuses the cold-open `free` layout** (zero new work) and the sandbox that
+rises after it is the shell's existing post-narrative surface, not a Ch 10 field
+capability.
+
+### 27.5 Reduced motion & what the platform added (for the pipeline / other agents)
+
+- **Reduced motion** jump-cuts free→ribbon live (the settled band at `ribbonReveal:
+  1`, the cracks + tinted era-bands + "N eras" counter drawn as the strictness-dial
+  stills, team glow intact) — declare `reducedMotionEndState: { layout: 'ribbon',
+  ribbonReveal: 1, dim: <beat> }` (or let it default to `fieldState`). There is **no
+  beat that requires a tap**; the seismograph strip, fault map, verdict card,
+  convergence fans and payoff render their static end states, and the Teleporter
+  renders as TWO hard-separated static sub-cards (Machine A's 214/224 cleared before
+  Machine B's +57/+35 world), the picked cluster highlighted but NOT lifted.
+- **New `LayoutId` `ribbon`** (code 12) + **new `FieldRenderState` fields**
+  `ribbonReveal`, `teleportProgress`, `teleportLift`, `teleportOthersDim` (set by
+  `resolveRenderState`; `sameState` extended). All default inert (`ribbonReveal: 1`
+  but `ribbon` is never a layout in R1..R5b, and `teleportProgress: 0` gates the
+  lift off) — so **R1a…R5b scenes render BYTE-IDENTICALLY** (cold open, ch1-9,
+  interlude, sandbox verified unchanged; the discarded `posRibbon` compute never
+  changes a prior layout's returned position). Add `'ch10'` to the `ChapterId`
+  union and fold `ribbon` into the `SceneFieldState` layout union (§2) before any
+  Ch 10 scene compiles.
+- **No new per-point buffer, no data texture, no new attribute, zero wire cost, 14
+  attributes held** (the finale discharges nothing new against the ceiling): the
+  render computes `posRibbon` from `position.x` + the existing `uInvN` inside the
+  shared `computeCore()`, gated `if (uLayoutA == 12 || uLayoutB == 12)`; the only new
+  uniforms are the two float scalars `uRibbonBandY` / `uRibbonBandHalf` (baked from
+  `computeRibbon` in `handleResize`) plus the four render-state scalars.
+  `pickLayout` takes a `vec3 pRibbon` param returning it at `id == 12` (both call
+  sites, both shaders), so the pick pass tracks the band; `o.ribbonWeight` drives a
+  settle-alpha `alphaMul *= mix(1.0, RIBBON_ALPHA, ...)` (the `flowWeight`
+  precedent). The Teleporter subset rides the spare **bit 2 of `aRunOut`** via
+  `field.setTeleport` (§27.2) — no attribute, no buffer.
+- **Pipeline dependency (R6a):** `scenes/ch10.json` only — the per-strictness
+  seismograph segmentations (crack ball-indices + posteriors per β stop), the fault
+  map (metric lines + break-year stations + interchanges), the bridge-player verdict
+  (within/turnover shift-share), the Teleporter table (per player-season SR / SR+ /
+  naive / percentile re-quotes), the convergence fans, the 2021 micro-era, the 16
+  inline payoff cards and the footnote roll-ups. All are direct roll-ups /
+  build-time computations of the corpus — **no per-point buffer at all (Ch 10 is
+  buffer-free, like Ch 6 and Ch 7)**, no fitted model shipped to the browser, no
+  WASM. Byte-deterministic (seed where random used, sorted keys, gzip `mtime=0`);
+  well inside the 2 MB/chapter budget. `ledger.py` adds
+  `CH10_SET_FILES=("scenes/ch10.json",)`; `navplan` empties `FUTURE_CHAPTERS` (Ch 10
+  is the last chapter — the nav goes all-live, no next-chapter tease).
+- The ribbon position + the Teleporter lift live in the shared `computeCore()`
+  (`posRibbon`), so the pick pass tracks the band and the lifted cluster and can
+  never drift from the visual field.

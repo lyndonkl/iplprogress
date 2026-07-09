@@ -161,7 +161,8 @@ export type LayoutId =
 	| 'constellation'
 	| 'flow'
 	| 'matchdots'
-	| 'duelweb';
+	| 'duelweb'
+	| 'ribbon';
 
 /**
  * Which per-innings-phase star map is active in the Ch 6 constellation
@@ -252,7 +253,17 @@ export const LAYOUT_CODE: Record<LayoutId, number> = {
 	// `strandRecede` sinks non-focus knots to neutral, `duelDustDim` sinks the dust, and
 	// `duelReveal` draws the web in. Fixed data aspect (square), letterboxed like the
 	// others. See CONTRACT §26.
-	duelweb: 11
+	duelweb: 11,
+	// Ch 10 controlling morph (free→ribbon), the FINALE: every ball condenses onto one
+	// long CHRONOLOGICAL band — x = the ball's own point index 0..N-1 (essentially match
+	// order 2008→2026), y = a thin centred band + a hashed jitter so the dense stream reads
+	// as texture. A PURE FUNCTION of position.x — NO new per-point buffer, NO new vertex
+	// attribute, NO data texture (the field holds at 14). The fault-line cracks are
+	// SCENE-drawn SVG anchored via getRibbonLayout().pointToX(i); the Player Teleporter is a
+	// SUBSET lift over the aRunOut spare bit2 (setTeleport). The ribbon exhales back to the
+	// cold-open free field to close the story. Gated in-shader on code 12 being in the mix,
+	// so R0..R9 render byte-identically. See CONTRACT §27.
+	ribbon: 12
 };
 
 /**
@@ -694,6 +705,26 @@ export interface FieldRenderState {
 	duelDustDim: number;
 	/** 0 = every knot lit · 1 = non-focus knots fully receded to neutral. Default 0. */
 	strandRecede: number;
+
+	/* ---- ribbon + player teleporter (§27 capability — the Ch 10 finale) --------
+	 * The `ribbon` layout (code 12) is a PURE FUNCTION of the point index, so it needs
+	 * no per-point data — only these held scalars, read in-shader ONLY while code 12 is
+	 * in the A/B mix (so every prior scene renders byte-identically regardless of them).
+	 * `ribbonReveal` fades the chronological band in (1 = fully drawn). The Player
+	 * Teleporter is a cross-cutting SUBSET over the per-point aRunOut spare bit2 (baked
+	 * via field.setTeleport — the setSparks precedent): `teleportProgress` 0→1 lifts the
+	 * selected player-season's deliveries out (position, in core), `teleportLift` is the
+	 * world-units lift, and `teleportOthersDim` damps every OTHER ball so the picked
+	 * player reads alone. All inert by default (ribbonReveal 1 is a no-op off code 12;
+	 * teleportProgress 0 gates the subset off), so R0..R9 are byte-identical. */
+	/** 0 = ribbon hidden · 1 = the chronological band fully drawn. Default 1 (inert off code 12). */
+	ribbonReveal: number;
+	/** 0 = teleporter inactive · >0 = the selected player-season's deliveries lift + pop. Default 0. */
+	teleportProgress: number;
+	/** world-units vertical lift for teleported points at teleportProgress 1. Default 0. */
+	teleportLift: number;
+	/** luminance × for non-teleport points while the teleporter is active (1 = no dimming). Default 1. */
+	teleportOthersDim: number;
 }
 
 export const DEFAULT_RENDER_STATE: FieldRenderState = {
@@ -764,5 +795,9 @@ export const DEFAULT_RENDER_STATE: FieldRenderState = {
 	duelReveal: 0,
 	duelDominance: 0,
 	duelDustDim: 1,
-	strandRecede: 0
+	strandRecede: 0,
+	ribbonReveal: 1,
+	teleportProgress: 0,
+	teleportLift: 0,
+	teleportOthersDim: 1
 };

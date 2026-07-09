@@ -694,6 +694,74 @@ export const FOOTNOTES = {
 			'That lines up with the belief audit in Chapter 8, where a wicket after a wicket ran about 0.93 (ch8-momentum). So the collapse is a story, not a mechanism: wickets do not summon more wickets. The technical name for a does-an-event-trigger-more-of-itself read is a Hawkes aftershock model, and here the ratio sits below one, meaning a wicket dampens the next rather than exciting it.',
 			'It is the contrarian companion to Chapter 8’s momentum beat, demoted to this footnote on purpose: the chapter’s on-screen budget is two heroes and one supporting beat, so Collapse Contagion earns a mention here, not a scene of its own.'
 		]
+	},
+
+	/* ---- Chapter 10 · The Era Machine (r6a, the finale) ---------------------
+	 * The chapter's single point: we stop narrating eras and let the data draw
+	 * its own fault lines, and the modern era turns out to be a stack of
+	 * staggered breaks. On screen every device wears a fan name; the technical
+	 * names (the PELT changepoint segmentation and its Bayesian break
+	 * posteriors, the penalty sweep, the within/between shift-share, the
+	 * league-ratio versus rank-preserving era translation and SR+, the linear
+	 * extrapolation) live here, one click deep (the glossary rule; no z-score
+	 * ever reaches the screen, and the one honest note about it lives in
+	 * ch10-teleporter to say why it was dropped). Prose numbers track
+	 * scenes/ch10.json EXACTLY (the artifact wins: the honest deltas ship
+	 * straight, sixes broke 2014 then 2018 not a clean 2018, about two-thirds
+	 * turnover not three-quarters, the naive ceiling about 224 not 228, "how
+	 * far above his own era" as a percent-above-par gap because the blueprint
+	 * z-scores were not reproducible, and the WPL six-hitting owned as off the
+	 * clock). */
+	'ch10-seismo': {
+		title: 'How the machine finds where the game broke',
+		paragraphs: [
+			'The ribbon holds all 316,199 balls in the order they were bowled, so left to right is time. The machine scans each season-by-season series for the years the level genuinely steps, on the date-ordered record of 1,243 men’s matches and 295,557 legal deliveries, and marks a crack where a step is real. How sure it is runs from about 0.15 to 0.44, so most cracks are drawn faint because the record is only nineteen seasons long.',
+			'The breaks are staggered. Sixes broke at 2014, then again at 2018, 2022 and 2024; runs an over at 2023, then 2024; wides at 2022, then 2024; dot balls at 2015 to 2016, then 2023; boundaries at 2023, then 2024. So the six-rate broke about five years before scoring did, and 2018 to 2023 is exactly five. The strongest single fault in the whole system is the wides break at 2022, about 0.44, and the strongest scoring break is 2023, about 0.37.',
+			'The strictness dial is a penalty sweep. At its loosest it splits the history into six eras, at 2009, 2010, 2014, 2023 and 2024; tighten it and that falls to four eras, then three, then two split at 2023, then one. Six loosen to two exactly. The dial never re-fits anything in your browser; each stop reads a precomputed break set out of the chapter’s data.',
+			'The six-rate ladder ran 0.048, 0.038, 0.042, 0.039, 0.042, 0.038, 0.051, 0.052, 0.047, 0.052, 0.063, 0.056, 0.052, 0.049, 0.062, 0.065, 0.077, 0.078, 0.086 across 2008 to 2026, and runs an over ran 8.31, 7.48, 8.13, 7.73, 7.83, 7.68, 8.20, 8.37, 8.31, 8.41, 8.65, 8.41, 8.29, 8.05, 8.54, 8.99, 9.56, 9.63, 9.88.',
+			'The teaser called the six-hitting break a clean 2018; the record shows the dominant six break is 2014, with 2018 a real second station, so the copy ships 2014, then 2018. These are the years the data itself marks, drawn at their real strength, never dressed up as certainties. The changepoint, the segmentation penalty and the Bayesian break posterior are the technical names.'
+		]
+	},
+	'ch10-bridge': {
+		title: 'How the 2023-to-2024 jump splits',
+		paragraphs: [
+			'The league’s batting strike rate rose from 141.72 in 2023 to 150.59 in 2024, a jump of 8.87 runs per 100 balls. Of the batters who faced at least 60 balls in both seasons, 56 of them, the average change held against themselves was about +2.7 and the pooled change about +2.9, so the same players got a little faster but not much.',
+			'Of the +8.87, about +2.93 came from the same players improving and about +5.94 from turnover, so within-player is about a third (33%) and turnover about two-thirds (67%). The turnover splits into new faces arriving worth about +32.4, departures worth about -17.5, and shifts in who faced how many balls worth about -9.0, which nets to about +5.94.',
+			'The within-player figure is a survivors-only statistic, the batters present in both seasons, a favourably-selected cohort, so a gain of only about +2.9 is if anything an upper bound; correcting for that only strengthens the two-thirds-turnover conclusion. On a stricter qualified set the turnover share rises toward three-quarters, so the copy ships about two-thirds to three-quarters.',
+			'The teaser said about +2.3 within and roughly three-quarters turnover; the recount gives about +2.9 within and about two-thirds turnover, so the copy ships two-thirds. The rule that opened the door was graded in Chapter 7, the new faces are the turnover measured here, and the decade of climbing skill is the ignition curve of Chapter 1; all three did some of the work, and none of them caused it alone. The within-player and between-player shift-share is the technical name.'
+		]
+	},
+	'ch10-teleporter': {
+		title: 'The Teleporter, and why the ghost overshoots',
+		paragraphs: [
+			'V Sehwag in 2008 faced 220 balls for 406 runs, a strike rate of 184.55, when the league scored 128.98 per 100 balls. The naive way scales that up by the ratio of league strike rates, giving about 215.5 in 2024 and about 223.7 in 2026, a modern ceiling near 224. The honest way keeps him at the rank he actually reached, about the 98th place in 100 of 2008, giving about 200.1 in 2024 and about 213.6 in 2026.',
+			'So the naive figure overshoots the honest one by about 15 in 2024 and about 10 in 2026, because you cannot scale an outlier up. The honest re-quote’s uncertainty band is narrower than that gap: its half-width of 5.46 is strictly less than the 10.08-point 2026 gap, so the ghost sits clear above the band and the overshoot is real. The teaser said the naive figure was about 228; the record’s league strike rates never rise high enough for 228, so the naive ceiling ships as about 224.',
+			'Measured against the going rate of its own season, CH Gayle in 2011 scored 183.13 and comes out 56.7% above his year’s par, while J Fraser-McGurk in 2024 scored 234.04 and comes out 35.4% above his, so Gayle edges him despite a raw strike rate about 51 points lower.',
+			'The blueprint quoted era-relative z-scores of about +5.5 and +5.2 for those two innings; those numbers were not reproducible on the record, they recount to about +3.5 and +3.3 and even flip on some populations, so the chapter drops the z-score entirely and shows a plain percent-above-par gap instead. The league-ratio and rank-preserving era translations, and the strike-rate-plus behind “how far above his own era”, are the technical names.'
+		]
+	},
+	'ch10-convergence': {
+		title: 'The convergence clock, and its wide bands',
+		paragraphs: [
+			'Runs an over ran 8.99, 9.56, 9.63, 9.88 across 2023 to 2026. Carrying the 2016-to-2026 climb forward, the men’s line crosses ten an over around 2028.8, with a band of roughly 2027 to 2031 drawn as a bracket on the time axis; 2026 is already at 9.88, just short of ten.',
+			'The women’s league has four seasons of run rate, 8.08, 7.86, 8.37, 8.54, a climb of about +0.19 a season, so its run rate is rising, though on four seasons the date carries a wide band. Measured against a fixed target it reaches the men’s-2026 level of about 9.88 around 2033 on the central line.',
+			'Its six rate ran 0.196, 0.201, 0.229, 0.219, a slope indistinguishable from flat, so on four seasons the six-hitting is off the clock and reaching the men’s 2026 level is not honestly foreseeable; it is drawn with its target pushed off-screen on purpose. The teaser said the run rate converges about a decade before the six-hitting; the recount holds the direction, run rate first, but the magnitudes are far larger and far less certain, so the copy ships run rate closes first and six-hitting barely foreseeable on four seasons.',
+			'These are the trend carried forward, not a prophecy, and the bands are drawn wide on purpose. The WPL is never behind; it is a young league whose future you can already clock. The linear extrapolation and its slope are the technical names.'
+		]
+	},
+	'ch10-microera': {
+		title: 'Why the 2021 break is mostly geography',
+		paragraphs: [
+			'When the machine scans the per-match series strictly it lands a break at 2021, which looks like a mid-pandemic rule shift. It is mostly geography. The 2021 men’s season was split across two venues: the India leg scored at 8.41 an over (9,499 runs off 6,777 balls) and the UAE leg, on slower pitches in a bio-bubble, at 7.71 (9,123 runs off 7,099 balls).',
+			'So a chunk of the 2021 break in the wide rate and the run rate is not a change in how the game was played but a change in where it was played that season. We keep this off the main flow because the hero story is the genuine staggered breaks, not a venue artefact. A strict per-match changepoint at 2021 attributable to leg composition is the technical detail.'
+		]
+	},
+	'ch10-payoff': {
+		title: 'How your adapters card is built',
+		paragraphs: [
+			'Your riser is the franchise batter whose own strike rate rose most across the 2023 fault, shown with an adaptation badge. The teleported legend is the franchise’s signature player-season re-quoted the honest way to 2026, the rank-preserving figure and never the naive ghost. The climb position is the team’s current run rate against the league’s, stated as a position, not a ranking.',
+			'A young franchise or a thin season carries a wide re-quote, which is a fact about its record, never a deficit. The women’s-league card is the forward-clock beat made personal, never a deficit card and never behind.'
+		]
 	}
 } as const satisfies Record<string, FootnoteEntry>;
 

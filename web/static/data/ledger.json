@@ -67,8 +67,8 @@
    "bytes_gz": 20686
   },
   "meta.json": {
-   "bytes_raw": 1586,
-   "bytes_gz": 519
+   "bytes_raw": 1642,
+   "bytes_gz": 531
   },
   "pairing.u16": {
    "bytes_raw": 632398,
@@ -85,6 +85,10 @@
   "scenes/ch1.json": {
    "bytes_raw": 37434,
    "bytes_gz": 9005
+  },
+  "scenes/ch10.json": {
+   "bytes_raw": 40901,
+   "bytes_gz": 10930
   },
   "scenes/ch2.json": {
    "bytes_raw": 34057,
@@ -162,7 +166,7 @@
     "scenes/coldopen.json"
    ],
    "budget_gz": 3000000,
-   "actual_gz": 406055,
+   "actual_gz": 406067,
    "pass": true
   },
   {
@@ -274,6 +278,15 @@
    "pass": true
   },
   {
+   "name": "chapter ch10 (Era Machine scene doc, buffer-free)",
+   "files": [
+    "scenes/ch10.json"
+   ],
+   "budget_gz": 2000000,
+   "actual_gz": 10930,
+   "pass": true
+  },
+  {
    "name": "engines (ch2 par/entry + R3b parallel-track re288/wp_grid)",
    "files": [
     "engines/entry.json",
@@ -310,6 +323,7 @@
     "payoff/ch1.json",
     "restate.u8",
     "scenes/ch1.json",
+    "scenes/ch10.json",
     "scenes/ch2.json",
     "scenes/ch3.json",
     "scenes/ch4.json",
@@ -327,7 +341,7 @@
     "wpa.u8"
    ],
    "budget_gz": 25000000,
-   "actual_gz": 2065623,
+   "actual_gz": 2076565,
    "pass": true
   }
  ],

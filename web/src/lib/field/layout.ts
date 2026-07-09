@@ -1262,3 +1262,60 @@ export function duelWebPoint(
 ): { x: number; y: number } {
 	return { x: nx * layout.halfExtent, y: ny * layout.halfExtent };
 }
+
+/* ---------------------------------------------------------------------------
+ * The ribbon (Ch 10 controlling morph, CONTRACT §27 — the finale). Every ball
+ * condenses onto one long CHRONOLOGICAL band: x = the ball's own point index
+ * 0..N-1 mapped left→right (essentially match order 2008→2026), y = a thin
+ * centred band + a small hashed jitter so the dense stream reads as texture.
+ * The whole layout is a PURE FUNCTION of the point index (position.x) — NO new
+ * per-point buffer / attribute / data texture (the field holds at 14). The
+ * fault-line cracks are SCENE-drawn SVG, anchored to the band via the world x
+ * `getRibbonLayout().pointToX(i)` returns (which mirrors the shader's exact
+ * `(i/N * 2 - 1) * halfW * RIBBON_X_FRAC`).
+ *
+ * This function owns only the band BOX + the band centre/half-thickness the
+ * shader reads as uRibbonBandY / uRibbonBandHalf. Unlike the fixed-aspect
+ * layouts the ribbon spans the FULL frame width (like the free field), so a
+ * wider viewport just stretches the time axis; the band stays a thin letterbox.
+ * ------------------------------------------------------------------------- */
+
+/** Fraction of the frame half-width the ribbon spans (matches the shader's uHalfW × this). */
+export const RIBBON_X_FRAC = 0.95;
+/** Ribbon band half-thickness as a fraction of the frame half-height (a thin centred band). */
+export const RIBBON_BAND_HALF_FRAC = 0.08;
+
+export interface RibbonLayout {
+	/** world x at the earliest ball (point index 0) */
+	left: number;
+	/** world width spanning point index 0 → N-1 */
+	width: number;
+	/** world y at the band bottom edge */
+	bottom: number;
+	/** world height of the band */
+	height: number;
+	/** world y of the band centre (mirrors uRibbonBandY) */
+	bandY: number;
+	/** world half-thickness of the band (mirrors uRibbonBandHalf) */
+	bandHalf: number;
+}
+
+/**
+ * The centred chronological band box for the current frame — full-width (± the
+ * frame half-width × RIBBON_X_FRAC, matching the shader) and a thin letterboxed
+ * band centred at the origin. Rebuilt on resize.
+ */
+export function computeRibbon(halfW: number, halfH: number): RibbonLayout {
+	const left = -RIBBON_X_FRAC * halfW;
+	const width = 2 * RIBBON_X_FRAC * halfW;
+	const bandY = 0;
+	const bandHalf = RIBBON_BAND_HALF_FRAC * halfH;
+	return {
+		left,
+		width,
+		bottom: bandY - bandHalf,
+		height: 2 * bandHalf,
+		bandY,
+		bandHalf
+	};
+}

@@ -116,6 +116,10 @@ interface ResolvedSceneState {
 	duelDominance: number;
 	duelDustDim: number;
 	strandRecede: number;
+	ribbonReveal: number;
+	teleportProgress: number;
+	teleportLift: number;
+	teleportOthersDim: number;
 	teamIgnite: boolean;
 	wallHeatMix: number;
 }
@@ -143,6 +147,10 @@ export function withDefaults(s: SceneFieldState): ResolvedSceneState {
 		duelDominance: s.duelDominance ?? 0,
 		duelDustDim: s.duelDustDim ?? 1,
 		strandRecede: s.strandRecede ?? 0,
+		ribbonReveal: s.ribbonReveal ?? 1,
+		teleportProgress: s.teleportProgress ?? 0,
+		teleportLift: s.teleportLift ?? 0,
+		teleportOthersDim: s.teleportOthersDim ?? 1,
 		teamIgnite: s.teamIgnite ?? true,
 		wallHeatMix: s.wallHeatMix ?? 0
 	};
@@ -402,7 +410,16 @@ export function resolveRenderState(
 		duelReveal: lerp(f.duelReveal, g.duelReveal, clampedT),
 		duelDominance: lerp(f.duelDominance, g.duelDominance, clampedT),
 		duelDustDim: lerp(f.duelDustDim, g.duelDustDim, clampedT),
-		strandRecede: lerp(f.strandRecede, g.strandRecede, clampedT)
+		strandRecede: lerp(f.strandRecede, g.strandRecede, clampedT),
+		// ribbon + player teleporter (§27): the reveal + the three teleporter scalars lerp
+		// like any scalar from their inert defaults (ribbonReveal 1, teleportProgress 0,
+		// teleportLift 0, teleportOthersDim 1). Read in-shader only while the ribbon layout
+		// is in the mix / the teleporter is engaged, so a non-ribbon scene equals
+		// DEFAULT_RENDER_STATE (byte-identical).
+		ribbonReveal: lerp(f.ribbonReveal, g.ribbonReveal, clampedT),
+		teleportProgress: lerp(f.teleportProgress, g.teleportProgress, clampedT),
+		teleportLift: lerp(f.teleportLift, g.teleportLift, clampedT),
+		teleportOthersDim: lerp(f.teleportOthersDim, g.teleportOthersDim, clampedT)
 	};
 }
 

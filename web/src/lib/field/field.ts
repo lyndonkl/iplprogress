@@ -28,6 +28,7 @@ import {
 	flowRateToY,
 	computeMatchDots,
 	computeDuelWeb,
+	computeRibbon,
 	computeReviewChips,
 	CONSTELLATION_PHASES,
 	basePointPx,
@@ -52,6 +53,7 @@ import {
 	type FlowLayout,
 	type MatchDotsLayout,
 	type DuelWebLayout,
+	type RibbonLayout,
 	type ReviewChipsLayout
 } from './layout';
 import { makeVertexShader, fragmentShader, makePickVertexShader, pickFragmentShader } from './shaders';
@@ -365,6 +367,23 @@ export interface FieldHandle {
 	 */
 	getDuelWebLayout(): DuelWebLayoutInfo | null;
 	/**
+	 * Set the Player Teleporter subset for the Ch 10 finale (§27). Pass the point indices
+	 * of the selected player-season's deliveries (the scene derives them from `scenes/
+	 * ch10.json` `teleporter`); the field bakes them into the per-point `aRunOut` GL flag's
+	 * spare bit2 ONCE (bit0 run-out / bit1 spark are cleared to preserve independence, and
+	 * Ch 2 / Ch 7 never co-render with Ch 10 — no per-frame cost, demand mode preserved) and
+	 * renders. Pass `null` to clear (bit2 off everywhere). The setSparks precedent.
+	 */
+	setTeleport(indices: Iterable<number> | null): void;
+	/**
+	 * current ribbon geometry (§27 — Ch 10's finale controlling morph): the centred
+	 * chronological band box + `pointToX(i)`, the exact world x the shader places point
+	 * index `i` at. A scene anchors the fault-line crack SVG lines (2014 / 2018 / 2022 /
+	 * 2023 / 2024) to `pointToX(breakIndex)` via `field.projectToCss`, so they can never
+	 * drift from the GL band. null before the first resize.
+	 */
+	getRibbonLayout(): RibbonLayoutInfo | null;
+	/**
 	 * Set the review-chip subset for the Ch 8 review beat (§25). Pass `{ indices, team,
 	 * outcome }` — `indices` the 988 review-delivery point indices, `team` each chip's
 	 * franchise LANE index (0-based; the scene's own franchise→lane mapping), `outcome`
@@ -536,6 +555,21 @@ export interface MatchDotsLayoutInfo extends MatchDotsLayout {
 	toss: number[];
 	/** per-match world centroid for the LIVE `matchSplit` (length count) */
 	centres: { x: number; y: number }[];
+}
+
+/**
+ * The world-space ribbon geometry `field.getRibbonLayout()` returns (§27 — Ch 10's
+ * finale controlling morph). The `box` is the centred chronological band; `pointToX`
+ * maps a POINT INDEX to the exact world x the shader places that ball at (mirroring
+ * `(i/N × 2 − 1) × halfW × RIBBON_X_FRAC`), so a scene draws the fault-line cracks as
+ * vertical SVG lines at `pointToX(breakIndex)` (via `field.projectToCss`) that can
+ * never drift from the GL band. null before the first resize.
+ */
+export interface RibbonLayoutInfo {
+	/** the centred chronological band box (from `computeRibbon`) */
+	box: RibbonLayout;
+	/** world x for a given point index (0..nPoints), the exact shader mapping */
+	pointToX(i: number): number;
 }
 
 /**
@@ -1289,6 +1323,19 @@ export function createField(opts: FieldOptions): FieldHandle {
 		return { ...matchDotsLayout, count: cnt, split, toss, centres };
 	}
 
+	/* ---- ribbon geometry (§27 — the Ch 10 finale controlling morph) --------- */
+	// The band box + pointToX(i), the EXACT world x the shader places point index i at
+	// (invN === uInvN === 1/nPoints), so the fault-line crack SVG anchors can never drift.
+	function getRibbonLayout(): RibbonLayoutInfo | null {
+		if (!ribbonLayout) return null;
+		const box = ribbonLayout;
+		const invN = 1 / Math.max(1, n);
+		return {
+			box,
+			pointToX: (i: number) => box.left + i * invN * box.width
+		};
+	}
+
 	/* ---- duel-web graph (§26 — the Ch 9 controlling morph) ------------------ */
 	function setDuelGraph(input: DuelGraphInput): void {
 		if (disposed) return;
@@ -1744,6 +1791,16 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uDuelDominance: { value: 0 },
 		uDuelDustDim: { value: 1 },
 		uStrandRecede: { value: 0 },
+		// ribbon + player teleporter (§27) — the ribbon is a PURE FUNCTION of the point
+		// index (no data texture, no attribute); only the band geometry (set on resize) +
+		// these held scalars. All inert by default (ribbonReveal 1 is a no-op off code 12,
+		// teleportProgress 0 gates the subset off), so R0..R9 render byte-identically.
+		uRibbonBandY: { value: 0 },
+		uRibbonBandHalf: { value: 0.08 },
+		uRibbonReveal: { value: 1 },
+		uTeleportProgress: { value: 0 },
+		uTeleportLift: { value: 0 },
+		uTeleportOthersDim: { value: 1 },
 		// review chips (§25) — inactive by default (uReviewClass -1), so the review branch
 		// is a shader no-op and every prior scene renders byte-identically. The lane x's
 		// are baked by setReviews / resize; the box geometry is set on resize.
@@ -1927,6 +1984,7 @@ export function createField(opts: FieldOptions): FieldHandle {
 	let flowLayout: FlowLayout | null = null;
 	let matchDotsLayout: MatchDotsLayout | null = null;
 	let duelWebLayout: DuelWebLayout | null = null;
+	let ribbonLayout: RibbonLayout | null = null;
 	let reviewChipsLayout: ReviewChipsLayout | null = null;
 	let cssW = 1;
 	let cssH = 1;
@@ -2065,6 +2123,20 @@ export function createField(opts: FieldOptions): FieldHandle {
 		const arr = runOutAttr.array as Uint8Array;
 		for (let i = 0; i < n; i++) arr[i] &= 0xfd; // clear bit1, PRESERVE the run-out bit0
 		if (indices !== null) for (const i of indices) if (i >= 0 && i < n) arr[i] |= 2;
+		runOutAttr.needsUpdate = true;
+		invalidate();
+	}
+
+	/* ---- Player Teleporter membership (§27 — the Ch 10 finale) --------------- */
+	// Bake a CPU-supplied index set (the selected player-season's deliveries) into
+	// aRunOut's bit2 ONCE (the setSparks precedent), no per-frame cost — demand mode
+	// holds. Ch 2 (run-out bit0) and Ch 7 (spark bit1) never render with Ch 10, so bit2
+	// is independent; we clear it before setting so a re-pick replaces the subset.
+	function setTeleport(indices: Iterable<number> | null): void {
+		if (disposed) return;
+		const arr = runOutAttr.array as Uint8Array;
+		for (let i = 0; i < n; i++) arr[i] &= 0xfb; // clear bit2, PRESERVE run-out/spark bits
+		if (indices !== null) for (const i of indices) if (i >= 0 && i < n) arr[i] |= 4;
 		runOutAttr.needsUpdate = true;
 		invalidate();
 	}
@@ -2385,7 +2457,11 @@ export function createField(opts: FieldOptions): FieldHandle {
 			a.duelReveal === b.duelReveal &&
 			a.duelDominance === b.duelDominance &&
 			a.duelDustDim === b.duelDustDim &&
-			a.strandRecede === b.strandRecede
+			a.strandRecede === b.strandRecede &&
+			a.ribbonReveal === b.ribbonReveal &&
+			a.teleportProgress === b.teleportProgress &&
+			a.teleportLift === b.teleportLift &&
+			a.teleportOthersDim === b.teleportOthersDim
 		);
 	}
 
@@ -2571,6 +2647,16 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uniforms.uDuelDominance.value = s.duelDominance;
 		uniforms.uDuelDustDim.value = s.duelDustDim;
 		uniforms.uStrandRecede.value = s.strandRecede;
+
+		// ribbon + player teleporter (§27): the reveal + the three teleporter scalars
+		// (the band geometry is set on resize; the subset membership is baked by
+		// setTeleport). The ribbon scalars are read in-shader only while code 12 is in the
+		// A/B mix, and the teleporter branch is gated on uTeleportProgress > 0, so this is
+		// a no-op for every prior scene (byte-identical).
+		uniforms.uRibbonReveal.value = s.ribbonReveal;
+		uniforms.uTeleportProgress.value = s.teleportProgress;
+		uniforms.uTeleportLift.value = s.teleportLift;
+		uniforms.uTeleportOthersDim.value = s.teleportOthersDim;
 
 		// review chips (§25): bake the per-(team×outcome) stack the first time the reviews
 		// engage (cached by version), and set every scalar each apply so engage/tint/
@@ -2809,6 +2895,11 @@ export function createField(opts: FieldOptions): FieldHandle {
 		duelWebLayout = computeDuelWeb(halfW, halfH);
 		uniforms.uDuelHalfExtent.value = duelWebLayout.halfExtent;
 		uniforms.uDuelDotR.value = duelWebLayout.dotRadius;
+		// ribbon (§27): the centred chronological band → the band centre y + half-thickness
+		// (the x span is the full frame, computed in-shader from uHalfW × 0.95).
+		ribbonLayout = computeRibbon(halfW, halfH);
+		uniforms.uRibbonBandY.value = ribbonLayout.bandY;
+		uniforms.uRibbonBandHalf.value = ribbonLayout.bandHalf;
 		// review chips (§25): the chip box + per-franchise-lane x's follow the width.
 		rebuildReviewLanes();
 		uniforms.uPointScale.value = basePointPx(w, h, n) * dpr;
@@ -2958,6 +3049,8 @@ export function createField(opts: FieldOptions): FieldHandle {
 		setDuelGraph,
 		setDuelFocus,
 		getDuelWebLayout,
+		setTeleport,
+		getRibbonLayout,
 		setReviews,
 		getReviewChipsLayout,
 		dispose(): void {

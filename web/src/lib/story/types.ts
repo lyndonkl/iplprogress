@@ -32,6 +32,7 @@ export type ChapterId =
 	| 'ch7'
 	| 'ch8'
 	| 'ch9'
+	| 'ch10'
 	| 'endcard'
 	| 'bowl';
 
@@ -430,6 +431,19 @@ export interface SceneFieldState {
 	duelDominance?: number;
 	duelDustDim?: number;
 	strandRecede?: number;
+	/**
+	 * ribbon + Player Teleporter over the held `ribbon` layout (§27 — the Ch 10 finale).
+	 * `ribbonReveal` 0→1 fades the chronological band in (default 1 = fully drawn; a no-op
+	 * off the ribbon layout). The teleporter is a subset over the point set baked via
+	 * `field.setTeleport`: `teleportProgress` 0→1 lifts + pops the selected player-season's
+	 * deliveries, `teleportLift` the world-units lift, `teleportOthersDim` damps every other
+	 * ball so the picked player reads alone (defaults 0 / 0 / 1 — inert). Only meaningful
+	 * with the `ribbon` layout; drive across the hold via `dynamicState`.
+	 */
+	ribbonReveal?: number;
+	teleportProgress?: number;
+	teleportLift?: number;
+	teleportOthersDim?: number;
 	/** whether the picked team's balls stay ignited (default true — §2 standing rule) */
 	teamIgnite?: boolean;
 	/**

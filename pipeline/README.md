@@ -25,6 +25,7 @@ python3 pipeline/flatten.py \
   && python3 pipeline/ch7.py \
   && python3 pipeline/ch8.py \
   && python3 pipeline/ch9.py \
+  && python3 pipeline/ch10.py \
   && python3 pipeline/payoff_harness.py \
   && python3 pipeline/ledger.py \
   && python3 -m unittest discover -s pipeline/tests -q
@@ -105,6 +106,26 @@ indexed by point-index in-shader), **NOT a 15th vertex attribute — the field h
 14**. Three honest deltas ship straight (232 duels ran 8+ seasons not 235; loyalty ~27→~12
 not 28→15; mega trough 0.186 not 0.185). It must run **after** `flatten`/`scenes` for
 byte-determinism (it registers `scenes/ch9.json` + `pairing.u16` in `meta.json`);
+`ch10.py` (R6a, **the FINALE**) does its own single corpus pass (registry-resolved pids for
+the per-player tables, batting-team for the franchise payoff) and imports `seismo` (the
+pure-Python PELT + Bayesian changepoint machinery, byte-identical to
+`scratchpad/ch10_seismo.json`) and `par` (Engine #1, SR+ / own-era par for the Teleporter).
+It emits **`scenes/ch10.json`** and **no new buffer** (Ch 10 is buffer-free like Ch 6/Ch 7:
+the `ribbon` controlling morph is a pure `position.x` function, so the field holds at 14
+attributes, and the Teleporter subset rides the spare bit2 of the existing `aRunOut` byte):
+the league-pulse **seismograph** (per-season metric ladders + the strictness dial's precomputed
+break-index sets β0.3→6 eras … β14→1, verified 6→2, with each crack's ball-position and Bayesian
+posterior 0.15–0.44), the **fault-map** subway (metric lines, break stations, the 2023/2024/2014
+interchanges, the sixes-before-scoring gap), the **bridge-player** verdict (league SR 141.72→150.59
+= +8.87, 56 bridge batters, the within/turnover shift-share ≈1/3 vs ≈2/3, the three-suspect card),
+the **Teleporter** (Machine A Sehwag 2008 translated through time — naive ghost vs honest re-quote
+with band < gap; Machine B Gayle 2011 +56.7% vs Fraser-McGurk 2024 +35.4% percent-above-par bar-swap,
+never a z-score), the **convergence clock** (men's run rate crossing ten ≈2028.8, the WPL forward
+clock), the 2021 venue-leg micro-era, the 16 payoff variants, and the `ch10-*` footnotes. Six honest
+deltas ship straight (sixes broke 2014 then 2018 not a clean 2018; ≈two-thirds turnover not three-
+quarters; naive ceiling ≈224 not 228; "how far above his own era" a percent gap never a z; WPL six-
+hitting off the clock). It must run **after** `flatten`/`scenes` for byte-determinism (it registers
+`scenes/ch10.json` in `meta.json`);
 `payoff_harness.py` emits `payoff/ch1.json`;
 `ledger.py` audits everything on disk against the blueprint §2 budgets. The harness and
 the ledger exit non-zero on failure. The whole build runs in seconds and is **byte-for-byte
@@ -129,6 +150,8 @@ verified by rebuilding and diffing checksums.
 | `ch7.py` | **R4b — Chapter 7 "The Twelfth Man" (the Impact Player rule as a natural experiment).** Its own corpus pass (no engine, no per-point buffer — the twin-rivers controlling morph reuses `group_ids.u16` + `attrs.u8`) in flatten's exact season-blocked point order. Emits `scenes/ch7.json`: the **natural experiment** (IPL run rate range-bound 7.5-8.7 for 2008-2022 then 8.99/9.56/9.63/9.88, vs the rule-free WPL 8.08→8.54; diff-in-diff ≈ +0.9 RPO with disclosed confounds — on screen "the control group", "diff-in-diff" one click deep), the **License Index** (at ≥4 down / overs 7-16: SR 116.8→129.9 while the dismissal rate held ~flat 4.88→4.95; top order took the licence most, +18.0% vs +11.0% for 6-8), the **event-study placebo grid** (every candidate season 2012-2025's before/after level shift + SE + t, emitted whole so the placebo cursor is a lookup; the true 2023 date clears the entire pre-rule placebo cloud, with the honest disclosure that 2024's raw magnitude edges it as the break deepens), the **Playbook Decoder** (subs at the innings break 51.8%→35.7%), the **honest null** (entry entropy flat; top-3 SR 131.5→155.3; bowlers/innings 5.79→6.12), and the **impact-sub extraction**: 556 Impact Player events across 517 distinct deliveries (WPL 0 — the control arm), the bat-vs-bowl reinforcement split (256/300), and the **spark index list** (the 517 field point indices carrying an event, the render's subset-highlight membership). 16 team-playbook payoff variants (10 IPL playbook cards + 5 WPL control-arm cards + neutral). Registers `scenes/ch7.json` in `meta.json`. |
 | `ch8.py` | **R5a — Chapter 8 "The Captain's Brain" (the belief audit, report card FFFFP).** Its own corpus pass in flatten's exact season-blocked point order (no engine, no per-point buffer). Imports `h2h` (Engine #6) for the demoted Matchup Engineering footnote lead ONLY. Emits `scenes/ch8.json`: the **match-dots** controlling-morph table (1,331 match centroids `[x, y, toss_class, result]` + `match_bounds`, the 1,331 monotone block-start point indices the field binary-searches in-shader — NO per-point attribute, the field holds at 14), the **988-chip review subset** (`indices`/`team`/`outcome`, reusing `aDismissal`/`aTeam`/`aRiverPos`), **Belief 1 toss** FAIL (field-first 42.9→77.1 while the chase never paid better 54.3/59.6/52.8; the two crossing lines + crossing point; toss-to-win ~50% every era), **Belief 2 reviews** FAIL (988 reviews 29.6% upheld; the honest delta — the success rate DEGRADED 32.8→28.1, a free fall to 16.9 by 2026, at 1.26→1.87/match), **Belief 3 spells** FAIL (one-over share 54.7→64.1, WPL 75.3; the honest delta — the cold-return tax GREW +0.16→+0.30, strict +0.18→+0.41; near-median example strips), **Belief 4 momentum** FAIL-with-a-residual (the wicket myth collapses 0.93 anti; hitting is mostly good batters batting with a FLAT ~1.07 real sliver; the raw edge 1.21→1.16 that fades is kept off the sliver claim; all shuffle nulls precomputed, fixed seed), **Belief 5 required-rate** PASS (chase powerplay 7.62→9.19 now above the middle overs, ahead-at-halfway 31.7→37.5, with the honest caveat that chasing still wins ~53%), the **WPL transmission** (a two-season adoption curve 54.5→~100, reviews 30.5 vs 29.6, out-fragments at 75.3; analytics-native, never "behind"), the **16 payoff variants** (10 IPL "your captains' report card" incl. RCB 96%/38.7% and CSK 13%/Chepauk and DC last 19.4% + 5 WPL bespoke transmission cards + neutral), and the footnote layer (`ch8-matchdots`/`toss`/`review`/`spell`/`momentum`/`required`/`wpl`/`payoff`/`matchup`/`dew`). Byte-deterministic. Registers `scenes/ch8.json` in `meta.json`. |
 | `ch9.py` | **R5b — Chapter 9 "The Living League" (institutions churn, the human fabric persists).** Its own single corpus pass in flatten's exact season-blocked point order; imports `h2h` (Engine #6) for person resolution + striker-dismissal + empirical-Bayes dominance (mu 1.3322, k 51.2). Reproduces the validated **duel-web force layout** (277 players as nodes, 1,691 ≥30-ball duels as edges; ForceAtlas2-style, degree-scaled repulsion kr=0.02, linear attraction log1p(balls)/log1p(30), gravity kg=0.30, 550 iters, **seed 42**, per connected component then packed — IPL giant centred, disjoint WPL web in a corner; the two leagues share no players so they are never normalized together — byte-identical to `scratchpad/ch9_layout.json`). Emits `scenes/ch9.json`: `duel_web` (`nodes[277]` {id,name,x,y,deg,era,league} + `duels[1691]` {id,a,b,bat,bowl,balls,runs,dis,seasons,span,dom,color,px,py} sorted by balls-desc so duel_id is stable + a `meta` block with the balls split 79,378 in-duel / 236,821 dust and the dominance-color constants), the `replays` (per-duel faced-ball code list + season run-length for the tap-a-duel strip), the `heartbeat` (per-season league-mean squad overlap + min-max envelope, IPL + WPL, the five mega-auction troughs), the `loyalty` spectrum (one-club share among 4th-plus-season players + the Finch 9-shirt record), the `wpl` age-matched comparison, the `collapse` figure (Collapse Contagion aftershock), the 16 `payoff` variants, and the `footnotes` (`ch9-duel`/`heartbeat`/`loyalty`/`payoff`/`collapse`). ALSO emits the one new per-point buffer **`pairing.u16`** (duel id or 0xFFFF dust per delivery, delivered as a data texture `uPairingTex`, holding the field at 14 vertex attributes). Byte-deterministic (seed 42, gzip mtime=0, sorted keys). Registers both artifacts in `meta.json`. |
+| `seismo.py` | **R6a helper** (imported by `ch10.py`, emits nothing) — the pure-Python changepoint machinery: PELT (L2/SSE cost, per-changepoint penalty β) + an offline Bayesian product-partition changepoint posterior (Normal-mean) over the IPL/WPL season-by-season metric series. `build_seismo()` reproduces `scratchpad/ch10_seismo.json` exactly: the per-season metric ladders, the penalty sweep + six-to-two strictness stops, the fault map, the Bayesian posteriors (the crack-opacity source), the ribbon crack ball-positions, the composite league-pulse strictness curve, the 2021 India-vs-UAE venue-leg split, and the under-powered WPL micro-series. Stdlib only, no random, byte-deterministic. |
+| `ch10.py` | **R6a — Chapter 10 "The Era Machine" (the FINALE: the data draws its own fault lines).** Its own single corpus pass (registry-resolved pids for the per-player tables, batting-team for the franchise payoff); imports `seismo` (the changepoint machinery) and `par` (Engine #1, SR+ / own-era par). Emits **`scenes/ch10.json`** and **no new buffer** (buffer-free like Ch 6/Ch 7: the `ribbon` morph is a pure `position.x` function so the field holds at 14 attributes, and the Teleporter subset rides the spare bit2 of the existing `aRunOut` byte): the ribbon geometry hints (316,199 balls, per-season ball starts, time-axis ticks), the **seismograph** (per-season six/run/wide/dot/boundary ladders + the strictness dial's precomputed break-index sets β0.3→6 eras / β0.6→4 / β1.0→3 / β4.0→2 / β14→1, verified 6→2, each crack carrying its ball-position and Bayesian posterior 0.15–0.44, plus the per-metric medium-strictness cracks), the **fault-map** subway (sixes 2014/2018/2022/2024, scoring 2023/2024, wides 2022/2024, dots 2015-16/2023, boundaries 2023/2024; the 2023/2024/2014 interchanges; the sixes-broke-five-years-before-scoring gap), the **bridge-player** verdict (league SR 141.72→150.59 = +8.87, 56 bridge batters ≥60 balls both seasons, within-player +2.9 vs turnover +5.9 ≈ 1/3 vs 2/3, the three-suspect card Ch7/here/Ch1), the **Teleporter** (Machine A: Sehwag 2008 SR 184.55 translated through time, naive ghost 223.7 vs honest re-quote 213.6 in 2026 with band ±5.5 < gap 10.1 asserted at build; Machine B: Gayle 2011 +56.7% vs Fraser-McGurk 2024 +35.4% percent-above-par bar-swap, raw SR gap 50.9, **never a z-score**), the **convergence clock** (men's run rate 8.99/9.56/9.63/9.88 crossing ten ≈2028.8 band 2027–2031; the WPL forward clock, run rate 8.08/7.86/8.37/8.54 slope +0.19 reaching the men's-2026 level ≈2033, six-hitting .196/.201/.229/.219 off the clock), the 2021 venue-leg micro-era (India 8.41, UAE 7.71), the 16 payoff "Your adapters" variants (10 IPL + 5 WPL forward-clock + neutral), and the footnote layer (`ch10-seismo`/`bridge`/`teleporter`/`convergence`/`microera`/`payoff`). Six honest deltas ship straight; no z-score on screen; zero em dashes. Byte-deterministic (no random, gzip mtime=0, sorted keys). Registers `scenes/ch10.json` in `meta.json`. |
 | `payoff_harness.py` | Payoff-card snapshot harness: emits + asserts the 16 Chapter-1 variants (R1a full spec). |
 | `ledger.py` | Payload ledger vs the §2 budgets; prints the table; writes `ledger.json`. |
 | `tests/` | `unittest` snapshot tests (see below). |
@@ -189,6 +212,7 @@ index, over, delivery index):
 | `scenes/ch8.json` **(R5a)** | Chapter 8 "The Captain's Brain" (the belief audit). `match_dots` (the controlling-morph table: `centroids` = 1,331 × `[x, y, toss_class, result]` — x normalized start date, y a fixed low-discrepancy spread, toss_class 0 bat-first / 1 field-first, result 1 chase-won / 0 bat-first-won / −1 undecided; `bounds` = 1,331 monotone block-start point indices in flatten point order the field binary-searches in-shader; `season`/`league` per match; `axis_ticks`), `review_subset` (the 988 IPL review deliveries: `indices`/`team`/`outcome` for `field.setReviews`, reusing `aDismissal`/`aTeam`/`aRiverPos`), `toss` (FAIL: per-era field-first 42.9→77.1 + chase-win 54.3/59.6/52.8, the two crossing lines + crossing point, the captain-sim lookup), `review` (FAIL: 988/29.6% + the DEGRADED delta 32.8→28.1 free-falling to 16.9, per-team chip lanes + leaderboard), `spell` (FAIL: one-over 54.7→64.1 WPL 75.3, the GROWN cold-return tax +0.16→+0.30 / strict +0.18→+0.41, near-median example strips), `momentum` (FAIL-with-residual: 7 claims × 4 groups with precomputed shuffle-null histograms + the batter-stratified residuals, wicket 0.93 anti + boundary residual FLAT ~1.07), `required_rate` (PASS: chase PP 7.62→9.19, ahead-at-halfway 31.7→37.5), `wpl` (the two-season adoption curve 54.5→~100, reviews 30.5, one-over 75.3), `payoff` (16 variants), `footnotes` (10 `ch8-*` strings). Engine- and buffer-free; no per-point buffer (`match_bounds` is inline, holding the field at 14 attributes). |
 | `scenes/ch9.json` **(R5b)** | Chapter 9 "The Living League". `controlling_morph` (free→duelweb: layout code 11, the pairing delivered as `uPairingTex`, four inert-default scalars duelReveal/duelDominance/duelDustDim/strandRecede), `duel_web` (`meta` {n_duels 1691, n_nodes 277, n_men 244, n_women 33, balls_split {total 316,199 · in-duel 79,378 · dust 236,821 · faced_total · faced_in_duel 77,125}, dominance_color {center_mu 1.3322, half_range}, eb {mu,sigma2,tau2,k 51.2}, force {seed 42, kr 0.02, kg 0.30}, legibility}; `nodes[277]` {id, name, x, y ∈[-1,1], deg, era, league}; `duels[1691]` sorted by balls-desc {id, a, b (node indices), bat, bowl (names), balls, runs, dis, seasons, span:[first,last], dom, color ∈[-1,1] (+1 batter-red/−1 bowler-blue), px, py (strand-midpoint cluster centre)}), `replays[1691]` (per duel {c:[ball codes 0..6 runs / 7 wicket], sb:[[season,count]] run-length} for the tap-a-duel strip; codes sum to 77,125), `heartbeat` (`ipl` {series [{season,mean,lo,hi,n}] 2009-2026 with a min-max envelope, mega_years {2011,2014,2018,2022,2025}, mega_mean **0.186**, nonmega_mean 0.461, sixth_lowest 2024=.419}, `wpl` {series 2024 .476/2025 .536/2026 .257, first_reset}), `loyalty` (series [{season,pct,one_club,veterans}], peak 2012≈26.9, trough 2022≈12.5, start/end, max_shirts {name "AJ Finch", n 9, teams, shorts}), `wpl` (n_players 33, n_duels, age_matched {wpl_duels_by_season3, ipl_duels_by_season3}, heartbeat), `collapse` (aftershock ≈0.95 — a wicket makes the next less likely), `payoff` (16 variants: 10 IPL "through the churn" {rivalry, reset, loyalist} + 5 WPL forming-fast {rivalry, duel_count} + neutral), `footnotes` (`ch9-duel`/`heartbeat`/`loyalty`/`payoff`/`collapse`). Every on-screen number reads from here; three honest deltas ship straight (232 duels 8+ seasons, loyalty ~27→~12, mega trough 0.186). |
 | `pairing.u16` **(R5b)** | The one new per-point buffer, **little-endian Uint16 per delivery** in flatten season-blocked point order (aligned with `group_ids.u16` / `attrs.u8`): value = the duel id `0..1690` the ball belongs to, or `0xFFFF` (65,535) the DUST sentinel for a ball not in any ≥30-ball duel. 316,199 entries, 632,398 B raw, ~95 KB gz; 79,378 non-dust. Delivered to the field as a DATA TEXTURE (`uPairingTex` texelFetch'd by point-index in-shader, since `position.x` already holds the point index), NOT a 15th vertex attribute, so the field holds at 14. Reproduces `scratchpad/ch9_pairing.u16` byte-for-byte. |
+| `scenes/ch10.json` **(R6a, the FINALE)** | Chapter 10 "The Era Machine". `controlling_morph` (free→ribbon: layout code 12, a pure `position.x` function, `new_buffer: null`, the Teleporter subset on the spare `aRunOut` bit2, three inert-default scalars teleportProgress/teleportLift/teleportOthersDim + two float uniforms uRibbonBandY/uRibbonBandHalf), `ribbon` (total_points 316,199, per-season `cum_deliv_start`, `time_axis_ticks`, the ball-spacing legend), `seismograph` (per-season `series` {six_rate, run_rate, rpo, wide_rate, dot_rate, boundary_rate}, `record` {1,243 matches, 295,557 legal deliveries}, `strongest_faults` {wide-2022 .44, run-2023 .37, boundary-2023 .35}, per-metric medium-strictness `cracks` {metric, year, ball_pos, ribbon_frac, posterior}, `strictness` {composite dial `stops` β0.3/0.6/1.0/4.0/14 → 6/4/3/2/1 eras, each with per-crack ball_pos + posterior, default_beta 0.6/4-era}, full `bayes_posterior`), `fault_map` (`metrics`[5] {key, label, primary, stations:[{year, ball_pos, posterior}]}, `hero_lines` [six_rate, run_rate], `interchanges` 2023/2024/2014, `order_gap` {six 2018 vs scoring 2023 = 5 yr}), `bridge` (league_sr_2023 141.72, league_sr_2024 150.59, jump +8.87, n_bridge 56, within_mean/within_pooled ≈+2.9, `shift_share` {total 8.87, within 2.93/33%, turnover 5.94/67%, components}, `verdict` three co-equal panels), `teleporter` (`machine_a` {anchor_sr 185, default Sehwag {balls 220, runs 406, sr 184.55, percentile 98.0, naive_ceiling 224, `translations`[2023-26] {naive, honest, band_lo/hi, band_halfwidth, gap, band_lt_gap}}, `integrity` band<gap at 2026}, `machine_b` {Gayle +56.7%, Fraser-McGurk +35.4%, raw_sr_gap 50.9}), `convergence` (`mens` {series, recent, fit_window 2016-26, crosses_ten {central 2028.8, band_years [2027,2031]}, today 9.88}, `wpl` {run_rate slope +0.19 reaches ≈2033, six_rate off_the_clock}), `micro_era_2021` (India 8.41, UAE 7.71), `payoff` (16 variants: 10 IPL "Your adapters" {riser, legend honest-2026, climb} + 5 WPL forward-clock + neutral), `footnotes` (`ch10-seismo`/`bridge`/`teleporter`/`convergence`/`microera`/`payoff`). Every on-screen number reads from here; no new per-point buffer (the field holds at 14). |
 | `ledger.json` | the payload audit (build report, excluded from its own budget math) |
 
 ## R1a recipe pins (metric definitions that reconcile with the catalog teasers)
@@ -550,6 +574,63 @@ toward a teaser.
   `uPairingTex`, NOT a 15th vertex attribute (the field holds at 14). Reproduces
   `scratchpad/ch9_pairing.u16` byte-for-byte.
 
+## Chapter 10 recipe pins (R6a — "The Era Machine", the FINALE)
+
+Every number reads from the emitted `scenes/ch10.json` (ARTIFACT WINS). The changepoint
+segmentations are byte-identical to the scout's validated `scratchpad/ch10_seismo.json` (via
+`seismo.build_seismo()`); the Teleporter's own-era par is Engine #1 (`par.py`) SR+. **Buffer-free
+like Ch 6 / Ch 7** — the `ribbon` controlling morph is a pure `position.x` function (no 15th
+attribute, the field holds at 14) and the Teleporter subset rides the spare bit2 of the existing
+`aRunOut` byte, so R6a adds NO new per-point buffer. Six honest deltas ship straight; **no z-score
+appears on screen** (footnotes only); zero em dashes.
+
+- **The seismograph.** The date-ordered record of **1,243 men's matches, 295,557 legal
+  deliveries**. PELT (SSE cost, per-changepoint penalty β) on the standardized per-season series
+  finds the breaks; an offline Bayesian product-partition posterior (**0.15 to 0.44**, so most
+  cracks are drawn faint) is the crack-opacity source. Staggered break years: **sixes 2014** then
+  2018/2022/2024, **runs an over 2023** (the single strongest fault, posterior .37) then 2024,
+  **wides 2022** then 2024, **dots 2015-16** then 2023, **boundaries 2023** then 2024. The
+  strictness dial is the composite league-pulse penalty sweep, verified **β0.3 = 6 eras (2009,
+  2010, 2014, 2023, 2024) → β0.6 = 4 → β1.0 = 3 → β4.0 = 2 (2023) → β14 = 1**, six loosen to two
+  exactly. Each crack's `ball_pos` is the per-season cumulative delivery index (flatten point
+  order, IPL first), so it doubles as its position on the full 316,199-ball ribbon. **Honest delta:**
+  the dominant six break is 2014 (dead-ball plateau ending), with 2018 a real second station, so
+  the copy ships "2014, then 2018," never a clean 2018.
+- **The bridge-player verdict.** League batting SR **141.72 (2023) → 150.59 (2024) = +8.87**.
+  **56** bridge batters faced ≥ 60 balls in both seasons; held against themselves they gained
+  about **+2.9** (mean +2.7 / pooled +2.9). A within/between shift-share over all batters (ball-share
+  weighted): within-player **+2.93 (33%)**, turnover **+5.94 (67%)** — so about two-thirds was new
+  faces and new roles, not the same players hitting harder. **Honest delta:** ~2/3 turnover, not
+  3/4 (the footnote ships "two-thirds to three-quarters" for the stricter qualified set). The
+  three-suspect card (the rule Ch7 / new faces here / the skill climb Ch1) is three co-equal panels,
+  never a partition.
+- **The Teleporter.** Machine A translates **Sehwag 2008 (220 balls, 406 runs, SR 184.55; league
+  SR 128.98)** through time: the naive league-ratio ghost reaches **~215.5 (2024) / ~223.7 (2026)**,
+  a ceiling near **224** (**honest delta:** not 228 — the league SRs never rise high enough); the
+  honest rank-preserving (98th-percentile) re-quote reaches **~200.1 / ~213.6**, its ±1-percentile
+  band half-width **strictly less than the naive-vs-honest gap at every dial stop** (asserted at
+  build: band ±5.5 < gap 10.1 at 2026, so the ghost sits clear above the band). Machine B ranks
+  each player against his own year's par as a bar-swap: **Gayle 2011 SR 183.13, +56.7% above par**;
+  **Fraser-McGurk 2024 SR 234.04, +35.4%**; raw SR gap **50.9**, so Gayle still edges him.
+  **Honest delta / z-drop:** the blueprint z-scores (~+5.5 / +5.2) were not reproducible (recount
+  ~+3.5 / +3.3, even flip on some populations), so "how far above his own era" ships as a **percent
+  gap (SR+)**, never a z-score.
+- **The convergence clock.** Men's run rate **8.99 / 9.56 / 9.63 / 9.88** (2023-26); the 2016-2026
+  fit crosses **ten an over ≈ 2028.8** (band **2027–2031**, drawn as a time-axis bracket), already
+  9.88 at 2026. WPL run rate **8.08 / 7.86 / 8.37 / 8.54**, slope **+0.19/yr**, reaching the
+  men's-2026 level ≈ **2033** against a fixed target (never "closing on" the moving men's line).
+  WPL six per over **.196 / .201 / .229 / .219**, slope ≈ 0 — **off the clock** (honest delta: run
+  rate closes first, six-hitting barely foreseeable on four seasons). Extrapolations with owned
+  bands, never a prophecy; the WPL is never "behind."
+- **The 2021 micro-era (footnote).** A strict per-match wide break at 2021 is partly venue-leg
+  composition: the India leg scored **8.41** an over (9,499 / 6,777), the UAE leg **7.71** (9,123
+  / 7,099).
+- **The 16 payoff variants.** `payoff_section` computes, per franchise, its 2023-fault riser (the
+  batter whose own SR rose most 2023→2024), its signature player-season re-quoted the honest way to
+  2026, and its 2026 run rate against the league's (stated as a position). **10 IPL** "Your adapters"
+  cards + **5 WPL** forward-clock cards (never a deficit card, no "behind") + **1 neutral**. Every
+  read data-bound; all 16 non-degenerate.
+
 ## Budgets (ledger) — actuals
 
 - **Cold-open critical set** (`meta.json` + `groups.json` + `group_ids.u16` +
@@ -595,8 +676,16 @@ toward a teaser.
   **118,038 B gz** (the 277-node + 1,691-duel tables, the per-duel ball-by-ball replays, the
   heartbeat + envelope, the loyalty spectrum, the WPL comparison, the 16 payoff variants, and
   the footnotes — the replays dominate the raw size and gzip hard, small integer codes).
-- Full read-through ≤ 25 MB gz → actual ~2.07 MB gz (R2a engines + the parallel track + the
-  R2b/R3a/R3b/R5a/R5b chapter buffers and scene docs).
+- **Chapter 10** (`scenes/ch10.json`, lazy-loaded at Ch 10 entry): ≤ 2 MB gz → actual **10,901 B
+  gz** (40,820 B raw). **Buffer-free** (like Ch 6 / Ch 7) — the `ribbon` morph is a pure
+  `position.x` function so the field holds at 14 attributes and the Teleporter subset rides the
+  spare `aRunOut` bit2, so R6a adds NO new per-point buffer. The whole chapter (the seismograph
+  ladders + strictness break sets + posteriors + per-metric cracks, the fault-map subway, the
+  bridge-player shift-share + three-suspect card, the Teleporter Machine A/B tables, the
+  convergence fans, the 2021 micro-era, the 16 payoff variants, and the six `ch10-*` footnotes)
+  fits in one small scene doc.
+- Full read-through ≤ 25 MB gz → actual ~2.08 MB gz (R2a engines + the parallel track + the
+  R2b/R3a/R3b/R5a/R5b/R6a chapter buffers and scene docs).
 - The `ledger.py` rows enumerate exactly the shipped filenames (no phantom
   `draw/truth.json` / `ch1/outrate.json` rows — those never shipped; the R1a scene
   data lives in `scenes/coldopen.json` + `scenes/ch1.json`).
