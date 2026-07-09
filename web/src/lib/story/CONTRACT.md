@@ -1,4 +1,4 @@
-# Story Shell Contract — R1a (+ R1b field capabilities: §11 picking · §12 filtering; + R2a Ch 2: §13 worm-space · §14 run-out cascade; + R2b Ch 3: §15 frontier plane · §16 dismissal rivers; + MF §17 mobile "read, then watch" captions; + R3a Ch 4: §18 tide skyline + waterline; + R3b-2 Ch 5: §19 worth grid + pricelens · §20 over rail · §21 WPA highlight; + R4a Ch 6: §22 constellation + phase toggle; + R4b Ch 7: §23 twin rivers `flow` + impact-sub sparks; + R5a Ch 8: §24 match-dots `matchdots` + toss lanes · §25 review chips; + R5b Ch 9: §26 duel web `duelweb`; + R6a Ch 10: §27 ribbon `ribbon`)
+# Story Shell Contract — R1a (+ R1b field capabilities: §11 picking · §12 filtering; + R2a Ch 2: §13 worm-space · §14 run-out cascade; + R2b Ch 3: §15 frontier plane · §16 dismissal rivers; + MF §17 mobile "read, then watch" captions; + R3a Ch 4: §18 tide skyline + waterline; + R3b-2 Ch 5: §19 worth grid + pricelens · §20 over rail · §21 WPA highlight; + R4a Ch 6: §22 constellation + phase toggle; + R4b Ch 7: §23 twin rivers `flow` + impact-sub sparks; + R5a Ch 8: §24 match-dots `matchdots` + toss lanes · §25 review chips; + R5b Ch 9: §26 duel web `duelweb`; + R6a Ch 10: §27 ribbon `ribbon`; + R6b: §28 sandbox filter mask)
 
 The scene system every scene builder codes against. The shell (this directory +
 `lib/field/` + `lib/state/`) is owned by the story-shell architect; **scene
@@ -2783,3 +2783,141 @@ capability.
 - The ribbon position + the Teleporter lift live in the shared `computeCore()`
   (`posRibbon`), so the pick pass tracks the band and the lifted cluster and can
   never drift from the visual field.
+
+---
+
+## 28. The sandbox filter mask — R6b's full facet grammar (extends §12)
+
+R6b hands the finished field to the reader as a **filterable instrument**: after
+the Ch 10 finale the persistent 316,199-ball field becomes **The Bowl**, and the
+reader ANDs together the **full facet grammar** — league / team (batting-side) /
+season / phase / over-range / outcome (+ a **separate wicket AND-toggle**) /
+batter / bowler / batter-vs-bowler duel, **all combinable**. This **extends §12**
+(which shipped team + season + one famous-match preset only). The catch is that
+most of the new facets have **no per-point vertex attribute** on the wire — there
+is no `over`, `batter`, or `bowler` attribute — and a **15th attribute blacks out
+the WHOLE field** on the ANGLE/Metal build machine (the §24.2 ceiling). So R6b
+adds **no attribute and no per-facet uniform**. Instead the scene computes
+**PASS/FAIL per point in JS** over the columnar typed arrays (`buildFacetMask`,
+~0.26–4.8 ms measured for a full pass over 316,199 rows) into a
+`Uint8Array(316,199)` **mask**, and delivers it as **one data texture indexed by
+point-index** (`position.x`) — the exact §26 `uPairingTex` indexing pattern, in an
+R8 format because it is a 0/1 membership bit. The shader gates `mask == 0` points
+out. Arbitrary combinable facets, **ZERO new attributes**. The field **STAYS at 14
+vertex attributes** (the §24.2 / §26.2 ceiling, held); the only new GL state is
+**one R8 data texture + two int scalars**, no per-point attribute and no uniform
+array. The R1b scalar filter path (§12) is **untouched** — the sandbox uses the
+mask **only** for the facets the scalars cannot express, while team / season /
+preset still take the R1b scalar fast path (§28.3). Add nothing yourself — the
+field owns the gate.
+
+### 28.1 Imperative — `field.setFilterMask` (the arbitrary-facet path — READ THIS)
+
+Membership is fed the way the interactive R1b `setFilter` (§12.2) is — imperatively,
+on a control change, **NOT** through `SceneFieldState`/`applyState` (the
+`setDuelGraph` / `setMatchTable` precedent) — and demand-renders once:
+
+```ts
+field.setFilterMask(mask);   // mask: Uint8Array(316,199), 1 = keep · 0 = gate out; render once
+field.setFilterMask(null);   // clear the mask (uFilterMaskOn → 0), back to the scalar-only path
+```
+
+- **One persistent R8 `DataTexture`** (`RedFormat`, `UnsignedByteType`,
+  `NearestFilter`, width `min(n, 2048)`, height `ceil(n / W)`), built **ONCE** at
+  size `n` when the field mounts. Each `setFilterMask` **copies the bytes into
+  `tex.image.data` and sets `needsUpdate = true`** — never dispose/recreate (the
+  filter changes on every toggle, so a re-upload is far cheaper than reallocating
+  the texture), then sets `uFilterMaskOn = 1`, `uFilterMaskTexW = W`, and calls
+  `invalidate()` (**one** demand render). `null` sets `uFilterMaskOn = 0`.
+- Keep a **CPU copy `appliedMask`** (bytes stored as `0` / `255`) for the
+  `pointVisible` mirror (§28.2).
+
+### 28.2 The shader branch + the CPU mirror
+
+`passesFilter` (the shared `computeCore` visibility test, §12.5) gains a mask
+branch that **ANDs with** the existing R1b team/season/range/match scalar test:
+
+```glsl
+uniform highp sampler2D uFilterMaskTex;
+uniform int uFilterMaskTexW;
+uniform int uFilterMaskOn;
+// inside passesFilter, alongside the R1b team/season/range/match test:
+if (uFilterMaskOn == 1) {
+  int pidx = int(position.x + 0.5);      // the point index — already recovered for §26 pairing
+  if (texelFetch(uFilterMaskTex, ivec2(pidx % uFilterMaskTexW, pidx / uFilterMaskTexW), 0).r < 0.5)
+    return false;                         // gated out
+}
+```
+
+- `position.x` already carries the point index `0..316198` (the same index §24's
+  match binary search and §26's pairing fetch read), so the mask rides **NO new
+  vertex attribute**; the uniforms sit next to `uPairingTex`.
+- **`filterDim` / `filterMode` compose unchanged** (§12): the mask decides
+  **membership only** (in / out); `filterMode` still decides whether a gated-out
+  point renders as a **`'dim'` ghost or is `'hide'`-den**, and `filterDim` still
+  lerps. Nothing about the dim path changes.
+- **CPU mirror — `pointVisible(i)`** gains `if (appliedMask && appliedMask[i] === 0)
+  return false;`, so `firstVisiblePoint` / `stepVisiblePoint` (the keyboard
+  inspector + the tap fallback) never land on a gated ball. **`pickAt` needs NO
+  change** — it renders the real pick shader, which already honours the mask (the
+  §11 / §12.5 "the pick pass can never drift from the reader's field" invariant).
+
+### 28.3 Scalar-vs-mask routing (demand mode — one render per change)
+
+The two filter paths are **mutually exclusive per render**, chosen by the active
+facet set so the common case pays **zero mask cost**:
+
+- **ONLY team / season / matchRange active → the R1b scalar fast path (§12).** Call
+  `field.setFilter(...)`, leave the mask `null`. This is **byte-identical to R1b** —
+  the sandbox's opening team-pick, the season facet and the famous-match preset all
+  still resolve through the scalar uniforms, with no mask built and no texture
+  touched.
+- **ANY of phase / over-range / outcome / wicket / batter / bowler active → the
+  mask path.** Build the `Uint8Array` with `buildFacetMask`, call
+  `field.setFilterMask(mask)`, and set the scalar facet uniforms **inactive**
+  (`team = season = range = -1`) so the two gates never double-count — the mask
+  alone carries the whole AND.
+
+Either way it is **one demand render per change** (set uniforms → one
+`invalidate()`), never an rAF loop. The single field-change acknowledgement cue is a
+**self-terminating one-shot**, not a running animation, and under reduced motion the
+change is a **static swap** (no tween). This routing is the §28 decision the facet
+engine's `commit()` calls.
+
+### 28.4 `SceneFieldState.filterMask` + the bowlHeld re-upload (the §12.2 caveat)
+
+`setFilterMask` is imperative, but the scroll orchestrator re-applies the held
+scene's declarative `fieldState` on **every** progress tick (the §12.2 orchestrator
+caveat). So the mask must ALSO be reachable declaratively, or a stray scroll while a
+facet is active would drop it:
+
+- **`SceneFieldState.filterMask?: Uint8Array | null`** (`story/types.ts`), threaded
+  through `fieldstate.ts` (`resolveSceneFilter` + `applyFilterUniforms`) so a
+  re-application of the Bowl's held state **re-uploads the SAME mask** rather than
+  clearing it. This is the whole reason **`bowlHeld`** exists (§12.2):
+  `syncBowlHeld` stashes the last committed mask on `bowlHeld.filterMask`, and every
+  re-apply feeds it straight back through `setFilterMask`. Because it re-uploads the
+  identical bytes, the re-apply is idempotent — the field never flickers.
+
+### 28.5 What the platform added (for the pipeline / other agents)
+
+- **The field STAYS at 14 vertex attributes.** The mask is a **data texture indexed
+  by point-index**, not an attribute — R6b adds **one R8 `DataTexture`
+  (`uFilterMaskTex`) + two int scalars (`uFilterMaskTexW`, `uFilterMaskOn`)** and
+  nothing else: no per-point attribute, no per-facet uniform, no uniform array (the
+  §24.2 / §26.2 ceiling, held).
+- **All prior releases render byte-identically.** `uFilterMaskOn` defaults `0`, so
+  the mask branch is a shader no-op for R1a…R6a. The **R1b sandbox (team / season /
+  famous-match preset) is byte-identical** — it takes the scalar fast path with the
+  mask `null` (§28.3), exactly as it did before R6b.
+- **No new buffer on the wire, no new pipeline artifact for the field.** The mask is
+  computed **client-side** from the already-shipped `columnar.json.gz` arrays on
+  each toggle (the batter/bowler dictionaries and the `over` / `outcome` / `wicket` /
+  `season` / `league` / `batting_team` columns are all already loaded); nothing about
+  the mask ships from `pipeline/`, so the byte-deterministic pipeline is unaffected.
+  (The R6b pipeline delta is the sandbox `tourFlags` list — a separate note; the
+  field capability itself is buffer-free.)
+- **The mask is a pure membership gate; it composes with every layout** because it
+  lives in `passesFilter` inside the shared `computeCore` — a masked field could
+  still morph (though R6b only ever gates the held `free` sandbox). `filterDim` /
+  `filterMode` still own the render of the gated-out points.

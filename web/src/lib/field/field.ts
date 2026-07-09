@@ -135,6 +135,20 @@ export interface FieldHandle {
 	setFilter(partial: Partial<FieldFilter>): void;
 	/** the currently applied facet filter */
 	getFilter(): Readonly<FieldFilter>;
+	/**
+	 * Drive the ARBITRARY-FACET membership mask (§28 — the full Bowl sandbox).
+	 * The scalar `setFilter` fast path only knows team/season/match/range; the
+	 * combinable grammar (phase / over-range / outcome / batter / bowler, all
+	 * AND-able) has no per-point attribute, so the scene computes PASS/FAIL per
+	 * point in JS over the columnar arrays and hands the result here as a
+	 * length-nPoints byte mask (any non-zero = keep, 0 = drop). The mask is
+	 * delivered as ONE persistent data texture indexed by point index (NO new
+	 * vertex attribute — the field holds at 14) and ANDs with `setFilter`'s
+	 * scalar test in-shader. Membership only: `filterDim` / `filterMode` still
+	 * decide how dropped points render (unchanged). Pass null to clear the mask
+	 * (back to the scalar-only fast path). Renders once (demand-mode).
+	 */
+	setFilterMask(mask: Uint8Array | null): void;
 	/** whether the match_index buffer is loaded (i.e. the matchIndex facet works) */
 	readonly hasMatchAttr: boolean;
 
@@ -1224,6 +1238,37 @@ export function createField(opts: FieldOptions): FieldHandle {
 	let pairingTex = makeMatchTex(1, 1, false);
 	let duelTex = makeMatchTex(1, 1, true);
 	let duelFocusTex = makeMatchTex(1, 1, false);
+	/* ---- facet-mask data texture (§28 — the FULL Bowl sandbox) ----------------
+	 * The arbitrary-facet grammar (phase / over-range / outcome / batter / bowler,
+	 * all AND-able) has no per-point attribute, so the sandbox computes membership
+	 * in JS over the columnar arrays and hands a length-n byte mask to setFilterMask.
+	 * It rides ONE persistent R8 data texture indexed by point index (the uPairingTex
+	 * precedent — NO new vertex attribute, the field HOLDS AT 14), sampled by
+	 * passesFilter and ANDed with the scalar team/season/range test. Starts as a 1×1
+	 * placeholder (uFilterMaskOn 0, so the sampler stays bound but is never read); the
+	 * real n-sized texture is allocated ONCE on the first setFilterMask call and reused
+	 * thereafter (bytes copied in place — cheaper than dispose/recreate, since the mask
+	 * changes on every facet toggle). */
+	const FILTER_MASK_MAXW = 2048;
+	function makeMaskTex(w: number, h: number): THREE.DataTexture {
+		const tex = new THREE.DataTexture(
+			new Uint8Array(w * h),
+			w,
+			h,
+			THREE.RedFormat,
+			THREE.UnsignedByteType
+		);
+		tex.minFilter = THREE.NearestFilter;
+		tex.magFilter = THREE.NearestFilter;
+		tex.generateMipmaps = false;
+		tex.needsUpdate = true;
+		return tex;
+	}
+	let filterMaskTex = makeMaskTex(1, 1);
+	let filterMaskTexW = 1; // real texel width once allocated at size n
+	// CPU mirror of the applied mask (bytes 0/255) so pointVisible (the keyboard
+	// inspector + tap fallback) matches the shader exactly. null = no mask active.
+	let appliedMask: Uint8Array | null = null;
 	// the fed graph, kept for getDuelWebLayout readback + setDuelFocus re-bake
 	let duelGraph: {
 		count: number;
@@ -1669,6 +1714,12 @@ export function createField(opts: FieldOptions): FieldHandle {
 		uFilterRangeHi: { value: 0 },
 		uFilterMatch: { value: -1 },
 		uFilterDim: { value: 1 },
+		// facet MASK (§28) — the arbitrary-facet membership texture (indexed by point
+		// index, the uPairingTex precedent). Inactive by default (uFilterMaskOn 0), so
+		// passesFilter never samples it and R0..R6a render byte-identically.
+		uFilterMaskTex: { value: filterMaskTex },
+		uFilterMaskTexW: { value: 1 },
+		uFilterMaskOn: { value: 0 },
 		// worm-space layout (§13) — geometry set on every resize (letterboxed box)
 		uWormLeft: { value: 0 },
 		uWormWidth: { value: 1 },
@@ -2752,8 +2803,12 @@ export function createField(opts: FieldOptions): FieldHandle {
 		FieldRenderState,
 		'filterTeam' | 'filterSeason' | 'filterMatchIndex' | 'filterRangeLo' | 'filterRangeHi' | 'filterDim'
 	> {
+		// the arbitrary-facet mask (§28) counts as an active facet too: when it is the
+		// ONLY thing filtering (all scalars null, the sandbox's common case) filterDim
+		// must still resolve to the mode's dim, or dropped points stay full-bright.
 		const anyFacet =
-			f.team != null || f.season != null || f.matchIndex != null || f.matchRange != null;
+			f.team != null || f.season != null || f.matchIndex != null || f.matchRange != null ||
+			appliedMask != null;
 		return {
 			filterTeam: f.team ?? -1,
 			filterSeason: f.season ?? -1,
@@ -2785,10 +2840,62 @@ export function createField(opts: FieldOptions): FieldHandle {
 		applyState({ ...applied, ...filterToRenderState(merged) });
 	}
 
+	// §28 — the arbitrary-facet MASK. A length-n byte mask (any non-zero = keep,
+	// 0 = drop) computed in JS from the columnar arrays, delivered as ONE persistent
+	// data texture indexed by point index (the uPairingTex clone — NO new vertex
+	// attribute). ANDs with setFilter's scalar test in-shader; membership only, so
+	// filterDim/filterMode (the existing scalar path) still decide how dropped points
+	// render. Renders once. Pass null to clear (back to the scalar fast path).
+	function setFilterMask(mask: Uint8Array | null): void {
+		if (disposed) return;
+		if (!mask) {
+			// clear → scalar-only fast path. Leave the texture bound (cheap); the
+			// shader stops sampling it the instant uFilterMaskOn flips to 0.
+			appliedMask = null;
+			uniforms.uFilterMaskOn.value = 0;
+			// the mask was (possibly) the only active facet; recompute filterDim now
+			// that it is gone so a mask-only view un-dims back to the whole field.
+			applyState({ ...applied, ...filterToRenderState(getFilter()) });
+			invalidate();
+			return;
+		}
+		// Allocate the real n-sized R8 texture on first use, then reuse it — copy the
+		// bytes in place (normalized to 0/255) so a per-toggle re-filter is one upload,
+		// not a texture rebuild. (Clearing with null keeps the texture, so re-filtering
+		// after a clear also reuses it.)
+		if (filterMaskTex.image.width * filterMaskTex.image.height < n) {
+			const w = Math.min(n, FILTER_MASK_MAXW);
+			const h = Math.ceil(n / w);
+			filterMaskTex.dispose();
+			filterMaskTex = makeMaskTex(w, h);
+			filterMaskTexW = w;
+			uniforms.uFilterMaskTex.value = filterMaskTex;
+			uniforms.uFilterMaskTexW.value = w;
+		}
+		const data8 = filterMaskTex.image.data as Uint8Array;
+		if (!appliedMask || appliedMask.length !== n) appliedMask = new Uint8Array(n);
+		for (let i = 0; i < n; i++) {
+			const v = mask[i] ? 255 : 0;
+			data8[i] = v;
+			appliedMask[i] = v;
+		}
+		filterMaskTex.needsUpdate = true;
+		uniforms.uFilterMaskOn.value = 1;
+		// the mask is now an active facet: dropped points must dim/hide per the current
+		// mode. setFilter's scalar path leaves filterDim at 1 on the sandbox's mask path
+		// (all scalars null), so without this the mask would gate pickability but never
+		// visibly thin the field.
+		applyState({ ...applied, filterDim: FILTER_DIM[filterMode] });
+		invalidate();
+	}
+
 	// CPU mirror of the shader's `passesFilter`, read from the LIVE applied
 	// uniforms so it is correct no matter which path (setFilter or a scene's
 	// declarative fieldState) set the filter.
 	function pointVisible(i: number): boolean {
+		// §28 arbitrary-facet mask (the CPU mirror of the shader's texelFetch test):
+		// checked first so the keyboard inspector + tap fallback drop the same points.
+		if (appliedMask && appliedMask[i] === 0) return false;
 		if (applied.filterTeam >= 0 && data.team[i] !== applied.filterTeam) return false;
 		if (applied.filterSeason >= 0 && groupSeason[data.groupIds[i]] !== applied.filterSeason)
 			return false;
@@ -3021,6 +3128,7 @@ export function createField(opts: FieldOptions): FieldHandle {
 		stepVisiblePoint,
 		setFilter,
 		getFilter,
+		setFilterMask,
 		hasMatchAttr,
 		stats,
 		data,
@@ -3071,6 +3179,7 @@ export function createField(opts: FieldOptions): FieldHandle {
 			pairingTex.dispose();
 			duelTex.dispose();
 			duelFocusTex.dispose();
+			filterMaskTex.dispose();
 			renderer.dispose();
 			for (const L of labels) L.el.remove();
 		}

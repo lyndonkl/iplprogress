@@ -70,6 +70,21 @@ TEASER_RR_Y1_4 = {"ipl": [8.31, 7.48, 8.13, 7.73], "wpl": [8.08, 7.86, 8.37, 8.5
 EXPECTED_PLAYERS = 938  # faced or bowled at least one ball
 EXPECTED_N_POINTS = 316_199
 
+# R6b tour-flag rail (scenes/sandbox.json tourFlags). Rail order + the §12/§13
+# verified counts; every count is re-derived by an independent recount below.
+TOURFLAG_IDS = [
+    "final-2019", "bumrah-rahul", "kohli-2016", "wpl-all-sixes",
+    "two-hundred-club", "wickets-2022", "death-carnage-2023",
+    "powerplay-six-explosion", "death-dot-storm", "shafali-wpl",
+]
+TOURFLAG_COUNTS = {
+    "final-2019": 247, "bumrah-rahul": 123, "kohli-2016": 655,
+    "wpl-all-sixes": 705, "two-hundred-club": 28_704, "wickets-2022": 912,
+    "death-carnage-2023": 4_470, "powerplay-six-explosion": 3_920,
+    "death-dot-storm": 19_414, "shafali-wpl": 778,
+}
+TOURFLAG_200CLUB_MATCHES = 228  # first-innings totals >= 200 (the computed set)
+
 BANDS = {  # own banding, independent of scenes.py
     ("ipl", 2008): "ipl 2008-2010", ("ipl", 2009): "ipl 2008-2010", ("ipl", 2010): "ipl 2008-2010",
     ("ipl", 2011): "ipl 2011-2015", ("ipl", 2012): "ipl 2011-2015", ("ipl", 2013): "ipl 2011-2015",
@@ -283,6 +298,81 @@ def defier_recount_ipl_recent():
     return stats
 
 
+def tourflag_recount():
+    """Independent recount of the ten tour flags (own file order, own delivery
+    predicates written on raw runs, own 200-club computation and own identity
+    resolution of the 2019 final) — a different implementation from scenes.py's
+    resolve_tour_flags, so it verifies the emitted counts rather than echoing
+    them. Returns (counts, club_matches, final_index)."""
+    entries = []
+    for league, dirname in (("ipl", "ipl_json"), ("wpl", "wpl_json")):
+        for path in (canon.DATA_ROOT / dirname).glob("*.json"):
+            with open(path) as fh:
+                date0 = str(json.load(fh)["info"]["dates"][0])
+            entries.append((date0, int(path.stem), league, path))
+    entries.sort(key=lambda e: (int(e[0][:4]), e[2] != "ipl", e[0], e[1]))
+
+    counts = {k: 0 for k in TOURFLAG_COUNTS}
+    first_total = {}  # match_index -> first-innings total
+    first_balls = {}  # match_index -> first-innings ball count
+    final_index = None
+
+    for mi, (date0, _mid, league, path) in enumerate(entries):
+        with open(path) as fh:
+            match = json.load(fh)
+        info = match["info"]
+        season = int(date0[:4])
+        # Resolve the 2019 IPL final by identity (independent of resolve_preset).
+        teams = {RENAMES.get(t, t) for t in info["teams"]}
+        outcome = info.get("outcome", {})
+        if (
+            league == "ipl" and season == 2019
+            and info.get("event", {}).get("stage") == "Final"
+            and teams == {"Mumbai Indians", "Chennai Super Kings"}
+            and outcome.get("winner") == "Mumbai Indians"
+            and outcome.get("by", {}).get("runs") == 1
+        ):
+            final_index = mi
+
+        inn_no = 0
+        for innings in match.get("innings", []):
+            if innings.get("super_over"):
+                continue
+            inn_no += 1
+            for over in innings["overs"]:
+                ov = over["over"]
+                for dl in over["deliveries"]:
+                    rb = dl["runs"]["batter"]
+                    rt = dl["runs"]["total"]
+                    wk = 1 if dl.get("wickets") else 0
+                    bat, bowl = dl["batter"], dl["bowler"]
+                    if mi == final_index:
+                        counts["final-2019"] += 1
+                    if bowl == "JJ Bumrah" and bat == "KL Rahul":
+                        counts["bumrah-rahul"] += 1
+                    if bat == "V Kohli" and season == 2016:
+                        counts["kohli-2016"] += 1
+                    if league == "wpl" and rb == 6:
+                        counts["wpl-all-sixes"] += 1
+                    if league == "ipl" and season == 2022 and wk == 1:
+                        counts["wickets-2022"] += 1
+                    if ov >= 15 and season >= 2023 and rb in (4, 6):
+                        counts["death-carnage-2023"] += 1
+                    if ov <= 5 and rb == 6:
+                        counts["powerplay-six-explosion"] += 1
+                    if ov >= 15 and rb == 0 and rt == 0:
+                        counts["death-dot-storm"] += 1
+                    if bat == "Shafali Verma" and league == "wpl":
+                        counts["shafali-wpl"] += 1
+                    if inn_no == 1:
+                        first_total[mi] = first_total.get(mi, 0) + rt
+                        first_balls[mi] = first_balls.get(mi, 0) + 1
+
+    club = sorted(mi for mi, t in first_total.items() if t >= 200)
+    counts["two-hundred-club"] = sum(first_balls[mi] for mi in club)
+    return counts, club, final_index
+
+
 def setUpModule():
     global ART, REF
     out = canon.OUT_ROOT
@@ -300,9 +390,11 @@ def setUpModule():
         "groups": json.loads((out / "groups.json").read_text()),
         "coldopen": json.loads((out / "scenes" / "coldopen.json").read_text()),
         "ch1": json.loads((out / "scenes" / "ch1.json").read_text()),
+        "sandbox": json.loads((out / "scenes" / "sandbox.json").read_text()),
         "payoff": json.loads((out / "payoff" / "ch1.json").read_text()),
     }
     REF = independent_recount()
+    REF["tourflags"] = tourflag_recount()  # (counts, club_matches, final_index)
 
 
 def band_art(section, key):
@@ -761,6 +853,107 @@ class TestPayoffCh1FullSpec(unittest.TestCase):
             self.assertEqual(first_band["era"], "2008-2010")
             self.assertEqual(first_band["balls_1_10"], 0, team)
             self.assertIsNone(first_band["sr_1_10"], team)
+
+
+class TestSandboxTourFlags(unittest.TestCase):
+    """R6b: scenes/sandbox.json ships a validated ten-flag guided-tour rail
+    (§4/§12/§13). Every flag resolves to >= 1 ball from real data, the counts
+    reconcile an independent recount AND the verified digest, batter/bowler are
+    emitted by name, and the scope no longer defers the facets to R6/R7."""
+
+    def flags(self):
+        return ART["sandbox"]["tourFlags"]
+
+    def by_id(self):
+        return {f["id"]: f for f in self.flags()}
+
+    def test_rail_shape_and_order(self):
+        flags = self.flags()
+        self.assertEqual([f["id"] for f in flags], TOURFLAG_IDS)  # rail order
+        self.assertEqual(len(flags), 10)
+        self.assertEqual(len({f["id"] for f in flags}), 10)
+        for f in flags:
+            self.assertEqual(set(f) & {"id", "label", "blurb", "facets", "count"},
+                             {"id", "label", "blurb", "facets", "count"}, f["id"])
+            self.assertTrue(isinstance(f["label"], str) and f["label"].strip(), f["id"])
+            self.assertTrue(isinstance(f["blurb"], str) and f["blurb"].strip(), f["id"])
+            self.assertIsInstance(f["facets"], dict)
+            # Invariant 9: a flag never points at nothing.
+            self.assertIsInstance(f["count"], int)
+            self.assertGreaterEqual(f["count"], 1, f["id"])
+            # Voice invariant 11: zero em dashes in any reader-facing string.
+            self.assertNotIn("—", f["label"], f["id"])
+            self.assertNotIn("—", f["blurb"], f["id"])
+
+    def test_counts_match_recount_and_digest(self):
+        counts, club, final_index = REF["tourflags"]
+        by_id = self.by_id()
+        for fid, expected in TOURFLAG_COUNTS.items():
+            emitted = by_id[fid]["count"]
+            self.assertEqual(emitted, expected, f"{fid}: emitted vs digest")
+            self.assertEqual(emitted, counts[fid], f"{fid}: emitted vs recount")
+        self.assertEqual(len(club), TOURFLAG_200CLUB_MATCHES)
+
+    def test_match_preset_flag_carries_match_index(self):
+        _counts, _club, final_index = REF["tourflags"]
+        final = self.by_id()["final-2019"]
+        self.assertIn("match_index", final)
+        # The emitted index resolves the 2019 MI-CSK final by identity and
+        # equals the standalone preset's index (one source of truth).
+        self.assertEqual(final["match_index"], final_index)
+        self.assertEqual(
+            final["match_index"], ART["sandbox"]["preset"]["match_index"]
+        )
+        self.assertEqual(final["facets"].get("mode"), "hide")  # match reads cleaner hidden
+        # No other flag carries a match_index (they are facet/computed masks).
+        for f in self.flags():
+            if f["id"] != "final-2019":
+                self.assertNotIn("match_index", f, f["id"])
+
+    def test_player_flags_emit_names_not_indices(self):
+        by_id = self.by_id()
+        self.assertEqual(by_id["bumrah-rahul"]["facets"]["bowler"], "JJ Bumrah")
+        self.assertEqual(by_id["bumrah-rahul"]["facets"]["batter"], "KL Rahul")
+        self.assertEqual(by_id["kohli-2016"]["facets"]["batter"], "V Kohli")
+        self.assertEqual(by_id["shafali-wpl"]["facets"]["batter"], "Shafali Verma")
+        # Names, not dict indices, so the client resolves against col.dicts.
+        for fid in ("bumrah-rahul", "kohli-2016", "shafali-wpl"):
+            for k in ("batter", "bowler"):
+                v = by_id[fid]["facets"].get(k)
+                if v is not None:
+                    self.assertIsInstance(v, str, (fid, k))
+
+    def test_two_hundred_club_matchset(self):
+        _counts, club, _final = REF["tourflags"]
+        club_flag = self.by_id()["two-hundred-club"]
+        ms = club_flag["facets"]["matchSet"]
+        self.assertEqual(ms, sorted(ms))  # deterministic, sorted
+        self.assertEqual(len(ms), TOURFLAG_200CLUB_MATCHES)
+        self.assertEqual(ms, club)  # matches the independent 200-club set
+        self.assertEqual(club_flag["facets"]["innings"], 1)
+        # Every index in the set is a real match (0 <= mi < |matches|).
+        self.assertGreaterEqual(min(ms), 0)
+        self.assertLess(max(ms), REF["n_matches"])
+
+    def test_facet_flag_predicates(self):
+        by_id = self.by_id()
+        self.assertEqual(by_id["wpl-all-sixes"]["facets"],
+                         {"league": "wpl", "outcomes": [4]})  # six = 4
+        self.assertEqual(by_id["death-dot-storm"]["facets"],
+                         {"overLo": 15, "outcomes": [0]})  # dot = 0, last five overs
+        self.assertEqual(by_id["powerplay-six-explosion"]["facets"],
+                         {"overHi": 5, "outcomes": [4]})  # first six overs
+        self.assertEqual(by_id["death-carnage-2023"]["facets"],
+                         {"overLo": 15, "seasons": [2023, 2024, 2025, 2026],
+                          "outcomes": [3, 4]})  # four = 3, six = 4
+        self.assertEqual(by_id["wickets-2022"]["facets"],
+                         {"league": "ipl", "season": 2022, "wicket": 1})
+
+    def test_scope_no_longer_defers_facets(self):
+        scope = ART["sandbox"]["scope"]
+        self.assertNotIn("deferred to R6/R7", scope)
+        self.assertNotIn("TEAM + SEASON facets only", scope)
+        self.assertIn("tourFlags", scope)
 
 
 if __name__ == "__main__":

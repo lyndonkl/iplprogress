@@ -392,6 +392,17 @@ uniform highp sampler2D uDuelTex;      // per-duel: (px, py normalized [-1,1], d
 uniform int uDuelTexW;                 // duel-texture width (id → texel wrapping)
 uniform highp sampler2D uDuelFocusTex; // per-duel: R = focus 0..1 (1 = lit · 0 = recede candidate)
 uniform int uDuelFocusTexW;            // duel-focus-texture width (id → texel wrapping)
+
+// ---- Facet MASK (§28 — the FULL Bowl sandbox). The arbitrary combinable grammar
+//      (phase / over-range / outcome / batter / bowler) has no per-point attribute,
+//      so the sandbox computes membership per point in JS and delivers it as an R8
+//      texture indexed by point index (position.x — the uPairingTex precedent, NO new
+//      vertex attribute). passesFilter samples it (texelFetch) and ANDs it with the
+//      scalar team/season/range test. Inactive by default (uFilterMaskOn 0) so the
+//      fetch never runs and every prior release renders byte-identically.
+uniform highp sampler2D uFilterMaskTex; // per-point: R = 0/255 keep flag, indexed by point index
+uniform int uFilterMaskTexW;            // mask-texture width (point index → texel wrapping)
+uniform int uFilterMaskOn;              // 1 = mask facet active · 0 = inactive (scalar fast path)
 uniform float uDuelHalfExtent;         // world half-extent: world = normalized × this (square box)
 uniform float uDuelDotR;               // world radius of a strand cluster's constant jitter disc
 uniform float uDuelReveal;             // 0 = strand points hidden · 1 = fully drawn (the web draw)
@@ -491,6 +502,12 @@ bool passesFilter(int gi) {
 	if (uFilterSeason >= 0 && int(grpRow(gi, 3).w) != uFilterSeason) return false;
 	if (uFilterRangeHi > uFilterRangeLo &&
 		(position.x < uFilterRangeLo || position.x >= uFilterRangeHi)) return false;
+	// §28 arbitrary-facet mask: fail points the JS-built mask drops (0 = drop). ANDs
+	// with the scalar tests above; only sampled while the mask facet is active.
+	if (uFilterMaskOn == 1) {
+		int pidx = int(position.x + 0.5);
+		if (texelFetch(uFilterMaskTex, ivec2(pidx % uFilterMaskTexW, pidx / uFilterMaskTexW), 0).r < 0.5) return false;
+	}
 #ifdef HAS_MATCH
 	if (uFilterMatch >= 0.0 && abs(aMatchIndex - uFilterMatch) >= 0.5) return false;
 #endif

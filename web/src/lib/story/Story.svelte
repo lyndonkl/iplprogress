@@ -220,9 +220,12 @@
 					progresses[i] = t.progress;
 				});
 
-				// Deep entry: honor the hash once triggers exist, then update()
+				// Deep entry: honor the hash once triggers exist, then update().
+				// The Bowl sandbox appends a shareable query to its anchor
+				// (`#bowl?ph=d&oc=6&v=1`); strip it so getElementById finds `bowl`.
 				if (window.location.hash.length > 1) {
-					const el = document.getElementById(window.location.hash.slice(1));
+					const anchorId = window.location.hash.slice(1).split('?')[0];
+					const el = document.getElementById(anchorId);
 					if (el) {
 						el.scrollIntoView({ block: 'start' });
 						ScrollTrigger.update();

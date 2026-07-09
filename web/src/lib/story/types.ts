@@ -484,6 +484,18 @@ export interface SceneFieldState {
 	filterMatchRange?: readonly [number, number] | null;
 	/** how filtered-out points render: 'hide' (α→0) or 'dim' ghost (default 'dim') */
 	filterMode?: FilterMode;
+	/**
+	 * §28 arbitrary-facet membership mask: a length-nPoints byte mask (non-zero =
+	 * keep, 0 = drop) for the full sandbox grammar (phase / over-range / outcome /
+	 * batter / bowler — the facets that have no scalar uniform). Uploaded imperatively
+	 * via `field.setFilterMask`; the sandbox stashes the last-committed mask HERE (on
+	 * the held `bowlHeld` state) so a stray scroll re-applying the scene re-asserts the
+	 * SAME mask (CONTRACT §12.2) instead of reverting to the scalar-only filter. When a
+	 * mask is present it makes the filter active (so `filterDim`/`filterMode` still
+	 * govern how dropped points render). Omit for the scalar fast path (R1b + all prior
+	 * scenes) — the field then never touches the mask texture.
+	 */
+	filterMask?: Uint8Array | null;
 }
 
 /** Props every scene annotations component receives from the orchestrator. */

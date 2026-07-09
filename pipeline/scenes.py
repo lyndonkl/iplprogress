@@ -29,12 +29,13 @@ tests/test_r1a.py against an independent recount):
               League Maturity Clock: RR = ALL runs / legal balls — wides
               AND no-balls excluded from the denominator).
 
-  sandbox     (R1b) the minimal-bowl descriptor: the famous-match preset
+  sandbox     (R6b) the full-bowl descriptor: the famous-match preset
               (2019 IPL Final, MI beat CSK by 1 run — resolved by
               league+season+stage+teams+margin, never a hard-coded index),
-              the TEAM + SEASON facet lists (teams.json / groups.json), and
-              the tap-a-ball tooltip field roster. Team+season facets only,
-              per the tightened §3 scope; everything else is R6/R7.
+              the TEAM + SEASON facet lists (teams.json / groups.json), the
+              tap-a-ball tooltip field roster, and the ten-flag guided-tour
+              rail (tourFlags) — each flag resolved and count-validated against
+              the real deliveries at build so it can never point at nothing.
 
 Era bands (R1a data contract): IPL 2008-2010, 2011-2015, 2016-2019,
 2020-2022, 2023-2026; WPL pooled 2023-2026.
@@ -659,9 +660,277 @@ def resolve_preset(matches: list) -> int:
     return idx
 
 
+# ---------------------------------------------------------------------------
+# R6b — the guided-tour flag rail (scenes/sandbox.json tourFlags)
+# ---------------------------------------------------------------------------
+#
+# The ~10 one-tap curated views that onboard a reader who does not yet know
+# what to filter (r6b spec §4/§12). Each flag is resolved and VALIDATED against
+# the real flattened deliveries at build time so a flag can never point at
+# nothing: the pipeline recounts every flag's ball set in one corpus pass,
+# fails loudly (SystemExit) on a zero-ball flag, and asserts the recount equals
+# the digest-verified count exactly (artifact wins — the emitted `count` is the
+# recount, and the client's live buildFacetMask().count must reproduce it).
+#
+# The FACET VOCABULARY the client resolves into a mask (all keys AND-combine;
+# only the constraining keys are present on a given flag):
+#   league   "ipl" | "wpl"                (columnar arrays.league: ipl=0 wpl=1)
+#   season   int   exact season           seasons [int] season-in-set
+#   overLo   int   over >= overLo         overHi int over <= overHi  (0-based)
+#   outcomes [int] off-the-bat outcome codes, OR-ed within the list
+#   wicket   1     AND: a wicket fell on the ball (arrays.wicket == 1)
+#   innings  int   1 | 2                  batter/bowler  player NAME string
+#   matchSet [int] match_index in this set (two-hundred-club: the 228 matches)
+#   mode     "hide"  render mode override (the match-preset flag only; the rest
+#                    default to dim so the haze always survives)
+# OUTCOME CODES (mirror flatten.outcome_class / arrays.outcome): dot 0,
+# single 1, two_or_three 2, four 3, six 4, extras 5. The digest's trap: six=4,
+# four=3. WICKET is an INDEPENDENT 0/1 flag (co-occurs with any outcome).
+# batter/bowler are emitted BY NAME; the client resolves name -> col.dicts
+# index (the raw delivery names are exactly the DictEncoder entries).
+#
+# final-2019 is the match-preset flag: it carries `match_index` (resolved by
+# identity via resolve_preset, never a hard-coded number) and renders hide-mode.
+# two-hundred-club is a computed-predicate flag: the pipeline precomputes the
+# 228-match "first-innings total >= 200" set and emits it as facets.matchSet,
+# which the client expands to a point mask (innings 1 AND match_index in set).
+
+TWO_HUNDRED_CLUB_MIN = 200  # first-innings total (sum runs.total) that qualifies
+
+# Rail order (§12): the human hooks (a famous final, a duel, a record season)
+# lead, then the aggregate-pattern flags. `_expected` is the digest-verified
+# count the build re-derives and asserts (§13). `_kind`: "match" resolves a
+# match_index by identity; "club" is the computed 200-club predicate; the rest
+# are pure per-column facet predicates. facets hold ONLY the emitted keys;
+# match_index / matchSet are injected at resolve time from real data.
+TOUR_FLAGS = [
+    {
+        "id": "final-2019",
+        "label": "The 2019 Final, ball by ball",
+        "blurb": (
+            "Nine off Malinga's last over, and Mumbai win by one run. All 247 "
+            "balls of the closest final there's been."
+        ),
+        "facets": {"mode": "hide"},
+        "_kind": "match",
+        "_expected": 247,
+    },
+    {
+        "id": "bumrah-rahul",
+        "label": "Bumrah's longest duel",
+        "blurb": (
+            "123 balls of India's deadliest yorker at its coolest head. "
+            "Bumrah's most-bowled duel with anyone."
+        ),
+        "facets": {"bowler": "JJ Bumrah", "batter": "KL Rahul"},
+        "_kind": "facet",
+        "_expected": 123,
+    },
+    {
+        "id": "kohli-2016",
+        "label": "Kohli's record 2016",
+        "blurb": (
+            "The best single season the IPL has seen. All 655 balls Kohli "
+            "faced in 2016, the summer he made 973."
+        ),
+        "facets": {"batter": "V Kohli", "season": 2016},
+        "_kind": "facet",
+        "_expected": 655,
+    },
+    {
+        "id": "wpl-all-sixes",
+        "label": "Every six in WPL history",
+        "blurb": "Every maximum in the WPL, from the very first swing to now. 705 of them.",
+        "facets": {"league": "wpl", "outcomes": [4]},  # 4 = six (four=3, six=4)
+        "_kind": "facet",
+        "_expected": 705,
+    },
+    {
+        "id": "two-hundred-club",
+        "label": "The 200 Club",
+        "blurb": (
+            "228 times a side has posted 200 batting first. Here's all 28,704 "
+            "balls of it, up to the record 287."
+        ),
+        "facets": {"innings": 1},  # matchSet injected from the computed 228-set
+        "_kind": "club",
+        "_expected": 28704,
+    },
+    {
+        "id": "wickets-2022",
+        "label": "Every wicket of IPL 2022",
+        "blurb": (
+            "The first season after the mega-auction reshuffle. All 912 "
+            "wickets that fell across IPL 2022."
+        ),
+        "facets": {"league": "ipl", "season": 2022, "wicket": 1},
+        "_kind": "facet",
+        "_expected": 912,
+    },
+    {
+        "id": "death-carnage-2023",
+        "label": "Death-overs carnage, 2023 to now",
+        "blurb": (
+            "Overs 16 to 20 in the Impact Player era. 4,470 fours and sixes "
+            "launched at the death since 2023."
+        ),
+        "facets": {"overLo": 15, "seasons": [2023, 2024, 2025, 2026], "outcomes": [3, 4]},
+        "_kind": "facet",
+        "_expected": 4470,
+    },
+    {
+        "id": "powerplay-six-explosion",
+        "label": "The powerplay six explosion",
+        "blurb": (
+            "3,920 sixes in the first six overs, and the modern game nearly "
+            "doubled the rate, from 1,106 back then to 1,934 now."
+        ),
+        "facets": {"overHi": 5, "outcomes": [4]},
+        "_kind": "facet",
+        "_expected": 3920,
+    },
+    {
+        "id": "death-dot-storm",
+        "label": "The death-overs dot storm",
+        "blurb": (
+            "When the bowlers slam the door. 19,414 dot balls squeezed out in "
+            "the last five overs."
+        ),
+        "facets": {"overLo": 15, "outcomes": [0]},
+        "_kind": "facet",
+        "_expected": 19414,
+    },
+    {
+        "id": "shafali-wpl",
+        "label": "Shafali Verma in the WPL",
+        "blurb": (
+            "The WPL's biggest hitter, in full. All 778 balls Shafali Verma "
+            "has faced, 53 of them sixes."
+        ),
+        "facets": {"batter": "Shafali Verma", "league": "wpl"},
+        "_kind": "facet",
+        "_expected": 778,
+    },
+]
+
+
+def _flag_pass(facets: dict, rec: dict) -> bool:
+    """Does one delivery `rec` satisfy a flag's per-column facet predicate?
+
+    The build-time mirror of the client's buildFacetMask membership test:
+    every present constraining key AND-combines; unknown keys (mode) and
+    match-level keys (matchSet, handled separately for the 200 club) are
+    ignored here.
+    """
+    if "league" in facets and rec["league"] != facets["league"]:
+        return False
+    if "season" in facets and rec["season"] != facets["season"]:
+        return False
+    if "seasons" in facets and rec["season"] not in facets["seasons"]:
+        return False
+    if "overLo" in facets and rec["over"] < facets["overLo"]:
+        return False
+    if "overHi" in facets and rec["over"] > facets["overHi"]:
+        return False
+    if "outcomes" in facets and rec["outcome"] not in facets["outcomes"]:
+        return False
+    if "wicket" in facets and rec["wicket"] != facets["wicket"]:
+        return False
+    if "innings" in facets and rec["innings"] != facets["innings"]:
+        return False
+    if "batter" in facets and rec["batter"] != facets["batter"]:
+        return False
+    if "bowler" in facets and rec["bowler"] != facets["bowler"]:
+        return False
+    return True
+
+
+def resolve_tour_flags(matches: list, preset_index: int | None = None) -> list:
+    """The ~10 tour flags, each resolved + validated against real deliveries.
+
+    ONE chronological corpus pass (super overs excluded, the standing rule):
+    counts every pure-facet flag's ball set, the 2019-final match's ball set,
+    and the per-match first-innings totals + ball counts needed for the 200
+    club. Then: resolves final-2019's match_index by identity (resolve_preset,
+    with its SystemExit guards); builds the 228-match >=200 first-innings set;
+    asserts every flag returns >= 1 ball (loud SystemExit on 0) and that the
+    recount equals the digest-verified count exactly. Returns the emitted flag
+    dicts in rail order: {id, label, blurb, facets, count, match_index?}.
+    """
+    if preset_index is None:
+        preset_index = resolve_preset(matches)
+
+    counts = {f["id"]: 0 for f in TOUR_FLAGS}
+    facet_flags = [f for f in TOUR_FLAGS if f["_kind"] == "facet"]
+    first_inn_total: dict[int, int] = {}
+    first_inn_balls: dict[int, int] = {}
+
+    for match_index, (_date, _mid, league, path) in enumerate(
+        flatten.sorted_match_files()
+    ):
+        with open(path) as fh:
+            match = json.load(fh)
+        season = canon.canon_season(match["info"])
+        innings_no = 0
+        for innings in match.get("innings", []):
+            if canon.is_super_over(innings):
+                continue  # standing rule: super overs never enter the stream
+            innings_no += 1
+            for over in innings["overs"]:
+                over_no = over["over"]
+                for dl in over["deliveries"]:
+                    rec = {
+                        "league": league,
+                        "season": season,
+                        "over": over_no,
+                        "outcome": flatten.outcome_class(dl),
+                        "wicket": 1 if dl.get("wickets") else 0,
+                        "innings": innings_no,
+                        "batter": dl["batter"],
+                        "bowler": dl["bowler"],
+                    }
+                    if match_index == preset_index:
+                        counts["final-2019"] += 1
+                    for f in facet_flags:
+                        if _flag_pass(f["facets"], rec):
+                            counts[f["id"]] += 1
+                    if innings_no == 1:
+                        first_inn_total[match_index] = (
+                            first_inn_total.get(match_index, 0) + dl["runs"]["total"]
+                        )
+                        first_inn_balls[match_index] = (
+                            first_inn_balls.get(match_index, 0) + 1
+                        )
+
+    club = sorted(
+        mi for mi, total in first_inn_total.items() if total >= TWO_HUNDRED_CLUB_MIN
+    )
+    counts["two-hundred-club"] = sum(first_inn_balls[mi] for mi in club)
+
+    resolved = []
+    for f in TOUR_FLAGS:
+        got = counts[f["id"]]
+        if got < 1:  # a flag must never point at nothing (invariant 9)
+            raise SystemExit(f"tour flag {f['id']!r} resolved to 0 balls")
+        if got != f["_expected"]:  # artifact-vs-digest guard (tolerance 0)
+            raise SystemExit(
+                f"tour flag {f['id']!r} count {got} != digest {f['_expected']}"
+            )
+        facets = dict(f["facets"])
+        entry = {"id": f["id"], "label": f["label"], "blurb": f["blurb"], "count": got}
+        if f["_kind"] == "match":
+            entry["match_index"] = preset_index
+        elif f["_kind"] == "club":
+            facets["matchSet"] = club  # the 228 qualifying match indices
+        entry["facets"] = facets
+        resolved.append(entry)
+    return resolved
+
+
 def sandbox_doc() -> dict:
     matches = flatten.build_matches()
     preset_index = resolve_preset(matches)
+    tour_flags = resolve_tour_flags(matches, preset_index)
     teams = [
         {"id": t["id"], "short": t["short"], "name": t["name"], "league": t["league"]}
         for t in canon.TEAMS
@@ -672,6 +941,7 @@ def sandbox_doc() -> dict:
             "label": PRESET_LABEL,
             "blurb": PRESET_BLURB,
         },
+        "tourFlags": tour_flags,
         "facets": {
             "team": {
                 "source": "teams.json",
@@ -692,10 +962,15 @@ def sandbox_doc() -> dict:
             "fields": TOOLTIP_FIELDS,
         },
         "scope": (
-            "R1b minimal bowl: TEAM + SEASON facets only, one famous-match "
-            "preset, tap-a-ball tooltip. League/phase/player/over/outcome "
-            "facets, the linked worm/Manhattan panel, tour flags and "
-            "shareable URLs are deferred to R6/R7 (blueprint §3)."
+            "R6b full bowl: the field becomes a filterable instrument. The "
+            "full facet grammar (league, team, season, phase, over-range, "
+            "outcome, the wicket AND-toggle, batter, bowler, all combinable), "
+            "the ten-flag guided-tour rail (tourFlags, each resolved and "
+            "validated against real deliveries so a flag never points at "
+            "nothing), the tap-a-ball tooltip, and shareable URLs. The team + "
+            "season facets and the 2019-final preset carry over from the R1b "
+            "minimal bowl unchanged; the linked worm/Manhattan breakdown panel "
+            "is the remaining R6b UI surface (blueprint §3, r6b spec §5)."
         ),
     }
 
@@ -3337,6 +3612,11 @@ def main(out_root: Path = canon.OUT_ROOT) -> dict:
     )
     p = sandbox["preset"]
     print(f"sandbox preset: match_index={p['match_index']} — {p['label']}")
+    tf = sandbox["tourFlags"]
+    print(
+        f"sandbox tourFlags: {len(tf)} flags, counts "
+        + "/".join(str(f["count"]) for f in tf)
+    )
     ab = ch2["anchor"]["bands"]
     ar = ch2["archetype"]["bands"]
     n_empty = sum(1 for v in ch2["payoff"]["variants"] if v["empty_state"])

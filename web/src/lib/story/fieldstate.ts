@@ -8,6 +8,7 @@ import {
 	type ResortColumns
 } from '$lib/field/types';
 import { ASSEMBLY_RAIN_WINDOW } from '$lib/field/shaders';
+import type { FieldHandle } from '$lib/field/field';
 import type {
 	ConstellationPhaseState,
 	OverRail,
@@ -56,7 +57,7 @@ function railSlotArray(rail: OverRail): number[] {
 	return out;
 }
 
-/** The six filter uniform fields resolved from a scene's declarative facets. */
+/** The filter uniform fields resolved from a scene's declarative facets. */
 interface ResolvedFilter {
 	active: boolean;
 	filterTeam: number;
@@ -65,6 +66,14 @@ interface ResolvedFilter {
 	filterRangeLo: number;
 	filterRangeHi: number;
 	filterDim: number;
+	/**
+	 * §28 arbitrary-facet mask (or null). Uploaded imperatively via
+	 * `field.setFilterMask` — it does NOT ride the scalar FieldRenderState — but its
+	 * PRESENCE makes the filter active so `filterDim` resolves to the mode's dim (below).
+	 * That is what keeps a stray scroll re-applying the held state from un-dimming the
+	 * mask: `filterDim` stays at the dim value even though no scalar facet is set.
+	 */
+	filterMask: Uint8Array | null;
 }
 
 function resolveSceneFilter(s: SceneFieldState): ResolvedFilter {
@@ -72,7 +81,12 @@ function resolveSceneFilter(s: SceneFieldState): ResolvedFilter {
 	const season = s.filterSeason ?? null;
 	const matchIndex = s.filterMatchIndex ?? null;
 	const range = s.filterMatchRange ?? null;
-	const active = team != null || season != null || matchIndex != null || range != null;
+	const mask = s.filterMask ?? null;
+	// A mask makes the filter active too (§28): the mask decides membership, so the
+	// mode's dim must apply even when no scalar facet is set. Without this, a scroll
+	// re-applying bowlHeld would reset filterDim to 1 (no-op) and the mask would drop
+	// points but leave them at full brightness.
+	const active = team != null || season != null || matchIndex != null || range != null || mask != null;
 	const mode = s.filterMode ?? 'dim';
 	return {
 		active,
@@ -82,8 +96,26 @@ function resolveSceneFilter(s: SceneFieldState): ResolvedFilter {
 		filterRangeLo: range ? range[0] : 0,
 		filterRangeHi: range ? range[1] : 0,
 		// filterDim is a no-op when no facet is active (nothing is filtered out)
-		filterDim: active ? FILTER_DIM[mode] : 1
+		filterDim: active ? FILTER_DIM[mode] : 1,
+		filterMask: mask
 	};
+}
+
+/**
+ * Imperative bridge for the §28 sandbox mask. The scalar facets (team / season /
+ * match / range) and `filterDim` ride the FieldRenderState through
+ * `resolveRenderState` → `field.applyState`, but the arbitrary-facet MASK is
+ * imperative (`field.setFilterMask`, a persistent data texture — NOT in the render
+ * state, exactly like `setDuelGraph` / `setMatchTable`). So whenever the sandbox
+ * re-applies its held state (bowlHeld) — e.g. a stray scroll — call this to re-assert
+ * the SAME mask (or clear it). Demand-mode: one render at most. The scalar side is
+ * already handled by the render-state path, so this touches only the mask.
+ */
+export function applyFilterUniforms(
+	field: Pick<FieldHandle, 'setFilterMask'>,
+	s: SceneFieldState
+): void {
+	field.setFilterMask(s.filterMask ?? null);
 }
 
 /**
