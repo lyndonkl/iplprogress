@@ -152,6 +152,7 @@ def build(data_root: Path = canon.DATA_ROOT):
             match = json.load(fh)
         info = match["info"]
         season = canon.canon_season(info)
+        reg = info.get("registry", {}).get("people", {})  # name -> stable person-id
         ss = seasons[(league, season)]
         ss.matches += 1
         n_matches += 1
@@ -195,8 +196,11 @@ def build(data_root: Path = canon.DATA_ROOT):
                         ss.legal_balls += 1
                     appeared.add(striker)
                     appeared.add(dl["non_striker"])
-                    players.add(striker)
-                    players.add(dl["bowler"])
+                    # n_players is a REGISTRY-PID count (folds spelling variants
+                    # onto one person; keeps genuine namesakes distinct), matching
+                    # this block's definition string and pipeline/registry.py.
+                    players.add(reg.get(striker, striker))
+                    players.add(reg.get(dl["bowler"], dl["bowler"]))
                     if not wide:
                         faced[striker] += 1
                         n = faced[striker]

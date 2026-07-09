@@ -68,7 +68,7 @@
   },
   "meta.json": {
    "bytes_raw": 1642,
-   "bytes_gz": 531
+   "bytes_gz": 532
   },
   "pairing.u16": {
    "bytes_raw": 632398,
@@ -77,6 +77,18 @@
   "payoff/ch1.json": {
    "bytes_raw": 20655,
    "bytes_gz": 3108
+  },
+  "players/duels_by_player.json": {
+   "bytes_raw": 992095,
+   "bytes_gz": 138627
+  },
+  "players/teleporter_lookup.json": {
+   "bytes_raw": 7921,
+   "bytes_gz": 3063
+  },
+  "players.json": {
+   "bytes_raw": 195966,
+   "bytes_gz": 39088
   },
   "restate.u8": {
    "bytes_raw": 316199,
@@ -131,8 +143,8 @@
    "bytes_gz": 34491
   },
   "scenes/sandbox.json": {
-   "bytes_raw": 3311,
-   "bytes_gz": 1245
+   "bytes_raw": 6912,
+   "bytes_gz": 2888
   },
   "team.u8": {
    "bytes_raw": 316199,
@@ -166,7 +178,7 @@
     "scenes/coldopen.json"
    ],
    "budget_gz": 3000000,
-   "actual_gz": 406067,
+   "actual_gz": 406068,
    "pass": true
   },
   {
@@ -187,7 +199,7 @@
     "scenes/sandbox.json"
    ],
    "budget_gz": 2000000,
-   "actual_gz": 677166,
+   "actual_gz": 678809,
    "pass": true
   },
   {
@@ -287,6 +299,17 @@
    "pass": true
   },
   {
+   "name": "players registry + card tables (R7a search / duels / teleporter)",
+   "files": [
+    "players.json",
+    "players/duels_by_player.json",
+    "players/teleporter_lookup.json"
+   ],
+   "budget_gz": 2000000,
+   "actual_gz": 180778,
+   "pass": true
+  },
+  {
    "name": "engines (ch2 par/entry + R3b parallel-track re288/wp_grid)",
    "files": [
     "engines/entry.json",
@@ -321,6 +344,9 @@
     "meta.json",
     "pairing.u16",
     "payoff/ch1.json",
+    "players.json",
+    "players/duels_by_player.json",
+    "players/teleporter_lookup.json",
     "restate.u8",
     "scenes/ch1.json",
     "scenes/ch10.json",
@@ -341,7 +367,7 @@
     "wpa.u8"
    ],
    "budget_gz": 25000000,
-   "actual_gz": 2076565,
+   "actual_gz": 2258987,
    "pass": true
   }
  ],

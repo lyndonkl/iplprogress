@@ -49,7 +49,7 @@ const FALLBACK_CORPUS: ColdOpenCorpus = {
 	corpus_total: 316388,
 	superover_balls: 189,
 	matches: 1331,
-	players: 938,
+	players: 937,
 	ipl_seasons: 19,
 	wpl_seasons: 4
 };

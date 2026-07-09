@@ -34,8 +34,9 @@
 		<p>
 			Everything starts from <a href="https://cricsheet.org/">Cricsheet</a>’s ball-by-ball
 			JSON: 1,243 IPL matches (2008–2026) and 88 WPL matches (2023–2026) — 1,331 matches
-			across 19 IPL seasons and 4 WPL seasons, with 938 players counted by registry ID, so a
-			spelling change never becomes a second player. Every count the story shows is read from
+			across 19 IPL seasons and 4 WPL seasons, with 937 players counted by registry ID rather
+			than by name, so one player written two ways stays one player and two players who share a
+			name stay two. Every count the story shows is read from
 			the pipeline’s emitted artifacts (<code>meta.json</code> and friends) — the artifact,
 			not the prose, is the source of truth; if the two ever disagree, the artifact wins and
 			the copy changes.

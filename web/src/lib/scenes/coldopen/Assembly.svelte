@@ -50,7 +50,7 @@
 	/* ---- title-card counts — every figure reads from an artifact ------------- */
 	const deliveries = $derived(n > 0 ? n : (data?.corpus.points_rendered ?? 316199));
 	const matches = $derived(data?.corpus.matches ?? 1331);
-	const players = $derived(data?.corpus.players ?? 938);
+	const players = $derived(data?.corpus.players ?? 937);
 	const iplSeasons = $derived(data?.corpus.ipl_seasons ?? 19);
 	const wplSeasons = $derived(data?.corpus.wpl_seasons ?? 4);
 	const wplTotal = $derived(

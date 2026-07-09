@@ -67,7 +67,11 @@ TEASER_FOURS_PCT = {"wpl": 46.8, "ipl_recent": 33.9}
 TEASER_SIXSHARE_PCT = {"wpl": 15.5, "ipl_recent": 29.0}
 TEASER_RR_Y1_4 = {"ipl": [8.31, 7.48, 8.13, 7.73], "wpl": [8.08, 7.86, 8.37, 8.54]}
 
-EXPECTED_PLAYERS = 938  # faced or bowled at least one ball
+EXPECTED_PLAYERS = 937  # registry-pid count of who faced or bowled a ball
+# (recounted 2026-07-09): distinct registry person-ids, NOT distinct name strings.
+# Resolving names to pids folds spelling variants (e.g. "NA Saini" / "Navdeep Saini")
+# onto one person and keeps genuine namesakes (two "Harmeet Singh", two "S Rana")
+# distinct; the naive name-union over-counts at 938. See pipeline/registry.py.
 EXPECTED_N_POINTS = 316_199
 
 # R6b tour-flag rail (scenes/sandbox.json tourFlags). Rail order + the §12/§13
@@ -167,6 +171,7 @@ def independent_recount():
         start = len(ballsfaced)
 
         info = match["info"]
+        reg = info.get("registry", {}).get("people", {})  # name -> stable person-id
         method = info.get("outcome", {}).get("method", "")
         full_first = "D/L" not in str(method) and info["outcome"].get("result") != "no result"
         first_total = None
@@ -198,8 +203,10 @@ def independent_recount():
                     ss.runs[2] += 6 if rb == 6 else 0
                     if not wide and "noballs" not in extras:
                         ss.runs[3] += 1
-                    players.add(dl["batter"])
-                    players.add(dl["bowler"])
+                    # n_players is a REGISTRY-PID count (registry.py's universe),
+                    # so recount distinct person-ids, not distinct name strings.
+                    players.add(reg.get(dl["batter"], dl["batter"]))
+                    players.add(reg.get(dl["bowler"], dl["bowler"]))
                     at_crease.add(dl["batter"])
                     at_crease.add(dl["non_striker"])
                     if wide:

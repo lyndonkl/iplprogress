@@ -158,6 +158,21 @@ CH9_SET_FILES = ("scenes/ch9.json", "pairing.u16")
 # subset rides the spare bit2 of the existing aRunOut byte, so Ch 10 adds NO new
 # per-point buffer. Lazy-loaded at Ch 10 entry; held to the per-chapter budget.
 CH10_SET_FILES = ("scenes/ch10.json",)
+# R7a player registry + card tables: the /players search / card join key
+# (players.json — every registry pid who faced or bowled a ball, with aliases,
+# leagues, seasons, teams, role and ball counts, plus the name->pids search index
+# and the namesakes block), plus the two Phase-2 client-assembly tables the card
+# needs and cannot derive from already-shipped artifacts: players/duels_by_player.json
+# (top-12 EB-shrunk duels per pid, each side — Panel C) and
+# players/teleporter_lookup.json (per league/season sorted SR distribution so the
+# teleporter runs client-side — Panel D). The /players route loads these on demand;
+# small lazy artifacts, NOT in the cold-open critical set. Held to the per-chapter
+# budget. (The river/entry map reuse the already-counted engines/srplus + entry.)
+PLAYERS_SET_FILES = (
+    "players.json",
+    "players/duels_by_player.json",
+    "players/teleporter_lookup.json",
+)
 # Engine tables under engines/: R2a's engine #1 (par/SR+) + engine #5 (entry
 # states) consumed by Chapter 2, plus the parallel-track engine #2 (re288) +
 # engine #3 (wp_grid) built during R2/R3a and consumed in R3b. All lazy-loaded
@@ -210,6 +225,7 @@ def build_ledger(out_root: Path = canon.OUT_ROOT) -> dict:
     ch8_files = [n for n in CH8_SET_FILES if n in artifacts]
     ch9_files = [n for n in CH9_SET_FILES if n in artifacts]
     ch10_files = [n for n in CH10_SET_FILES if n in artifacts]
+    players_files = [n for n in PLAYERS_SET_FILES if n in artifacts]
     engine_files = sorted(n for n in artifacts if n.startswith(ENGINES_PREFIXES))
 
     checks = [
@@ -305,6 +321,13 @@ def build_ledger(out_root: Path = canon.OUT_ROOT) -> dict:
             "budget_gz": BUDGET_CHAPTER_GZ,
             "actual_gz": gz_sum(ch10_files),
             "pass": bool(ch10_files) and gz_sum(ch10_files) <= BUDGET_CHAPTER_GZ,
+        },
+        {
+            "name": "players registry + card tables (R7a search / duels / teleporter)",
+            "files": players_files,
+            "budget_gz": BUDGET_CHAPTER_GZ,
+            "actual_gz": gz_sum(PLAYERS_SET_FILES),
+            "pass": bool(players_files) and gz_sum(PLAYERS_SET_FILES) <= BUDGET_CHAPTER_GZ,
         },
         {
             "name": "engines (ch2 par/entry + R3b parallel-track re288/wp_grid)",
