@@ -114,6 +114,75 @@ interface TeleporterFile {
 	target_season: number;
 }
 
+/* -- R7b credibility engines (all four loaded SUPPRESSIBLY; see loaders) ---- */
+
+/** engines/half_life.json - per-metric persistence fit; the freshness dial reads H. */
+interface HalfLifeMetric {
+	half_life_seasons: number;
+	r0: number;
+	pop_mean: number;
+	unit: string;
+}
+interface HalfLifeFile {
+	metrics: Record<string, HalfLifeMetric>;
+}
+
+/** engines/trueecon.json - per bowler-season era-fair economy (100 = par, up = better). */
+interface TrueEconRow {
+	pid: string;
+	bowler: string;
+	league: League;
+	season: number;
+	economy: number;
+	par_economy: number;
+	true_economy: number;
+	trueecon_plus: number;
+	legal_balls: number;
+	wickets: number;
+	strike_rate: number;
+}
+interface TrueEconFile {
+	bowler_seasons: TrueEconRow[];
+	min_legal_balls: number;
+	count: number;
+}
+
+/** engines/stabilization.json - per-stat M (balls to half-signal); M can be null. */
+interface StabOverall {
+	M: number | null;
+	mean: number;
+	sigma2: number;
+	tau2: number;
+	n_groups: number;
+	stabilizes: boolean;
+}
+interface StabStat {
+	overall: StabOverall;
+	min_balls: number;
+}
+interface StabilizationFile {
+	stats: Record<string, StabStat>;
+}
+
+/** engines/truetalent.json - per-pid career SR+ with an 80% CI (the static card CI). */
+interface TrueTalentRow {
+	pid: string;
+	league: League;
+	name: string;
+	n: number;
+	raw: number;
+	regressed: number;
+	ci_lo: number;
+	ci_hi: number;
+}
+interface TrueTalentFile {
+	players: TrueTalentRow[];
+	pop_mean: Record<League, number>;
+	M: number;
+	sigma2: number;
+	z: number;
+}
+
 /* ==========================================================================
  * Public model  -  the card the UI renders (camelCase, everything precomputed)
  * ========================================================================== */
@@ -151,7 +220,48 @@ export interface PeakSRPlus {
 	season: number;
 	/** raw SR that peak season  -  the number the teleporter re-prices */
 	sr: number;
+	/** balls faced that peak season  -  the §9.5 trust read (balls vs the SR M) */
+	balls: number;
 	league: League;
+}
+
+/** One point on the TrueEcon river; a gap season carries hasData:false (never interpolated). */
+export interface TrueEconPoint {
+	season: number;
+	league: League;
+	/** null on a gap season (bowled under the min-legal-balls floor, or absent) */
+	trueeconPlus: number | null;
+	/** runs saved per over vs era par that season (null on a gap) */
+	trueEconomy: number | null;
+	/** legal balls bowled that season (null on a gap) */
+	balls: number | null;
+	hasData: boolean;
+}
+
+export interface PeakTrueEcon {
+	trueeconPlus: number;
+	season: number;
+	/** runs saved per over vs par that peak season  -  the caption gloss */
+	trueEconomy: number;
+	/** legal balls that peak season  -  the trust read */
+	balls: number;
+	league: League;
+}
+
+/**
+ * §9.1 trust state of a rate stat: a player's balls vs that stat's stabilization M.
+ * The EXCEPTION-ONLY default  -  'settled' (and 'unknown', when M is unavailable)
+ * render with NO mark; only 'firming' and 'noisy' get a cue. Driven by n (balls),
+ * NEVER the numerator, so a big raw tally on few balls still flags as still-settling.
+ */
+export type TrustState = 'settled' | 'firming' | 'noisy' | 'unknown';
+
+/** balls >= M settled; M/2 <= balls < M firming; balls < M/2 noisy; M/balls null unknown. */
+export function trustState(balls: number | null, m: number | null): TrustState {
+	if (m == null || balls == null) return 'unknown';
+	if (balls >= m) return 'settled';
+	if (balls >= m / 2) return 'firming';
+	return 'noisy';
 }
 
 /** The role token a brightest entry-cell classifies into (no prose; the UI writes copy). */
@@ -248,6 +358,10 @@ export interface PlayerHeader {
 	/** balls_faced / dismissals  -  the accumulator's due; null if dismissals unknown/0 */
 	ballsPerDismissal: number | null;
 	peakSRPlus: PeakSRPlus | null;
+	/** the bowler's best era-fair economy season (max TrueEcon+); null if no bowling data */
+	peakTrueEcon: PeakTrueEcon | null;
+	/** §9.3 static 80% CI on the CAREER SR+ (raw + interval); null if the pool omits them */
+	careerSRPlus: { raw: number; ciLo: number; ciHi: number } | null;
 }
 
 /** Per-panel suppression: true = omit the panel (never fake it). */
@@ -273,10 +387,16 @@ export interface PlayerCard {
 	/** primaryBalls < 100 -> the UI shows a stub (header + raw line + Bowl link only) */
 	smallSample: boolean;
 	srPlusRiver: SRPlusPoint[];
+	/** §9.4 per-season era-fair economy line (100 = par, above = better); [] if no bowling */
+	trueEconRiver: TrueEconPoint[];
 	entryMap: EntryMap | null;
 	duels: Duels;
 	teleporter: Teleporter | null;
 	suppress: PanelSuppress;
+	/** §9.1 the flagged stats' stabilization M (balls to half-signal); null if unavailable */
+	stabilizationM: { battingSr: number | null; bowlingEconomy: number | null };
+	/** §9.2 the SR+ (srplus) half-life in seasons for the freshness dial; null if unavailable */
+	srHalfLife: number | null;
 	/** the always-visible "based on N balls" honesty basis */
 	basisNote: { ballsFaced: number; ballsBowled: number };
 }
@@ -290,11 +410,25 @@ let srplusPromise: Promise<SrPlusFile> | null = null;
 let entryPromise: Promise<EntryFile> | null = null;
 let duelsPromise: Promise<DuelsFile> | null = null;
 let teleporterPromise: Promise<TeleporterFile> | null = null;
+// R7b credibility engines: cached separately, each resolves null on any failure.
+let halfLifePromise: Promise<HalfLifeFile | null> | null = null;
+let trueEconPromise: Promise<TrueEconFile | null> | null = null;
+let stabilizationPromise: Promise<StabilizationFile | null> | null = null;
+let trueTalentPromise: Promise<TrueTalentFile | null> | null = null;
 
 async function fetchJson<T>(url: string): Promise<T> {
 	const res = await fetch(url);
 	if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`);
 	return (await res.json()) as T;
+}
+
+/**
+ * SUPPRESSIBLE loader: a fetch/parse failure resolves `null` instead of throwing,
+ * so a missing or malformed R7b credibility layer can NEVER regress an already
+ * shippable R7a card (the card just renders without that cue). Cached per file.
+ */
+function fetchJsonOrNull<T>(url: string): Promise<T | null> {
+	return fetchJson<T>(url).catch(() => null);
 }
 
 /** Load (once) and cache the player registry / search index. */
@@ -318,6 +452,24 @@ function loadDuels(): Promise<DuelsFile> {
 function loadTeleporter(): Promise<TeleporterFile> {
 	teleporterPromise ??= fetchJson<TeleporterFile>(`${base}/data/players/teleporter_lookup.json`);
 	return teleporterPromise;
+}
+function loadHalfLife(): Promise<HalfLifeFile | null> {
+	halfLifePromise ??= fetchJsonOrNull<HalfLifeFile>(`${base}/data/engines/half_life.json`);
+	return halfLifePromise;
+}
+function loadTrueEcon(): Promise<TrueEconFile | null> {
+	trueEconPromise ??= fetchJsonOrNull<TrueEconFile>(`${base}/data/engines/trueecon.json`);
+	return trueEconPromise;
+}
+function loadStabilization(): Promise<StabilizationFile | null> {
+	stabilizationPromise ??= fetchJsonOrNull<StabilizationFile>(
+		`${base}/data/engines/stabilization.json`
+	);
+	return stabilizationPromise;
+}
+function loadTrueTalent(): Promise<TrueTalentFile | null> {
+	trueTalentPromise ??= fetchJsonOrNull<TrueTalentFile>(`${base}/data/engines/truetalent.json`);
+	return trueTalentPromise;
 }
 
 /* ==========================================================================
@@ -515,13 +667,18 @@ function classifyEntryRole(xBin: number, yBin: number, concentration: number): E
  * suppression, small-sample flag. Nothing is fabricated when data is absent.
  */
 export async function loadPlayerCard(pid: string): Promise<PlayerCard> {
-	const [index, srplus, entry, duelsFile, teleporterFile] = await Promise.all([
-		loadPlayersIndex(),
-		loadSrPlus(),
-		loadEntry(),
-		loadDuels(),
-		loadTeleporter()
-	]);
+	const [index, srplus, entry, duelsFile, teleporterFile, halfLife, trueEcon, stabilization, trueTalent] =
+		await Promise.all([
+			loadPlayersIndex(),
+			loadSrPlus(),
+			loadEntry(),
+			loadDuels(),
+			loadTeleporter(),
+			loadHalfLife(),
+			loadTrueEcon(),
+			loadStabilization(),
+			loadTrueTalent()
+		]);
 
 	const record = getRecord(index, pid);
 	if (!record) throw new Error(`loadPlayerCard: unknown pid ${pid}`);
@@ -540,7 +697,13 @@ export async function loadPlayerCard(pid: string): Promise<PlayerCard> {
 	let peakSRPlus: PeakSRPlus | null = null;
 	for (const row of srMap.values()) {
 		if (!peakSRPlus || row.srplus > peakSRPlus.srplus) {
-			peakSRPlus = { srplus: row.srplus, season: row.season, sr: row.sr, league: primaryLeague };
+			peakSRPlus = {
+				srplus: row.srplus,
+				season: row.season,
+				sr: row.sr,
+				balls: row.balls,
+				league: primaryLeague
+			};
 		}
 	}
 
@@ -651,6 +814,72 @@ export async function loadPlayerCard(pid: string): Promise<PlayerCard> {
 		}
 	}
 
+	/* ---- TrueEcon river + peak (trueecon, PID-keyed, primary league) ------
+	 * §9.4: plot trueecon_plus over a 100 baseline (up = better). A season under
+	 * the min-legal-balls floor is absent from the artifact -> it breaks the line
+	 * as a gap (never interpolated), exactly like the SR+ river's <100-ball gap. */
+	const teMap = new Map<number, TrueEconRow>();
+	if (trueEcon) {
+		for (const row of trueEcon.bowler_seasons) {
+			if (row.pid === pid && row.league === primaryLeague) teMap.set(row.season, row);
+		}
+	}
+
+	let peakTrueEcon: PeakTrueEcon | null = null;
+	for (const row of teMap.values()) {
+		if (!peakTrueEcon || row.trueecon_plus > peakTrueEcon.trueeconPlus) {
+			peakTrueEcon = {
+				trueeconPlus: row.trueecon_plus,
+				season: row.season,
+				trueEconomy: row.true_economy,
+				balls: row.legal_balls,
+				league: primaryLeague
+			};
+		}
+	}
+
+	const trueEconRiver: TrueEconPoint[] = [];
+	if (teMap.size && record.seasons.length) {
+		const first = record.seasons[0];
+		const last = record.seasons[record.seasons.length - 1];
+		for (let s = first; s <= last; s++) {
+			const row = teMap.get(s);
+			if (row) {
+				trueEconRiver.push({
+					season: s,
+					league: primaryLeague,
+					trueeconPlus: row.trueecon_plus,
+					trueEconomy: row.true_economy,
+					balls: row.legal_balls,
+					hasData: true
+				});
+			} else {
+				trueEconRiver.push({
+					season: s,
+					league: primaryLeague,
+					trueeconPlus: null,
+					trueEconomy: null,
+					balls: null,
+					hasData: false
+				});
+			}
+		}
+	}
+
+	/* ---- credibility constants: M (§9.1), SR+ half-life (§9.2), CI (§9.3) --
+	 * All suppressible: a null flows through to "no cue" and the card is unharmed.
+	 * dismissal_pct.M is null by design (never stabilizes); the ?? null keeps that
+	 * honest for any stat, so a null M is treated as "unknown trust", never divided. */
+	const battingSrM = stabilization?.stats?.batting_sr?.overall?.M ?? null;
+	const bowlingEconomyM = stabilization?.stats?.bowling_economy?.overall?.M ?? null;
+	const srHalfLife = halfLife?.metrics?.srplus?.half_life_seasons ?? null;
+
+	let careerSRPlus: { raw: number; ciLo: number; ciHi: number } | null = null;
+	if (trueTalent) {
+		const ttRow = trueTalent.players.find((r) => r.pid === pid);
+		if (ttRow) careerSRPlus = { raw: ttRow.raw, ciLo: ttRow.ci_lo, ciHi: ttRow.ci_hi };
+	}
+
 	/* ---- Top Duels (pid-keyed, EB-shrunk, pre-ranked balls-desc) ---------- */
 	const rawDuels = duelsFile.by_pid[pid];
 	const toDuel = (d: DuelRaw): Duel => ({
@@ -731,7 +960,9 @@ export async function loadPlayerCard(pid: string): Promise<PlayerCard> {
 		runs: hasBatting ? careerRuns : null,
 		dismissals: hasBatting ? careerDismissals : null,
 		ballsPerDismissal,
-		peakSRPlus
+		peakSRPlus,
+		peakTrueEcon,
+		careerSRPlus
 	};
 
 	const suppress: PanelSuppress = {
@@ -749,10 +980,13 @@ export async function loadPlayerCard(pid: string): Promise<PlayerCard> {
 		primaryBalls,
 		smallSample: primaryBalls < 100,
 		srPlusRiver,
+		trueEconRiver,
 		entryMap,
 		duels,
 		teleporter,
 		suppress,
+		stabilizationM: { battingSr: battingSrM, bowlingEconomy: bowlingEconomyM },
+		srHalfLife,
 		basisNote: { ballsFaced: record.balls_faced, ballsBowled: record.balls_bowled }
 	};
 }

@@ -1,29 +1,39 @@
 <script lang="ts">
 	/**
-	 * Panel A - SR+ River (hero; storyboard 9.3). SR+ by season as a LINE over a flat
-	 * 100 baseline: 100 = an average batter that season, above = he scored faster than
-	 * his era's peers. The line BREAKS at any season under 100 balls (never interpolated,
-	 * never dropped to zero); those seasons get a neutral gap tick in the top margin.
-	 * No zero baseline; y-domain kept roughly symmetric so 100 is always on screen. The
-	 * peak is marked as "biggest edge over his era" (era-relative, never "improvement").
+	 * Bowler TrueEcon river (storyboard 9.4). The SR+ river's bowling twin: TrueEcon+
+	 * by season as a LINE over a flat 100 baseline, where 100 = a par bowler that
+	 * season and ABOVE the line = they leaked fewer runs than their era's peers. Plotted
+	 * on the 100 baseline (never a 0-baseline runs-saved line) so it mirrors the SR+
+	 * river with no relearning: for both, up is better. The line BREAKS at any season
+	 * under the min-legal-balls floor (never interpolated); those seasons get a neutral
+	 * gap tick. The peak is "biggest edge over their era", with the runs saved as the
+	 * caption GLOSS, not the axis. The §9.1 trust dot applies with the economy stat's
+	 * own M (a season short of it reads dim/hollow).
 	 */
-	import type { League, PeakSRPlus, SRPlusPoint, TrustState } from './data';
+	import type { League, PeakTrueEcon, TrueEconPoint, TrustState } from './data';
 	import { trustState } from './data';
-	import { fmt1, leagueName, peakTrustNote, trustLegend } from './copy';
+	import {
+		fmt1,
+		trueEconOrient,
+		trueEconPeakBelowPar,
+		trueEconPeakGloss,
+		trustLegend
+	} from './copy';
 
 	let {
 		points,
 		peak,
 		league,
 		m = null
-	}: { points: SRPlusPoint[]; peak: PeakSRPlus | null; league: League; m?: number | null } = $props();
+	}: { points: TrueEconPoint[]; peak: PeakTrueEcon | null; league: League; m?: number | null } =
+		$props();
 
 	interface Dot {
 		x: number;
 		y: number;
 		season: number;
-		srplus: number;
-		sr: number | null;
+		trueeconPlus: number;
+		trueEconomy: number | null;
 		balls: number | null;
 		trust: TrustState;
 	}
@@ -49,7 +59,7 @@
 		const xFor = (i: number): number => (n > 1 ? x0 + (i / (n - 1)) * plotW : (x0 + x1) / 2);
 
 		const data: number[] = [];
-		for (const p of points) if (p.hasData && p.srplus != null) data.push(p.srplus);
+		for (const p of points) if (p.hasData && p.trueeconPlus != null) data.push(p.trueeconPlus);
 		let dmin = Math.min(100, ...data);
 		let dmax = Math.max(100, ...data);
 		if (!isFinite(dmin) || !isFinite(dmax)) {
@@ -67,8 +77,8 @@
 		const paths: string[] = [];
 		let cur: string[] = [];
 		points.forEach((p, i) => {
-			if (p.hasData && p.srplus != null) {
-				cur.push(`${xFor(i).toFixed(2)} ${yFor(p.srplus).toFixed(2)}`);
+			if (p.hasData && p.trueeconPlus != null) {
+				cur.push(`${xFor(i).toFixed(2)} ${yFor(p.trueeconPlus).toFixed(2)}`);
 			} else if (cur.length) {
 				paths.push('M' + cur.join(' L'));
 				cur = [];
@@ -81,16 +91,16 @@
 		let hasNoisy = false;
 		let hasNonSettled = false;
 		points.forEach((p, i) => {
-			if (p.hasData && p.srplus != null) {
+			if (p.hasData && p.trueeconPlus != null) {
 				const trust = trustState(p.balls, m);
 				if (trust === 'noisy') hasNoisy = true;
 				if (trust === 'firming' || trust === 'noisy') hasNonSettled = true;
 				dots.push({
 					x: xFor(i),
-					y: yFor(p.srplus),
+					y: yFor(p.trueeconPlus),
 					season: p.season,
-					srplus: p.srplus,
-					sr: p.sr,
+					trueeconPlus: p.trueeconPlus,
+					trueEconomy: p.trueEconomy,
 					balls: p.balls,
 					trust
 				});
@@ -105,10 +115,10 @@
 			if (i >= 0)
 				peakPt = {
 					x: xFor(i),
-					y: yFor(peak.srplus),
+					y: yFor(peak.trueeconPlus),
 					season: peak.season,
-					srplus: peak.srplus,
-					sr: peak.sr,
+					trueeconPlus: peak.trueeconPlus,
+					trueEconomy: peak.trueEconomy,
 					balls: peak.balls,
 					trust: trustState(peak.balls, m)
 				};
@@ -140,24 +150,33 @@
 		};
 	});
 
-	// §9.5 the peak's SEPARATE trust line (one idea, one number); only with an M.
-	const peakNote = $derived(peak && m != null ? peakTrustNote(peak.balls, m) : null);
+	// §9.4 peak framing: "biggest edge" only when above par; the runs-saved reading is
+	// the GLOSS. A rare best-season-under-par bowler gets an honest below-par line.
+	const abovePar = $derived(peak != null && peak.trueeconPlus >= 100);
+	const peakGloss = $derived(
+		peak == null
+			? null
+			: abovePar
+				? trueEconPeakGloss(peak.trueEconomy)
+				: trueEconPeakBelowPar(-peak.trueEconomy)
+	);
 	// §9.1 legend, shown ONLY when a non-settled dot is actually present (exception-only).
 	const legend = $derived(V.hasNonSettled ? trustLegend(V.hasNoisy) : null);
 </script>
 
 <figure class="river">
 	<figcaption>
-		<p class="orient">
-			100 is an average {leagueName(league)} batter that season. Above the line means they scored
-			faster than their peers, priced against their own era, not today's.
-		</p>
+		<p class="orient">{trueEconOrient(league)}</p>
 		{#if peak}
 			<p class="point">
-				Their biggest edge over their era came in {peak.season}: SR+ {fmt1(peak.srplus)}.
+				{#if abovePar}
+					Their biggest edge over their era came in {peak.season}: TrueEcon+ {fmt1(peak.trueeconPlus)}.
+				{:else}
+					Their best economy season was {peak.season}: TrueEcon+ {fmt1(peak.trueeconPlus)}.
+				{/if}
 			</p>
-			{#if peakNote}
-				<p class="note">{peakNote}</p>
+			{#if peakGloss}
+				<p class="note">{peakGloss}</p>
 			{/if}
 		{/if}
 		{#if legend}
@@ -168,22 +187,20 @@
 	<svg
 		viewBox="0 0 {V.W} {V.H}"
 		role="img"
-		aria-label="Strike-rate-plus by season for this batter, era-adjusted, over a baseline of 100"
+		aria-label="TrueEcon-plus by season for this bowler, era-adjusted, over a baseline of 100"
 	>
-		<!-- 100 reference line (era baseline) -->
+		<!-- 100 reference line (era par) -->
 		<line class="ref" x1={V.x0} y1={V.y100} x2={V.x1} y2={V.y100} />
-		<text class="ref-label" x={V.x0 + 1} y={V.y100 - 3}>
-			100 = an average {leagueName(league)} batter
-		</text>
+		<text class="ref-label" x={V.x0 + 1} y={V.y100 - 3}>100 = a par {league === 'wpl' ? 'WPL' : 'IPL'} bowler</text>
 
 		<!-- gap ticks (neutral top-margin position; never near the value axis) -->
 		{#each V.gaps as g (g.season)}
 			<line class="gap" x1={g.x} y1={V.gapTop} x2={g.x} y2={V.gapBot}>
-				<title>{g.season}: too few balls this season (under 100 faced)</title>
+				<title>{g.season}: too few overs this season to price against the era</title>
 			</line>
 		{/each}
 
-		<!-- broken SR+ line -->
+		<!-- broken TrueEcon+ line -->
 		{#each V.paths as d, i (i)}
 			<path class="line" d={d} />
 		{/each}
@@ -192,10 +209,8 @@
 		     filled; noisy = hollow). Fullness is the CVD-safe SHAPE channel. -->
 		{#each V.dots as dot (dot.season)}
 			<circle class="dot" class:firming={dot.trust === 'firming'} class:noisy={dot.trust === 'noisy'} cx={dot.x} cy={dot.y} r="2.4">
-				<title>{dot.season}: SR+ {fmt1(dot.srplus)}{dot.sr != null
-						? `, raw SR ${fmt1(dot.sr)}`
-						: ''}{(dot.trust === 'firming' || dot.trust === 'noisy') && dot.balls != null && m != null
-						? `. ${dot.balls} balls faced, a strike rate needs about ${Math.round(m)} to settle`
+				<title>{dot.season}: TrueEcon+ {fmt1(dot.trueeconPlus)}{(dot.trust === 'firming' || dot.trust === 'noisy') && dot.balls != null && m != null
+						? `. ${dot.balls} legal balls, an economy needs about ${Math.round(m)} to settle`
 						: ''}</title>
 			</circle>
 		{/each}
@@ -210,7 +225,7 @@
 				y={V.peakPt.y - 8}
 				text-anchor={V.peakPt.x > V.W / 2 ? 'end' : 'start'}
 			>
-				biggest edge, {V.peakPt.season}
+				{abovePar ? 'biggest edge' : 'best season'}, {V.peakPt.season}
 			</text>
 		{/if}
 
@@ -278,23 +293,23 @@
 	}
 	.line {
 		fill: none;
-		stroke: var(--gold);
+		stroke: var(--teal);
 		stroke-width: 2;
 		stroke-linejoin: round;
 		stroke-linecap: round;
 	}
 	.dot {
-		fill: var(--gold);
+		fill: var(--teal);
 	}
 	/* firming: filled but dimmed (past the noisy floor, still short of M). */
 	.dot.firming {
-		fill: var(--gold);
+		fill: var(--teal);
 		opacity: 0.72;
 	}
 	/* noisy: HOLLOW ring (shape channel), never dimmed to illegibility. */
 	.dot.noisy {
 		fill: none;
-		stroke: var(--gold);
+		stroke: var(--teal);
 		stroke-width: 1;
 		opacity: 0.6;
 	}

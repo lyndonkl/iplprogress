@@ -1,7 +1,21 @@
 <script lang="ts">
 	import { onMount, untrack } from 'svelte';
+	import { flip } from 'svelte/animate';
 	import type { Columnar, MatchInfo } from '../data';
-	import { computeSelectionStats, type SelectionStats } from './select-stats';
+	import {
+		computeSelectionStats,
+		type SelectionStats,
+		type BatterRow,
+		type BowlerRow
+	} from './select-stats';
+	import {
+		loadCredibility,
+		trustState,
+		regressSR,
+		type Credibility,
+		type TrustState,
+		type RegressResult
+	} from './credibility';
 
 	/**
 	 * THE BOWL: the linked breakdown panel (r6b spec §5). Three small oriented views
@@ -48,7 +62,10 @@
 			isWide = mq.matches;
 		};
 		mq.addEventListener('change', on);
-		return () => mq.removeEventListener('change', on);
+		return () => {
+			mq.removeEventListener('change', on);
+			if (rankTimer) clearTimeout(rankTimer);
+		};
 	});
 
 	const panelActive = $derived(open || isWide);
@@ -159,6 +176,162 @@
 
 	const battersMax = $derived(stats?.leaderboard.batters[0]?.runs ?? 1);
 	const bowlersMax = $derived(stats?.leaderboard.bowlers[0]?.wickets ?? 1);
+
+	/* ================= R7b credibility: trust meter + shrinkage slider =================
+	 * The trust meter (storyboard 9.1) is an EXCEPTION-ONLY cue: a reliable row carries
+	 * no mark, only firming and noisy rows get a dot, driven by n (balls) vs the stat M.
+	 * The shrinkage slider (storyboard 9.3) is BATTING-ONLY, a 3-detent control that
+	 * re-ranks the batter pool by the best-guess strike rate with an 80% CI whisker. Both
+	 * are suppressed until the tiny league-wide artifacts load; a load failure leaves the
+	 * plain R6b leaderboards untouched. */
+	let credibility = $state<Credibility | null>(null);
+	let credLoadStarted = false;
+	// load lazily once the panel or the desktop strip is watching (never blocks R6b)
+	$effect(() => {
+		if (!panelActive || credLoadStarted) return;
+		credLoadStarted = true;
+		loadCredibility()
+			.then((c) => (credibility = c))
+			.catch(() => (credibility = null));
+	});
+
+	/** how many leaderboard rows are shown (the pool is wider; see select-stats) */
+	const LEADER_SHOWN = 8;
+
+	/** the 3 detents; lambda 0 (as it happened) / ~0.5 (halfway) / 1 (best guess) */
+	const DETENTS = [
+		{ label: 'As it happened', gloss: 'Small samples included: a short, hot spell can top it.' },
+		{ label: 'Halfway', gloss: 'Part way to the best guess, weighing how little we have seen.' },
+		{ label: 'Best guess', gloss: 'Our best guess at true skill, weighing how little we have seen.' }
+	];
+	let detent = $state(0);
+	const lambda = $derived(detent === 1 ? 0.5 : detent === 2 ? 1 : 0);
+	/** true only when a shrinkage detent is active AND the artifacts have loaded */
+	const regressedMode = $derived(detent !== 0 && credibility != null);
+
+	// re-rank motion gating: enter/exit + flip animate ONLY on a detent change, never on
+	// a mask commit (so a new selection does not flash the whole board).
+	let rankShift = $state(false);
+	let rankTimer: ReturnType<typeof setTimeout> | null = null;
+	let prevDetent = 0;
+	let announce = $state('');
+
+	function setDetent(d: number): void {
+		if (d === detent) return;
+		detent = d;
+		if (!reduced) {
+			rankShift = true;
+			if (rankTimer) clearTimeout(rankTimer);
+			rankTimer = setTimeout(() => (rankShift = false), 400);
+		}
+	}
+
+	interface RankedBatter extends BatterRow {
+		reg: RegressResult | null;
+		trust: TrustState;
+	}
+	interface RankedBowler extends BowlerRow {
+		trust: TrustState;
+	}
+
+	const battingPool = $derived<BatterRow[]>(stats?.leaderboard.batters ?? []);
+
+	/** the shown eight batters by the ACTIVE ordering (raw runs at detent 0, else skill) */
+	const battingRows = $derived.by<RankedBatter[]>(() => {
+		const cred = credibility;
+		const pool = battingPool;
+		const bt = (n: number): TrustState => (cred ? trustState(n, cred.batting.M) : 'reliable');
+		// detent 0 is R6b exactly: the raw runs board, every batter, no floor.
+		if (!cred || detent === 0) {
+			return pool.slice(0, LEADER_SHOWN).map((b) => ({ ...b, reg: null, trust: bt(b.balls) }));
+		}
+		// A best-guess ranking needs a real sample: below about a quarter of M the batter's
+		// own numbers carry under a fifth of the estimate, so the row is essentially the
+		// league average and would rank a tail-ender's non-sample above a proven batter.
+		// Qualify the pool by that floor (fall back to the whole pool for a tiny selection).
+		const floor = Math.ceil(cred.batting.M / 4);
+		const qualified = pool.filter((b) => b.balls >= floor);
+		const source = qualified.length > 0 ? qualified : pool;
+		const mu = (b: BatterRow): number =>
+			b.league === 1 ? cred.batting.popMeanSR.wpl : cred.batting.popMeanSR.ipl;
+		const ranked = source.map((b) => {
+			const rawSR = b.balls > 0 ? (100 * b.runs) / b.balls : 0;
+			const reg = regressSR(rawSR, b.balls, mu(b), cred.batting.M, cred.batting.sigma2, cred.batting.z, lambda);
+			return { ...b, reg, trust: bt(b.balls) };
+		});
+		ranked.sort((p, q) => q.reg.point - p.reg.point || q.runs - p.runs || p.name.localeCompare(q.name));
+		return ranked.slice(0, LEADER_SHOWN);
+	});
+
+	/** shared x-domain for the CI whiskers, so the eight rows compare on one scale */
+	const whiskerDomain = $derived.by(() => {
+		if (!regressedMode) return null;
+		let lo = Infinity;
+		let hi = -Infinity;
+		for (const b of battingRows) {
+			if (!b.reg) continue;
+			if (b.reg.lo < lo) lo = b.reg.lo;
+			if (b.reg.hi > hi) hi = b.reg.hi;
+		}
+		if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) return null;
+		const pad = (hi - lo) * 0.06;
+		return { lo: lo - pad, hi: hi + pad };
+	});
+
+	function whiskerGeo(reg: RegressResult, dom: { lo: number; hi: number }) {
+		const span = Math.max(1e-6, dom.hi - dom.lo);
+		const clamp = (v: number): number => Math.max(0, Math.min(100, ((v - dom.lo) / span) * 100));
+		return { lo: clamp(reg.lo), hi: clamp(reg.hi), pt: clamp(reg.point) };
+	}
+
+	const bowlingRows = $derived.by<RankedBowler[]>(() => {
+		const cred = credibility;
+		const rows = stats?.leaderboard.bowlers ?? [];
+		const bt = (n: number): TrustState => (cred ? trustState(n, cred.bowling.M) : 'reliable');
+		return rows.slice(0, LEADER_SHOWN).map((b) => ({ ...b, trust: bt(b.balls) }));
+	});
+
+	// legends are exception-only: shown only when a shown row is actually still settling
+	const battingHasUnsettled = $derived(
+		credibility != null && !regressedMode && battingRows.some((b) => b.trust !== 'reliable')
+	);
+	const bowlingHasUnsettled = $derived(
+		credibility != null && bowlingRows.some((b) => b.trust !== 'reliable')
+	);
+
+	const rankLabel = $derived(
+		regressedMode ? 'Ranked by: best guess at true skill' : 'Ranked by: what actually happened'
+	);
+
+	// live-region announcement, fired ONLY when the detent changes (reads the rows untracked
+	// so a new selection or a slow recompute never re-announces the ranking).
+	$effect(() => {
+		const d = detent;
+		if (d === prevDetent) return;
+		const lead = untrack(() => battingRows[0]?.name ?? 'unavailable');
+		prevDetent = d;
+		announce =
+			d === 0
+				? 'Ranked by what actually happened.'
+				: `Reordered by best guess at true skill. New leader: ${lead}.`;
+	});
+
+	function battingRawTip(b: RankedBatter): string {
+		const M = credibility ? Math.round(credibility.batting.M) : 0;
+		if (!credibility || b.trust === 'reliable') return `${b.name}: ${b.runs} runs off ${b.balls} balls.`;
+		return `${b.balls} balls faced. A strike rate needs about ${M} to settle.`;
+	}
+	function battingRegTip(b: RankedBatter): string {
+		if (!b.reg) return b.name;
+		return `${b.name}. Best guess ${Math.round(b.reg.point)}. 80% sure it is between ${Math.round(
+			b.reg.lo
+		)} and ${Math.round(b.reg.hi)}.`;
+	}
+	function bowlingTip(b: RankedBowler): string {
+		const M = credibility && credibility.bowling.M != null ? Math.round(credibility.bowling.M) : 0;
+		if (!credibility || b.trust === 'reliable' || !M) return `${b.name}: ${b.wickets} wickets off ${b.balls} balls.`;
+		return `${b.balls} balls bowled. An economy rate needs about ${M} to settle.`;
+	}
 
 	function onKeydown(e: KeyboardEvent): void {
 		if (e.key === 'Escape') onClose();
@@ -329,56 +502,106 @@
 						{/if}
 					</section>
 
-					<!-- the leaderboard -->
-					<section class="view" aria-label="Who did the damage">
-						<p class="v-title">Who did the damage</p>
-						<div class="boards">
-							<div class="board">
-								<p class="board-title">Top run-scorers</p>
-								{#if stats.leaderboard.batters.length > 0}
-									<ol class="ranks">
-										{#each stats.leaderboard.batters as b (b.name)}
-											<li class="rank">
-												<span class="rk-name">{b.name}</span>
-												<span class="rk-bar" aria-hidden="true">
-													<span
-														class="rk-fill runs"
-														style="width:{Math.max(4, (b.runs / battersMax) * 100)}%"
-													></span>
-												</span>
-												<span class="rk-val">{fmt(b.runs)}</span>
-											</li>
-										{/each}
-									</ol>
-								{:else}
-									<p class="board-empty">No runs off the bat in this selection.</p>
-								{/if}
-							</div>
-							<div class="board">
-								<p class="board-title">Top wicket-takers</p>
-								{#if stats.leaderboard.bowlers.length > 0}
-									<ol class="ranks">
-										{#each stats.leaderboard.bowlers as b (b.name)}
-											<li class="rank">
-												<span class="rk-name">{b.name}</span>
-												<span class="rk-bar" aria-hidden="true">
-													<span
-														class="rk-fill wkts"
-														style="width:{Math.max(4, (b.wickets / bowlersMax) * 100)}%"
-													></span>
-												</span>
-												<span class="rk-val">{fmt(b.wickets)}</span>
-											</li>
-										{/each}
-									</ol>
-								{:else}
-									<p class="board-empty">No wickets in this selection.</p>
-								{/if}
-							</div>
-						</div>
-					</section>
 				</div>
 			{/key}
+
+			<!-- the leaderboard lives OUTSIDE the {#key coordTick} block so the shrinkage
+			     control and its active detent survive a mask commit (the keyed views above
+			     remount and settle; this section persists and re-ranks reactively on the
+			     detent, without re-firing the demand-mode pass). -->
+			<section class="view lead" aria-label="Who did the damage">
+				<p class="v-title">Who did the damage</p>
+
+				{#if credibility && battingPool.length > 0}
+					<!-- the shrinkage control: batting-only, 3 snapping detents (9.3) -->
+					<div class="shrink">
+						<p class="shrink-state">{rankLabel}</p>
+						<div class="detents" role="radiogroup" aria-label="Rank the batters by">
+							{#each DETENTS as d, i (i)}
+								<button
+									class="detent"
+									class:on={detent === i}
+									role="radio"
+									aria-checked={detent === i}
+									type="button"
+									onclick={() => setDetent(i)}>{d.label}</button
+								>
+							{/each}
+						</div>
+						<p class="shrink-gloss">{DETENTS[detent].gloss}</p>
+					</div>
+				{/if}
+				<p class="sr-only" aria-live="polite">{announce}</p>
+
+				<div class="boards" class:stack={regressedMode}>
+					<div class="board">
+						<p class="board-title">Top run-scorers</p>
+						{#if battingHasUnsettled}
+							<p class="trust-legend">A hollow dot means still settling. Too few balls to trust yet.</p>
+						{/if}
+						{#if battingRows.length > 0}
+							<ol class="ranks">
+								{#each battingRows as b (b.name)}
+									<li
+										class="rank"
+										class:regressed={regressedMode}
+										class:promoted={rankShift && !reduced}
+										animate:flip={{ duration: rankShift && !reduced ? 260 : 0 }}
+									>
+										{#if regressedMode && b.reg && whiskerDomain}
+											{@const g = whiskerGeo(b.reg, whiskerDomain)}
+											<span class="rk-name">{b.name}</span>
+											<span class="rk-bar whisker" title={battingRegTip(b)} aria-label={battingRegTip(b)}>
+												<span class="wk-track">
+													<span class="wk-range" style="left:{g.lo}%; right:{100 - g.hi}%"></span>
+													<span class="wk-dot" style="left:{g.pt}%"></span>
+												</span>
+											</span>
+										{:else}
+											<span class="rk-name">{b.name}</span>
+											<span class="rk-bar" aria-hidden="true">
+												<span class="rk-fill runs" style="width:{Math.max(4, (b.runs / battersMax) * 100)}%"></span>
+											</span>
+											<span class="rk-val" title={battingRawTip(b)}>
+												{#if b.trust === 'firming'}<span class="trust-dot filled" aria-hidden="true"></span
+													>{:else if b.trust === 'noisy'}<span class="trust-dot hollow" aria-hidden="true"></span>{/if}
+												<span class="v-num" data-trust={b.trust}>{fmt(b.runs)}</span>
+											</span>
+										{/if}
+									</li>
+								{/each}
+							</ol>
+						{:else}
+							<p class="board-empty">No runs off the bat in this selection.</p>
+						{/if}
+					</div>
+					<div class="board">
+						<p class="board-title">Top wicket-takers</p>
+						{#if bowlingHasUnsettled}
+							<p class="trust-legend">A hollow dot means still settling. Too few balls to trust yet.</p>
+						{/if}
+						{#if bowlingRows.length > 0}
+							<ol class="ranks">
+								{#each bowlingRows as b (b.name)}
+									<li class="rank">
+										<span class="rk-name">{b.name}</span>
+										<span class="rk-bar" aria-hidden="true">
+											<span class="rk-fill wkts" style="width:{Math.max(4, (b.wickets / bowlersMax) * 100)}%"></span>
+										</span>
+										<span class="rk-val" title={bowlingTip(b)}>
+											{#if b.trust === 'firming'}<span class="trust-dot filled" aria-hidden="true"></span
+												>{:else if b.trust === 'noisy'}<span class="trust-dot hollow" aria-hidden="true"></span>{/if}
+											<span class="v-num" data-trust={b.trust}>{fmt(b.wickets)}</span>
+										</span>
+									</li>
+								{/each}
+							</ol>
+						{:else}
+							<p class="board-empty">No wickets in this selection.</p>
+						{/if}
+					</div>
+				</div>
+			</section>
 		{/if}
 	</div>
 {/if}
@@ -704,6 +927,11 @@
 		}
 	}
 
+	/* in a shrinkage state the batting board goes full width so the CI whisker is legible */
+	.boards.stack {
+		grid-template-columns: 1fr;
+	}
+
 	.board-title {
 		margin: 0 0 0.35rem;
 		font-size: 0.72rem;
@@ -763,9 +991,178 @@
 	}
 
 	.rk-val {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
 		font-size: 0.78rem;
 		font-weight: 700;
 		font-variant-numeric: tabular-nums;
+	}
+
+	/* ================= R7b credibility: trust meter + shrinkage slider ================= */
+
+	/* the leaderboard now sits outside the keyed views; restore the inter-view spacing */
+	.lead {
+		margin-top: 1.1rem;
+	}
+
+	/* the shrinkage control (batting-only) */
+	.shrink {
+		margin: 0.35rem 0 0.6rem;
+	}
+	.shrink-state {
+		margin: 0 0 0.35rem;
+		font-size: 0.76rem;
+		font-weight: 700;
+		color: var(--ink);
+	}
+	.detents {
+		display: inline-flex;
+		border: 1px solid rgba(232, 236, 245, 0.16);
+		border-radius: 9px;
+		overflow: hidden;
+	}
+	.detent {
+		min-height: 34px;
+		padding: 0 0.6rem;
+		border: none;
+		border-right: 1px solid rgba(232, 236, 245, 0.12);
+		background: transparent;
+		color: var(--ink-dim);
+		font: inherit;
+		font-size: 0.74rem;
+		cursor: pointer;
+	}
+	.detent:last-child {
+		border-right: none;
+	}
+	.detent.on {
+		background: rgba(46, 196, 182, 0.18);
+		color: var(--ink);
+		font-weight: 700;
+	}
+	.detent:focus-visible {
+		outline: 2px solid var(--teal);
+		outline-offset: -2px;
+	}
+	.shrink-gloss {
+		margin: 0.3rem 0 0;
+		font-size: 0.72rem;
+		color: var(--ink-dim);
+		line-height: 1.35;
+	}
+
+	/* the one-line, exception-only board legend */
+	.trust-legend {
+		margin: 0 0 0.35rem;
+		font-size: 0.68rem;
+		color: var(--ink-dim);
+		line-height: 1.3;
+	}
+
+	/* the 8px trust glyph: filled = firming, hollow = noisy, none = settled */
+	.trust-dot {
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		box-sizing: border-box;
+		flex: none;
+	}
+	.trust-dot.filled {
+		background: rgba(232, 236, 245, 0.72);
+	}
+	.trust-dot.hollow {
+		background: transparent;
+		border: 1px solid rgba(232, 236, 245, 0.6);
+	}
+	/* the value luminance mirrors the sample size, floored so it never reads as wrong */
+	.v-num[data-trust='firming'] {
+		opacity: 0.72;
+	}
+	.v-num[data-trust='noisy'] {
+		opacity: 0.6;
+	}
+
+	/* a brief luminance pulse on a re-rank (pure CSS, no DOM lifecycle, so no ghost rows);
+	   the animate:flip slide carries object constancy, this just says "it reordered" */
+	.rank.promoted {
+		animation: rankflash 360ms ease;
+	}
+	@keyframes rankflash {
+		0% {
+			filter: brightness(1.5);
+		}
+		100% {
+			filter: brightness(1);
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.rank.promoted {
+			animation: none;
+		}
+	}
+
+	/* in a shrinkage state the magnitude bar becomes a floating 80% CI whisker */
+	.rank.regressed {
+		grid-template-columns: minmax(60px, 1fr) minmax(120px, 1.9fr);
+	}
+	.rk-bar.whisker {
+		height: 16px;
+		background: none;
+		border-radius: 0;
+		overflow: visible;
+	}
+	.wk-track {
+		display: block;
+		position: relative;
+		width: 100%;
+		height: 16px;
+	}
+	.wk-range {
+		position: absolute;
+		top: 50%;
+		height: 2px;
+		transform: translateY(-50%);
+		background: rgba(232, 236, 245, 0.4);
+		border-radius: 1px;
+	}
+	.wk-range::before,
+	.wk-range::after {
+		content: '';
+		position: absolute;
+		top: -3px;
+		width: 1px;
+		height: 8px;
+		background: rgba(232, 236, 245, 0.5);
+	}
+	.wk-range::before {
+		left: 0;
+	}
+	.wk-range::after {
+		right: 0;
+	}
+	.wk-dot {
+		position: absolute;
+		top: 50%;
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: var(--ink);
+		transform: translate(-50%, -50%);
+		box-shadow: 0 0 4px rgba(232, 236, 245, 0.5);
+	}
+
+	/* visually hidden, spoken by a screen reader (the visible state header is enough) */
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0 0 0 0);
+		white-space: nowrap;
+		border: 0;
 	}
 
 	@media (prefers-reduced-motion: reduce) {

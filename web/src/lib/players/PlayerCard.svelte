@@ -10,12 +10,14 @@
 	 */
 	import type { PlayerCard } from './data';
 	import SrPlusRiver from './SrPlusRiver.svelte';
+	import TrueEconRiver from './TrueEconRiver.svelte';
 	import EntryMap from './EntryMap.svelte';
 	import DuelList from './DuelList.svelte';
 	import Teleporter from './Teleporter.svelte';
 	import { openInBowl } from './bowlLink';
 	import {
 		aliasLine,
+		careerCILine,
 		entryRoleShort,
 		fmt1,
 		fmtInt,
@@ -42,6 +44,14 @@
 		!isBowlerFirst && !card.smallSample && !card.suppress.teleporter && card.teleporter != null
 	);
 	const showBowling = $derived(!card.suppress.bowlingPanel);
+	// §9.4 TrueEcon river: only when there is a qualifying bowler-season to plot.
+	const showTrueEcon = $derived(h.peakTrueEcon != null && card.trueEconRiver.length > 0);
+	// §9.3 static 80% CI on the career SR+ (batters only; no slider on the card).
+	const careerCI = $derived(
+		!isBowlerFirst && h.careerSRPlus
+			? careerCILine(h.careerSRPlus.raw, h.careerSRPlus.ciLo, h.careerSRPlus.ciHi)
+			: null
+	);
 
 	// Header signature line: volume first, tempo (SR+) last.
 	const signature = $derived.by((): string => {
@@ -122,6 +132,9 @@
 		</div>
 		<p class="signature">{signature}</p>
 		<p class="basis">{basis}</p>
+		{#if careerCI}
+			<p class="career-ci">{careerCI}</p>
+		{/if}
 		{#if alias}
 			<p class="alias">{alias}</p>
 		{/if}
@@ -140,10 +153,20 @@
 			{#if isBowlerFirst && showBowling}
 				<section class="hero panel">
 					<h2 class="panel-title">As a bowler</h2>
-					<p class="caveat">
-						Raw matchups, not era-adjusted yet. The era-fair version, runs saved versus an average
-						bowler, comes next.
-					</p>
+					{#if showTrueEcon}
+						<TrueEconRiver
+							points={card.trueEconRiver}
+							peak={h.peakTrueEcon}
+							league={card.primaryLeague}
+							m={card.stabilizationM.bowlingEconomy}
+						/>
+						<p class="sub-note">Their most-faced batters follow, still raw matchups.</p>
+					{:else}
+						<p class="caveat">
+							Not enough overs in any single season to price their economy against the era, so the
+							runs-saved line is held back rather than faked.
+						</p>
+					{/if}
 					{#if topBowlDuel}
 						<DuelList
 							duels={card.duels.asBowler}
@@ -160,7 +183,12 @@
 			{#if showRiver}
 				<section class="hero panel">
 					<h2 class="panel-title">How fast they scored, priced against their era</h2>
-					<SrPlusRiver points={card.srPlusRiver} peak={h.peakSRPlus} league={card.primaryLeague} />
+					<SrPlusRiver
+						points={card.srPlusRiver}
+						peak={h.peakSRPlus}
+						league={card.primaryLeague}
+						m={card.stabilizationM.battingSr}
+					/>
 				</section>
 			{/if}
 
@@ -173,7 +201,7 @@
 							<span class="hint" aria-hidden="true">Tap to re-price</span>
 						</summary>
 						<div class="collapsible-body">
-							<Teleporter tp={card.teleporter} />
+							<Teleporter tp={card.teleporter} halfLife={card.srHalfLife} />
 						</div>
 					</details>
 				{/if}
@@ -231,7 +259,19 @@
 							<span class="hint" aria-hidden="true">Tap for matchups</span>
 						</summary>
 						<div class="collapsible-body">
-							<p class="caveat">Raw matchups, not era-adjusted yet.</p>
+							{#if showTrueEcon}
+								<TrueEconRiver
+									points={card.trueEconRiver}
+									peak={h.peakTrueEcon}
+									league={card.primaryLeague}
+									m={card.stabilizationM.bowlingEconomy}
+								/>
+								<p class="sub-note">Their most-faced batters follow, still raw matchups.</p>
+							{:else}
+								<p class="caveat">
+									Not enough overs in any single season to price their economy against the era yet.
+								</p>
+							{/if}
 							{#if topBowlDuel}
 								<DuelList
 									duels={card.duels.asBowler}
@@ -325,6 +365,13 @@
 		color: var(--ink-dim);
 		font-variant-numeric: tabular-nums;
 	}
+	.career-ci {
+		margin: 0.4rem 0 0;
+		font-size: 0.82rem;
+		line-height: 1.45;
+		color: var(--ink-dim);
+		font-variant-numeric: tabular-nums;
+	}
 	.alias {
 		margin: 0.25rem 0 0;
 		font-size: 0.78rem;
@@ -356,6 +403,12 @@
 	.empty {
 		margin: 0;
 		font-size: 0.85rem;
+		color: var(--ink-dim);
+	}
+	.sub-note {
+		margin: 0.7rem 0 0.2rem;
+		font-size: 0.8rem;
+		line-height: 1.4;
 		color: var(--ink-dim);
 	}
 	.grid {

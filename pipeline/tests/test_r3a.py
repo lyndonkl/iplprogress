@@ -382,13 +382,17 @@ class TestInningsTotalBuffer(unittest.TestCase):
 
 class TestEngineLight(unittest.TestCase):
     def test_no_new_engine_file(self):
-        # Chapter 4 is engine-light: it reuses engine #1 and ships no engine.
-        # The engines/ directory carries only the R2/R3b set.
+        # Chapter 4 is engine-light: it reuses engine #1 and ships no engine of
+        # its own. The engines/ directory carries the R2/R3b set; R7b later added
+        # the credibility engines (stabilization/half_life/truetalent/trueecon),
+        # which are not Ch4's and are listed here so the snapshot stays exact.
         engines = {p.name for p in (canon.OUT_ROOT / "engines").glob("*.json")}
         self.assertEqual(
             engines,
             {"par.json", "phasepar.json", "entry.json", "re288.json",
-             "srplus.json", "wp_grid.json"},
+             "srplus.json", "wp_grid.json",
+             "stabilization.json", "half_life.json", "truetalent.json",
+             "trueecon.json"},
         )
 
 

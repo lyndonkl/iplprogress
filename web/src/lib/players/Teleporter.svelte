@@ -12,11 +12,19 @@
 	 */
 	import { base } from '$app/paths';
 	import type { Teleporter } from './data';
-	import { fmt1, leagueName } from './copy';
+	import { fmt1, freshnessNote, leagueName } from './copy';
 
-	let { tp }: { tp: Teleporter } = $props();
+	let { tp, halfLife = null }: { tp: Teleporter; halfLife?: number | null } = $props();
 
 	const topPct = $derived(Math.max(1, Math.round(100 - tp.eraPercentile)));
+
+	// §9.2 freshness: a plain SENTENCE folded into the note (never an arc gauge, no
+	// retained% number, OFF the band). Named to the SR+ half-life; suppressed if the
+	// half-life failed to load or the peak is not before the target season.
+	const gap = $derived(tp.targetSeason - tp.season);
+	const freshness = $derived(
+		halfLife != null && gap > 0 ? freshnessNote(gap, halfLife, tp.targetSeason) : null
+	);
 
 	const V = $derived.by(() => {
 		const W = 340;
@@ -90,7 +98,7 @@
 	</p>
 	<p class="note">
 		The naive number pretends 2026 is their era. It isn't. Cross-era is a range, not a verdict, so the
-		band, not a single figure, is the answer.
+		band, not a single figure, is the answer.{freshness ? ` ${freshness}` : ''}
 	</p>
 	<p class="link">
 		<a href="{base}/#ch10">See how their era compares</a>

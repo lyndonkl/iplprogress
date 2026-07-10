@@ -179,6 +179,20 @@ PLAYERS_SET_FILES = (
 # and held to the per-chapter budget. By prefix so new engine files are counted
 # automatically.
 ENGINES_PREFIXES = ("engines/",)
+# R7b credibility layer (the FINAL release): four tiny engine tables that teach
+# every number to wear its own uncertainty. engines/stabilization.json (per-stat
+# stabilization point M), engines/half_life.json (per-metric r0 + half-life H),
+# engines/truetalent.json (the pid-keyed EB-regressed rows the shrinkage slider
+# reads) and engines/trueecon.json (the pid-keyed bowler TrueEcon river, the SR+
+# river's bowling twin, plotting trueecon_plus on a 100 baseline). All under
+# engines/ (already inside the ENGINES_PREFIXES total); this named block is the
+# R7b release gate. Held to the per-chapter budget.
+R7B_SET_FILES = (
+    "engines/stabilization.json",
+    "engines/half_life.json",
+    "engines/truetalent.json",
+    "engines/trueecon.json",
+)
 
 
 def measure(path: Path) -> dict:
@@ -226,6 +240,7 @@ def build_ledger(out_root: Path = canon.OUT_ROOT) -> dict:
     ch9_files = [n for n in CH9_SET_FILES if n in artifacts]
     ch10_files = [n for n in CH10_SET_FILES if n in artifacts]
     players_files = [n for n in PLAYERS_SET_FILES if n in artifacts]
+    r7b_files = [n for n in R7B_SET_FILES if n in artifacts]
     engine_files = sorted(n for n in artifacts if n.startswith(ENGINES_PREFIXES))
 
     checks = [
@@ -328,6 +343,13 @@ def build_ledger(out_root: Path = canon.OUT_ROOT) -> dict:
             "budget_gz": BUDGET_CHAPTER_GZ,
             "actual_gz": gz_sum(PLAYERS_SET_FILES),
             "pass": bool(players_files) and gz_sum(PLAYERS_SET_FILES) <= BUDGET_CHAPTER_GZ,
+        },
+        {
+            "name": "R7b credibility layer (stabilization/half-life/true-talent/trueecon)",
+            "files": r7b_files,
+            "budget_gz": BUDGET_CHAPTER_GZ,
+            "actual_gz": gz_sum(R7B_SET_FILES),
+            "pass": bool(r7b_files) and gz_sum(R7B_SET_FILES) <= BUDGET_CHAPTER_GZ,
         },
         {
             "name": "engines (ch2 par/entry + R3b parallel-track re288/wp_grid)",

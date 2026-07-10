@@ -30,6 +30,10 @@
    "bytes_raw": 754590,
    "bytes_gz": 119583
   },
+  "engines/half_life.json": {
+   "bytes_raw": 1930,
+   "bytes_gz": 941
+  },
   "engines/par.json": {
    "bytes_raw": 89417,
    "bytes_gz": 9694
@@ -45,6 +49,18 @@
   "engines/srplus.json": {
    "bytes_raw": 141831,
    "bytes_gz": 24489
+  },
+  "engines/stabilization.json": {
+   "bytes_raw": 8805,
+   "bytes_gz": 2404
+  },
+  "engines/trueecon.json": {
+   "bytes_raw": 247324,
+   "bytes_gz": 35436
+  },
+  "engines/truetalent.json": {
+   "bytes_raw": 25169,
+   "bytes_gz": 7103
   },
   "engines/wp_grid.json": {
    "bytes_raw": 157404,
@@ -310,17 +326,33 @@
    "pass": true
   },
   {
+   "name": "R7b credibility layer (stabilization/half-life/true-talent/trueecon)",
+   "files": [
+    "engines/stabilization.json",
+    "engines/half_life.json",
+    "engines/truetalent.json",
+    "engines/trueecon.json"
+   ],
+   "budget_gz": 2000000,
+   "actual_gz": 45884,
+   "pass": true
+  },
+  {
    "name": "engines (ch2 par/entry + R3b parallel-track re288/wp_grid)",
    "files": [
     "engines/entry.json",
+    "engines/half_life.json",
     "engines/par.json",
     "engines/phasepar.json",
     "engines/re288.json",
     "engines/srplus.json",
+    "engines/stabilization.json",
+    "engines/trueecon.json",
+    "engines/truetalent.json",
     "engines/wp_grid.json"
    ],
    "budget_gz": 2000000,
-   "actual_gz": 195468,
+   "actual_gz": 241352,
    "pass": true
   },
   {
@@ -332,10 +364,14 @@
     "columnar.json.gz",
     "cumruns.u8",
     "engines/entry.json",
+    "engines/half_life.json",
     "engines/par.json",
     "engines/phasepar.json",
     "engines/re288.json",
     "engines/srplus.json",
+    "engines/stabilization.json",
+    "engines/trueecon.json",
+    "engines/truetalent.json",
     "engines/wp_grid.json",
     "group_ids.u16",
     "groups.json",
@@ -367,7 +403,7 @@
     "wpa.u8"
    ],
    "budget_gz": 25000000,
-   "actual_gz": 2258987,
+   "actual_gz": 2304871,
    "pass": true
   }
  ],
